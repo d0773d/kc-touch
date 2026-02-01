@@ -20,9 +20,6 @@
 #include <nvs_flash.h>
 #include <driver/gpio.h>
 
-#include "esp_hosted.h"
-#include "esp_hosted_transport_config.h"
-
 #include <wifi_provisioning/manager.h>
 
 #ifdef CONFIG_EXAMPLE_PROV_TRANSPORT_BLE
@@ -33,53 +30,10 @@
 #include <wifi_provisioning/scheme_softap.h>
 #endif /* CONFIG_EXAMPLE_PROV_TRANSPORT_SOFTAP */
 #include "qrcode.h"
-#include "tab5_wifi_power.h"
+#include "wifi_copro_power.h"
+#include "wifi_copro_transport.h"
 
 static const char *TAG = "app";
-#define TAB5_WIFI_RESET_GPIO GPIO_NUM_15
-#define TAB5_SDIO_CLK_GPIO   GPIO_NUM_12
-#define TAB5_SDIO_CMD_GPIO   GPIO_NUM_13
-#define TAB5_SDIO_D0_GPIO    GPIO_NUM_11
-#define TAB5_SDIO_D1_GPIO    GPIO_NUM_10
-#define TAB5_SDIO_D2_GPIO    GPIO_NUM_9
-#define TAB5_SDIO_D3_GPIO    GPIO_NUM_8
-
-#ifdef CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE
-static void tab5_fill_sdio_config(struct esp_hosted_sdio_config *sdio_cfg)
-{
-    *sdio_cfg = INIT_DEFAULT_HOST_SDIO_CONFIG();
-
-    sdio_cfg->pin_clk.pin   = TAB5_SDIO_CLK_GPIO;
-    sdio_cfg->pin_cmd.pin   = TAB5_SDIO_CMD_GPIO;
-    sdio_cfg->pin_d0.pin    = TAB5_SDIO_D0_GPIO;
-    sdio_cfg->pin_d1.pin    = TAB5_SDIO_D1_GPIO;
-    sdio_cfg->pin_d2.pin    = TAB5_SDIO_D2_GPIO;
-    sdio_cfg->pin_d3.pin    = TAB5_SDIO_D3_GPIO;
-    sdio_cfg->pin_reset.pin = TAB5_WIFI_RESET_GPIO;
-
-    sdio_cfg->clock_freq_khz = 25000;
-    sdio_cfg->bus_width      = 4;
-    sdio_cfg->tx_queue_size  = 20;
-    sdio_cfg->rx_queue_size  = 20;
-}
-
-static void __attribute__((constructor(110))) tab5_prime_esp_hosted_transport(void)
-{
-    struct esp_hosted_sdio_config sdio_cfg;
-    tab5_fill_sdio_config(&sdio_cfg);
-
-    esp_hosted_transport_err_t transport_ret = esp_hosted_sdio_set_config(&sdio_cfg);
-    if (transport_ret == ESP_TRANSPORT_OK) {
-        ESP_EARLY_LOGI(TAG,
-                       "Primed ESP-Hosted SDIO config (CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d RESET=%d)",
-                       sdio_cfg.pin_clk.pin, sdio_cfg.pin_cmd.pin, sdio_cfg.pin_d0.pin,
-                       sdio_cfg.pin_d1.pin, sdio_cfg.pin_d2.pin, sdio_cfg.pin_d3.pin,
-                       sdio_cfg.pin_reset.pin);
-    } else if (transport_ret != ESP_TRANSPORT_ERR_ALREADY_SET) {
-        ESP_EARLY_LOGE(TAG, "Failed to prime ESP-Hosted SDIO config (%d)", transport_ret);
-    }
-}
-#endif
 
 #if CONFIG_EXAMPLE_PROV_SECURITY_VERSION_2
 #if CONFIG_EXAMPLE_PROV_SEC2_DEV_MODE
@@ -325,47 +279,6 @@ static void wifi_prov_print_qr(const char *name, const char *username, const cha
     ESP_LOGI(TAG, "If QR code is not visible, copy paste the below URL in a browser.\n%s?data=%s", QRCODE_BASE_URL, payload);
 }
 
-#ifdef CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE
-static esp_err_t tab5_configure_esp_hosted_transport(void)
-{
-    if (!esp_hosted_is_config_valid()) {
-        struct esp_hosted_sdio_config temp_cfg;
-        tab5_fill_sdio_config(&temp_cfg);
-        esp_hosted_transport_err_t set_ret = esp_hosted_sdio_set_config(&temp_cfg);
-        if (set_ret != ESP_TRANSPORT_OK) {
-            ESP_LOGE(TAG, "ESP-Hosted SDIO configuration failed (%d)", set_ret);
-            return (esp_err_t)set_ret;
-        }
-    }
-
-    struct esp_hosted_sdio_config *sdio_cfg = NULL;
-    esp_hosted_transport_err_t transport_ret = esp_hosted_sdio_get_config(&sdio_cfg);
-    if (transport_ret != ESP_TRANSPORT_OK || !sdio_cfg) {
-        ESP_LOGE(TAG, "Failed to fetch ESP-Hosted SDIO config (%d)", transport_ret);
-        return (esp_err_t)transport_ret;
-    }
-
-    int hosted_ret = esp_hosted_connect_to_slave();
-    if (hosted_ret != ESP_OK) {
-        ESP_LOGE(TAG, "esp_hosted_connect_to_slave failed (%d)", hosted_ret);
-        return hosted_ret;
-    }
-
-    ESP_LOGI(TAG,
-             "ESP-Hosted SDIO pins configured (CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d RESET=%d)",
-             sdio_cfg->pin_clk.pin, sdio_cfg->pin_cmd.pin, sdio_cfg->pin_d0.pin,
-             sdio_cfg->pin_d1.pin, sdio_cfg->pin_d2.pin, sdio_cfg->pin_d3.pin,
-             sdio_cfg->pin_reset.pin);
-    return ESP_OK;
-}
-#else
-static esp_err_t tab5_configure_esp_hosted_transport(void)
-{
-    ESP_LOGW(TAG, "ESP-Hosted SDIO host interface not enabled; using default transport config");
-    return ESP_OK;
-}
-#endif
-
 #ifdef CONFIG_EXAMPLE_PROV_ENABLE_APP_CALLBACK
 void wifi_prov_app_callback(void *user_data, wifi_prov_cb_event_t event, void *event_data)
 {
@@ -423,10 +336,10 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
 
     /* Power the external Wi-Fi coprocessor before initializing Wi-Fi */
-    ESP_ERROR_CHECK(tab5_wifi_power_init());
-    ESP_ERROR_CHECK(tab5_wifi_power_set(true));
-    ESP_ERROR_CHECK(tab5_wifi_reset_slave(TAB5_WIFI_RESET_GPIO));
-    ESP_ERROR_CHECK(tab5_configure_esp_hosted_transport());
+    ESP_ERROR_CHECK(wifi_copro_power_init());
+    ESP_ERROR_CHECK(wifi_copro_power_set(true));
+    ESP_ERROR_CHECK(wifi_copro_reset_slave(WIFI_COPRO_RESET_GPIO));
+    ESP_ERROR_CHECK(wifi_copro_transport_connect());
 
     /* Initialize Wi-Fi including netif with default config */
     esp_netif_create_default_wifi_sta();
