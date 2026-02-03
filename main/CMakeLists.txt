@@ -1,3 +1,4 @@
-idf_component_register(SRCS "app_main.c" "wifi_copro_power.c" "wifi_copro_transport.c"
+idf_component_register(SRCS "app_main.c"
                        PRIV_REQUIRES esp_wifi nvs_flash wifi_provisioning driver
+                       REQUIRES wifi_copro_power wifi_copro_transport wifi_copro_hw kc_touch_provisioning kc_touch_gui kc_touch_display
                        INCLUDE_DIRS ".")

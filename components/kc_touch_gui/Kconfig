@@ -1,0 +1,59 @@
+menu "KC Touch GUI"
+
+config KC_TOUCH_GUI_ENABLE
+    bool "Enable LVGL GUI subsystem"
+    default y
+    help
+        Enable the KC Touch GUI subsystem powered by LVGL. Disable this option when
+        the target does not need the GUI task or LVGL primitives.
+
+if KC_TOUCH_GUI_ENABLE
+
+config KC_TOUCH_GUI_TASK_STACK_SIZE
+    int "GUI task stack size"
+    default 8192
+    range 4096 65536
+    help
+        Stack size (in bytes) used by the GUI FreeRTOS task. Increase when LVGL
+        widgets allocate additional stack memory.
+
+config KC_TOUCH_GUI_TASK_PRIORITY
+    int "GUI task priority"
+    default 5
+    range 1 10
+    help
+        FreeRTOS priority assigned to the GUI task.
+
+config KC_TOUCH_GUI_TASK_PERIOD_MS
+    int "GUI task period (ms)"
+    default 10
+    range 1 100
+    help
+        Period at which the GUI task calls lv_timer_handler().
+
+config KC_TOUCH_GUI_TICK_PERIOD_MS
+    int "LVGL tick period (ms)"
+    default 5
+    range 1 10
+    help
+        Interval at which the LVGL tick timer increments internal timekeeping.
+
+config KC_TOUCH_GUI_WORK_QUEUE_LENGTH
+    int "GUI work queue depth"
+    default 8
+    range 2 32
+    help
+        Number of pending GUI work items (callbacks) that can be queued for the
+        GUI task. Increase for complex scenes that schedule frequent updates.
+
+config KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN
+    bool "Create placeholder splash screen"
+    default y
+    help
+        Automatically create a placeholder splash screen that confirms the LVGL
+        core booted successfully. Disable when the final application provides its
+        own startup scene.
+
+endif # KC_TOUCH_GUI_ENABLE
+
+endmenu

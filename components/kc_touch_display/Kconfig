@@ -1,0 +1,47 @@
+menu "KC Touch Display"
+
+config KC_TOUCH_DISPLAY_ENABLE
+    bool "Enable KC Touch display driver"
+    default n
+    help
+        Enable the KC Touch display component that targets the native
+        M5Stack Tab5 hardware via the M5Unified + M5GFX drivers.
+
+if KC_TOUCH_DISPLAY_ENABLE
+
+config KC_TOUCH_DISPLAY_WIDTH
+    int "Display width (pixels)"
+    default 720
+    range 100 2000
+
+config KC_TOUCH_DISPLAY_HEIGHT
+    int "Display height (pixels)"
+    default 1280
+    range 100 2000
+
+config KC_TOUCH_DISPLAY_BUFFER_LINES
+    int "LVGL buffer height (lines)"
+    default 40
+    range 10 160
+
+choice KC_TOUCH_DISPLAY_ROTATION
+    prompt "Display rotation"
+    default KC_TOUCH_DISPLAY_ROTATION_0
+
+config KC_TOUCH_DISPLAY_ROTATION_0
+    bool "0 degrees"
+config KC_TOUCH_DISPLAY_ROTATION_90
+    bool "90 degrees"
+config KC_TOUCH_DISPLAY_ROTATION_180
+    bool "180 degrees"
+config KC_TOUCH_DISPLAY_ROTATION_270
+    bool "270 degrees"
+endchoice
+
+config KC_TOUCH_TOUCH_ENABLE
+    bool "Enable touch input"
+    default y
+
+endif # KC_TOUCH_DISPLAY_ENABLE
+
+endmenu

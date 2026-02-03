@@ -1,7 +1,7 @@
 #pragma once
 
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 
 /* I2C bus that drives the power/reset expander */
 #define WIFI_COPRO_I2C_PORT I2C_NUM_0

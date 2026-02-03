@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "wifi_copro_hw.h"
 
 esp_err_t wifi_copro_power_init(void);

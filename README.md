@@ -25,6 +25,23 @@ This example can be used, as it is, for adding a provisioning service to any app
 
 > Note: If you use this example code in your own project, in BLE mode, then remember to enable the BT stack and BTDM BLE control settings in your SDK configuration (e.g. by using the `sdkconfig.defaults` file from this project).
 
+## KC Touch GUI subsystem
+
+The kc-touch firmware now includes a dedicated LVGL wrapper component located at [components/kc_touch_gui](components/kc_touch_gui). It bootstraps the LVGL core, manages the periodic tick timer, and exposes a thread-safe work queue so UI updates always run on the GUI task.
+
+- Enable or tune the subsystem under `idf.py menuconfig → Component config → KC Touch GUI`.
+- `kc_touch_gui_init(NULL)` loads defaults and spins up a GUI FreeRTOS task plus the LVGL tick timer. The call is issued from [main/app_main.c](main/app_main.c#L1), so the GUI is alive before provisioning finishes.
+- Use `kc_touch_gui_dispatch()` to schedule UI work (widget creation, screen swaps, etc.) from any task without worrying about LVGL's single-threaded requirement.
+- When `CONFIG_KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN=y`, the component draws a simple splash screen to confirm LVGL booted; disable it once the real UI ships.
+
+### Display and touch bring-up
+
+The [components/kc_touch_display](components/kc_touch_display) component is now purpose-built for the M5Stack Tab5. It leverages the upstream `M5Unified` + `M5GFX` drivers to light up the native MIPI DSI panel, GT911 touch controller, and PWM backlight—no GPIO bookkeeping required as long as PSRAM runs at 200 MHz.
+
+- `kc_touch_display_init()` runs right after `kc_touch_gui_init()` in [main/app_main.c](main/app_main.c#L1) so LVGL registers a real flush callback instead of the textual placeholder.
+- A starter scene (title, subtitle, and button) renders through LVGL to prove the panel is alive. Touch input feeds LVGL through a pointer driver whenever it is enabled.
+- `kc_touch_display_backlight_set()` proxies straight to the Tab5 brightness control exposed by M5Unified.
+
 ## How to use example
 
 ### Hardware Required
@@ -120,7 +137,7 @@ I (55355) app: Hello World!
 
 **Note:** For generating the credentials for security version 2 (`SRP6a` salt and verifier) for the device-side, the following example command can be used. The output can then directly be used in this example.
 
-The config option `CONFIG_EXAMPLE_PROV_SEC2_DEV_MODE` should be enabled for the example and in `main/app_main.c`, the macro `EXAMPLE_PROV_SEC2_USERNAME` should be set to the same username used in the salt-verifier generation.
+The config option `CONFIG_KC_TOUCH_PROV_SEC2_DEV_MODE` should be enabled for the example and in `main/app_main.c`, the macro `KC_TOUCH_PROV_SEC2_USERNAME` should be set to the same username used in the salt-verifier generation.
 
 ```log
 $ python esp_prov.py --transport softap --sec_ver 2 --sec2_gen_cred --sec2_username wifiprov --sec2_pwd abcd1234
@@ -142,7 +159,7 @@ static const char sec2_verifier[] = {
 
 ### QR Code Scanning
 
-Enabling `CONFIG_EXAMPLE_PROV_SHOW_QR` will display a QR code on the serial terminal, which can be scanned from the ESP Provisioning phone apps to start the Wi-Fi provisioning process.
+Enabling `CONFIG_KC_TOUCH_PROV_SHOW_QR` will display a QR code on the serial terminal, which can be scanned from the ESP Provisioning phone apps to start the Wi-Fi provisioning process.
 
 The monitor log should display something like this :
 

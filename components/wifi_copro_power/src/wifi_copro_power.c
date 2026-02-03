@@ -16,53 +16,59 @@
 #define PI4IO_REG_PULL_SEL    0x0D
 #define PI4IO_REG_INT_MASK    0x11
 
-#define I2C_TIMEOUT_TICKS pdMS_TO_TICKS(100)
+#define I2C_TIMEOUT_MS 100
+#define I2C_GLITCH_FILTER 7
 
 static const char *TAG = "wifi_copro_power";
-static bool s_i2c_ready;
 static bool s_expander_ready;
+static i2c_master_bus_handle_t s_i2c_bus;
+static i2c_master_dev_handle_t s_pi4io;
 
 static esp_err_t ensure_i2c(void)
 {
-    if (s_i2c_ready) {
+    if (s_pi4io) {
         return ESP_OK;
     }
 
-    i2c_config_t cfg = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = WIFI_COPRO_I2C_SDA,
-        .scl_io_num = WIFI_COPRO_I2C_SCL,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000,
-    };
-
-    esp_err_t err = i2c_param_config(WIFI_COPRO_I2C_PORT, &cfg);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = i2c_driver_install(WIFI_COPRO_I2C_PORT, cfg.mode, 0, 0, 0);
-    if (err == ESP_ERR_INVALID_STATE) {
-        s_i2c_ready = true;
-        return ESP_OK;
-    }
-    if (err != ESP_OK) {
-        return err;
+    if (!s_i2c_bus) {
+        i2c_master_bus_config_t bus_cfg = {
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .i2c_port = WIFI_COPRO_I2C_PORT,
+            .scl_io_num = WIFI_COPRO_I2C_SCL,
+            .sda_io_num = WIFI_COPRO_I2C_SDA,
+            .glitch_ignore_cnt = I2C_GLITCH_FILTER,
+            .flags.enable_internal_pullup = true,
+        };
+        esp_err_t err = i2c_new_master_bus(&bus_cfg, &s_i2c_bus);
+        if (err != ESP_OK) {
+            return err;
+        }
     }
 
-    s_i2c_ready = true;
+    if (!s_pi4io) {
+        i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = PI4IO_ADDR,
+            .scl_speed_hz = 400000,
+        };
+        esp_err_t err = i2c_master_bus_add_device(s_i2c_bus, &dev_cfg, &s_pi4io);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
     return ESP_OK;
 }
 
 static esp_err_t pi4io_write(uint8_t reg, uint8_t value)
 {
     uint8_t buffer[2] = {reg, value};
-    return i2c_master_write_to_device(WIFI_COPRO_I2C_PORT, PI4IO_ADDR, buffer, sizeof(buffer), I2C_TIMEOUT_TICKS);
+    return i2c_master_transmit(s_pi4io, buffer, sizeof(buffer), I2C_TIMEOUT_MS);
 }
 
 static esp_err_t pi4io_read(uint8_t reg, uint8_t *value)
 {
-    return i2c_master_write_read_device(WIFI_COPRO_I2C_PORT, PI4IO_ADDR, &reg, 1, value, 1, I2C_TIMEOUT_TICKS);
+    return i2c_master_transmit_receive(s_pi4io, &reg, 1, value, 1, I2C_TIMEOUT_MS);
 }
 
 esp_err_t wifi_copro_power_init(void)
