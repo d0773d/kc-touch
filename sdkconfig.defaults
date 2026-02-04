@@ -1,8 +1,5 @@
 # Override some defaults so BT stack is enabled and
 CONFIG_BT_ENABLED=y
-CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
-CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
-CONFIG_BTDM_CTRL_MODE_BTDM=n
 CONFIG_BT_NIMBLE_ENABLED=y
 
 # Enable the native Tab5 display + touch path by default when targeting ESP32-P4
@@ -13,9 +10,7 @@ CONFIG_KC_TOUCH_TOUCH_ENABLE=y
 
 # Ensure Tab5 PSRAM is available for the M5Unified frame buffers
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_200M=y
-# CONFIG_SPIRAM_SPEED_80M is not set
 CONFIG_SPIRAM_SPEED=200
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MEMTEST=y

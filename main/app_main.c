@@ -1,4 +1,4 @@
-/* Wi-Fi Provisioning Manager Example
+/* Wi-Fi Example
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -19,11 +19,9 @@
 #include <esp_event.h>
 #include <nvs_flash.h>
 #include <driver/gpio.h>
-
 #include <wifi_provisioning/manager.h>
-
 #include <wifi_provisioning/scheme_softap.h>
-#include "kc_touch_provisioning.h"
+
 #include "kc_touch_gui.h"
 #include "kc_touch_display.h"
 #include "wifi_copro_hw.h"
@@ -36,19 +34,10 @@ static const char *TAG = "app";
 /* Signal Wi-Fi events on this event-group */
 const int WIFI_CONNECTED_EVENT = BIT0;
 static EventGroupHandle_t wifi_event_group;
-static bool s_wifi_prov_mgr_initialized;
 
-#define PROV_TRANSPORT_SOFTAP   "softap"
-static const char *KC_TOUCH_POP = "abcd1234";
-
-static esp_err_t kc_touch_prov_manager_start(void);
-static void kc_touch_prov_manager_stop(void);
-static esp_err_t kc_touch_start_softap_provisioning(bool force_reset);
-static void kc_touch_display_force_provision(void *ctx);
-
-/* Event handler for catching system events */
-static void event_handler(void* arg, esp_event_base_t event_base,
-                          int32_t event_id, void* event_data)
+/* Handler for provisioning events */
+static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
+                                    int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_PROV_EVENT) {
         switch (event_id) {
@@ -58,7 +47,8 @@ static void event_handler(void* arg, esp_event_base_t event_base,
             case WIFI_PROV_CRED_RECV: {
                 wifi_sta_config_t *wifi_sta_cfg = (wifi_sta_config_t *)event_data;
                 ESP_LOGI(TAG, "Received Wi-Fi credentials"
-                         "\n\tSSID     : %s\n\tPassword : %s",
+                         "\n\tSSID     : %s"
+                         "\n\tPassword : %s",
                          (const char *) wifi_sta_cfg->ssid,
                          (const char *) wifi_sta_cfg->password);
                 break;
@@ -69,16 +59,6 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                          "\n\tPlease reset to factory and retry provisioning",
                          (*reason == WIFI_PROV_STA_AUTH_ERROR) ?
                          "Wi-Fi station authentication failed" : "Wi-Fi access-point not found");
-#ifdef CONFIG_KC_TOUCH_RESET_PROV_MGR_ON_FAILURE
-                /* Reset the state machine on provisioning failure.
-                 * This is enabled by the CONFIG_KC_TOUCH_RESET_PROV_MGR_ON_FAILURE configuration.
-                 * It allows the provisioning manager to retry the provisioning process
-                 * based on the number of attempts specified in wifi_conn_attempts. After attempting
-                 * the maximum number of retries, the provisioning manager will reset the state machine
-                 * and the provisioning process will be terminated.
-                 */
-                wifi_prov_mgr_reset_sm_state_on_failure();
-#endif
                 break;
             }
             case WIFI_PROV_CRED_SUCCESS:
@@ -86,25 +66,89 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                 break;
             case WIFI_PROV_END:
                 /* De-initialize manager once provisioning is finished */
-                kc_touch_prov_manager_stop();
+                wifi_prov_mgr_deinit();
                 break;
             default:
                 break;
         }
-    } else if (event_base == WIFI_EVENT) {
+    }
+}
+
+/* Function to start provisioning manually - to be called by button press */
+void start_wifi_provisioning(void)
+{
+    /* Initialize Wi-Fi Provisioning Manager */
+    wifi_prov_mgr_config_t config = {
+        /* SoftAP based provisioning */
+        .scheme = wifi_prov_scheme_softap,
+        /* Any custom scheme options */
+        .scheme_event_handler = WIFI_PROV_EVENT_HANDLER_NONE
+    };
+
+    ESP_ERROR_CHECK(wifi_prov_mgr_init(config));
+
+    /* Register listener for provisioning events */
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, &wifi_prov_event_handler, NULL));
+
+    /* Start provisioning */
+    const char *service_name = "PROV_DEVICE";
+    const char *service_key = "password"; 
+    
+    /* Start provisioning service */
+    esp_err_t err = wifi_prov_mgr_start_provisioning(WIFI_PROV_SECURITY_1, (const char *) service_key, service_name, NULL);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Provisioning started with service name: %s", service_name);
+        ESP_LOGI(TAG, "QR Code Payload: {\"ver\":\"v1\",\"name\":\"%s\",\"pop\":\"%s\",\"transport\":\"softap\"}", service_name, service_key ? service_key : "");
+    } else {
+        ESP_LOGE(TAG, "Failed to start provisioning: %s", esp_err_to_name(err));
+    }
+}
+
+/* Task to run provisioning manager in its own context */
+static void provisioning_task(void * arg)
+{
+    start_wifi_provisioning();
+    vTaskDelete(NULL);
+}
+
+static void btn_event_handler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+
+    if(code == LV_EVENT_CLICKED) {
+        ESP_LOGI(TAG, "Provisioning button clicked");
+        xTaskCreate(provisioning_task, "prov_task", 8192, NULL, 5, NULL);
+        
+        lv_obj_t * btn = lv_event_get_target(e);
+        lv_obj_t * label = lv_obj_get_child(btn, 0);
+        lv_label_set_text(label, "Provisioning...");
+        lv_obj_clear_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    }
+}
+
+static void create_prov_ui(void *ctx)
+{
+    lv_obj_t * btn = lv_btn_create(lv_scr_act());
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_event_cb(btn, btn_event_handler, LV_EVENT_ALL, NULL);
+    lv_obj_set_size(btn, 200, 60);
+
+    lv_obj_t * label = lv_label_create(btn);
+    lv_label_set_text(label, "Start Provisioning");
+    lv_obj_center(label);
+}
+
+/* Event handler for catching system events */
+static void event_handler(void* arg, esp_event_base_t event_base,
+                          int32_t event_id, void* event_data)
+{
+    if (event_base == WIFI_EVENT) {
         switch (event_id) {
             case WIFI_EVENT_STA_START:
-                esp_wifi_connect();
+                /* Wi-Fi started */
                 break;
             case WIFI_EVENT_STA_DISCONNECTED:
-                ESP_LOGI(TAG, "Disconnected. Connecting to the AP again...");
-                esp_wifi_connect();
-                break;
-            case WIFI_EVENT_AP_STACONNECTED:
-                ESP_LOGI(TAG, "SoftAP transport: Connected!");
-                break;
-            case WIFI_EVENT_AP_STADISCONNECTED:
-                ESP_LOGI(TAG, "SoftAP transport: Disconnected!");
+                 ESP_LOGI(TAG, "Disconnected.");
                 break;
             default:
                 break;
@@ -114,86 +158,6 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "Connected with IP Address:" IPSTR, IP2STR(&event->ip_info.ip));
         /* Signal main application to continue execution */
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_EVENT);
-    } else if (event_base == PROTOCOMM_SECURITY_SESSION_EVENT) {
-        switch (event_id) {
-            case PROTOCOMM_SECURITY_SESSION_SETUP_OK:
-                ESP_LOGI(TAG, "Secured session established!");
-                break;
-            case PROTOCOMM_SECURITY_SESSION_INVALID_SECURITY_PARAMS:
-                ESP_LOGE(TAG, "Received invalid security parameters for establishing secure session!");
-                break;
-            case PROTOCOMM_SECURITY_SESSION_CREDENTIALS_MISMATCH:
-                ESP_LOGE(TAG, "Received incorrect username and/or PoP for establishing secure session!");
-                break;
-            default:
-                break;
-        }
-    }
-}
-
-static void wifi_init_sta(void)
-{
-    /* Start Wi-Fi in station mode */
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_start());
-}
-
-static esp_err_t kc_touch_prov_manager_start(void)
-{
-    if (s_wifi_prov_mgr_initialized) {
-        return ESP_OK;
-    }
-
-    wifi_prov_mgr_config_t config;
-    kc_touch_prov_init_manager_config(&config);
-    esp_err_t err = wifi_prov_mgr_init(config);
-    if (err == ESP_OK) {
-        s_wifi_prov_mgr_initialized = true;
-    }
-    return err;
-}
-
-static void kc_touch_prov_manager_stop(void)
-{
-    if (!s_wifi_prov_mgr_initialized) {
-        return;
-    }
-    wifi_prov_mgr_deinit();
-    s_wifi_prov_mgr_initialized = false;
-}
-
-static esp_err_t kc_touch_start_softap_provisioning(bool force_reset)
-{
-    esp_err_t err = kc_touch_prov_manager_start();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to init provisioning manager (%s)", esp_err_to_name(err));
-        return err;
-    }
-
-    if (force_reset) {
-        wifi_prov_mgr_reset_sm_state_for_reprovision();
-    }
-
-    char service_name[KC_TOUCH_PROV_SERVICE_NAME_MAX] = {0};
-    kc_touch_prov_generate_service_name(service_name, sizeof(service_name));
-
-    err = kc_touch_prov_start_security1(service_name, KC_TOUCH_POP, PROV_TRANSPORT_SOFTAP);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Provisioning start failed (%s)", esp_err_to_name(err));
-        return err;
-    }
-
-    ESP_LOGI(TAG, "Provisioning SoftAP available (SSID: %s)", service_name);
-    return ESP_OK;
-}
-
-static void kc_touch_display_force_provision(void *ctx)
-{
-    (void)ctx;
-    ESP_LOGI(TAG, "Display button requested Wi-Fi provisioning");
-    esp_err_t err = kc_touch_start_softap_provisioning(true);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Unable to start provisioning (%s)", esp_err_to_name(err));
     }
 }
 
@@ -217,13 +181,23 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_event_group = xEventGroupCreate();
 
-    /* Register our event handler for Wi-Fi, IP and Provisioning related events */
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(PROTOCOMM_SECURITY_SESSION_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
+    /* Register our event handler for Wi-Fi and IP related events */
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
 
     /* Power the external Wi-Fi coprocessor before initializing Wi-Fi */
-    ESP_ERROR_CHECK(wifi_copro_power_init());
+    /* Retry initialization to handle I2C hardware timing on cold boot */
+    esp_err_t power_init_err = ESP_FAIL;
+    for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+            ESP_LOGW(TAG, "Retrying Wi-Fi copro power init (attempt %d/3)", retry + 1);
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        power_init_err = wifi_copro_power_init();
+        if (power_init_err == ESP_OK) {
+            break;
+        }
+    }
+    ESP_ERROR_CHECK(power_init_err);
     ESP_ERROR_CHECK(wifi_copro_power_set(true));
     ESP_ERROR_CHECK(wifi_copro_reset_slave(WIFI_COPRO_RESET_GPIO));
     ESP_ERROR_CHECK(wifi_copro_transport_connect());
@@ -233,68 +207,29 @@ void app_main(void)
     esp_netif_create_default_wifi_ap();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    
+    /* Start Wi-Fi driver */
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
 
-    /* Initialize provisioning manager so we can query state */
-    ESP_ERROR_CHECK(kc_touch_prov_manager_start());
-
-    esp_err_t gui_err = kc_touch_gui_init(NULL);
+    /* Initialize display */
+    kc_touch_gui_config_t gui_cfg = kc_touch_gui_default_config();
+    esp_err_t gui_err = kc_touch_gui_init(&gui_cfg);
     if (gui_err != ESP_OK) {
-        ESP_LOGW(TAG, "GUI init skipped (%d)", gui_err);
+        ESP_LOGE(TAG, "GUI init failed (%d)", gui_err);
     } else {
         esp_err_t display_err = kc_touch_display_init();
         if (display_err != ESP_OK) {
-            ESP_LOGW(TAG, "Display init skipped (%s)", esp_err_to_name(display_err));
+            ESP_LOGE(TAG, "Display init failed (%s)", esp_err_to_name(display_err));
         } else {
-            (void)kc_touch_display_set_provisioning_cb(kc_touch_display_force_provision, NULL);
+            kc_touch_gui_dispatch(create_prov_ui, NULL, portMAX_DELAY);
         }
     }
-
-    bool provisioned = false;
-#ifdef CONFIG_KC_TOUCH_RESET_PROVISIONED
-    wifi_prov_mgr_reset_provisioning();
-#else
-    /* Let's find out if the device is provisioned */
-    ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
-
-#endif
-    /* If device is not yet provisioned start provisioning service */
-    if (!provisioned) {
-        ESP_LOGI(TAG, "Starting provisioning");
-        ESP_ERROR_CHECK(kc_touch_start_softap_provisioning(false));
-    } else {
-        ESP_LOGI(TAG, "Already provisioned, starting Wi-Fi STA");
-
-        /* We don't need the manager as device is already provisioned,
-         * so let's release it's resources */
-        kc_touch_prov_manager_stop();
-
-        ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
-        /* Start Wi-Fi station */
-        wifi_init_sta();
-    }
-
-    /* Wait for Wi-Fi connection */
-    xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_EVENT, true, true, portMAX_DELAY);
-
+    
     /* Start main application now */
-#if CONFIG_KC_TOUCH_REPROVISIONING
-    while (1) {
-        for (int i = 0; i < 10; i++) {
-            ESP_LOGI(TAG, "Hello World!");
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
-
-        /* Resetting provisioning state machine to enable re-provisioning */
-        ESP_ERROR_CHECK(kc_touch_start_softap_provisioning(true));
-
-        /* Wait for Wi-Fi connection */
-        xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_EVENT, true, true, portMAX_DELAY);
-    }
-#else
      while (1) {
          ESP_LOGI(TAG, "Hello World!");
          vTaskDelay(1000 / portTICK_PERIOD_MS);
      }
-#endif
 
 }
