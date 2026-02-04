@@ -27,6 +27,10 @@
 #include "wifi_copro_hw.h"
 #include "wifi_copro_power.h"
 #include "wifi_copro_transport.h"
+#include "lvgl.h"
+#include "extra/libs/qrcode/lv_qrcode.h"
+
+static char prov_qr_payload[256];
 
 static const char *TAG = "app";
 
@@ -75,6 +79,14 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
 }
 
 /* Function to start provisioning manually - to be called by button press */
+static void show_qr_code_ui(void *ctx)
+{
+    lv_obj_t * lcd_scr = lv_scr_act();
+    lv_obj_t * qr = lv_qrcode_create(lcd_scr, 150, lv_color_black(), lv_color_white());
+    lv_qrcode_update(qr, prov_qr_payload, strlen(prov_qr_payload));
+    lv_obj_align(qr, LV_ALIGN_CENTER, 0, 80);
+}
+
 void start_wifi_provisioning(void)
 {
     /* Initialize Wi-Fi Provisioning Manager */
@@ -98,7 +110,14 @@ void start_wifi_provisioning(void)
     esp_err_t err = wifi_prov_mgr_start_provisioning(WIFI_PROV_SECURITY_1, (const char *) service_key, service_name, NULL);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Provisioning started with service name: %s", service_name);
-        ESP_LOGI(TAG, "QR Code Payload: {\"ver\":\"v1\",\"name\":\"%s\",\"pop\":\"%s\",\"transport\":\"softap\"}", service_name, service_key ? service_key : "");
+        
+        snprintf(prov_qr_payload, sizeof(prov_qr_payload), 
+            "{\"ver\":\"v1\",\"name\":\"%s\",\"pop\":\"%s\",\"transport\":\"softap\"}", 
+            service_name, service_key ? service_key : "");
+        ESP_LOGI(TAG, "QR Code Payload: %s", prov_qr_payload);
+
+        // Update UI on the GUI thread
+        kc_touch_gui_dispatch(show_qr_code_ui, NULL, portMAX_DELAY);
     } else {
         ESP_LOGE(TAG, "Failed to start provisioning: %s", esp_err_to_name(err));
     }
