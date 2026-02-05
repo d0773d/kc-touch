@@ -1,11 +1,15 @@
 #include "kc_touch_display.h"
 
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "kc_touch_display_tab5.h"
 #include "kc_touch_gui.h"
 #include "lvgl.h"
+#include "extra/libs/qrcode/lv_qrcode.h"
 #include "sdkconfig.h"
 
 #if CONFIG_KC_TOUCH_DISPLAY_ENABLE
@@ -27,6 +31,7 @@ static lv_color_t s_lv_buf_a[BUFFER_PIXELS];
 static lv_color_t s_lv_buf_b[BUFFER_PIXELS];
 static kc_touch_display_prov_cb_t s_prov_cb;
 static void *s_prov_ctx;
+static lv_obj_t *s_status_label;
 
 #if CONFIG_KC_TOUCH_TOUCH_ENABLE
 static lv_indev_t *s_touch_indev;
@@ -66,26 +71,33 @@ static void kc_touch_display_build_scene(void *ctx)
     lv_obj_clean(screen);
 
     lv_obj_t *title = lv_label_create(screen);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_48, 0);
     lv_label_set_text(title, "KC Touch Console");
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 50);
 
-    lv_obj_t *subtitle = lv_label_create(screen);
-    lv_label_set_text(subtitle, "Wi-Fi + GUI online");
-    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 40);
+    s_status_label = lv_label_create(screen);
+    lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_align(s_status_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_status_label, "Waiting for Wi-Fi...");
+    lv_obj_align(s_status_label, LV_ALIGN_TOP_MID, 0, 130);
 
     lv_obj_t *btn = lv_btn_create(screen);
-    lv_obj_set_size(btn, 200, 56);
-    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_size(btn, 400, 120);
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 20);
     lv_obj_add_event_cb(btn, kc_touch_display_force_prov_event, LV_EVENT_CLICKED, NULL);
+    
     lv_obj_t *btn_label = lv_label_create(btn);
-    lv_label_set_text(btn_label, "Start Wi-Fi provisioning");
+    lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_28, 0);
+    lv_label_set_text(btn_label, "Start Provisioning");
     lv_obj_center(btn_label);
 
     lv_obj_t *note = lv_label_create(screen);
-    lv_label_set_text(note, "Tap the button to expose the SoftAP provisioning portal.");
+    lv_obj_set_style_text_font(note, &lv_font_montserrat_28, 0);
+    lv_label_set_text(note, "Tap above to configure Wi-Fi.");
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(note, DISPLAY_WIDTH - 20);
-    lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_width(note, DISPLAY_WIDTH - 40);
+    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -50);
 }
 
 static void kc_touch_display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
@@ -203,6 +215,69 @@ esp_err_t kc_touch_display_set_provisioning_cb(kc_touch_display_prov_cb_t cb, vo
     return ESP_OK;
 }
 
+static void kc_touch_display_show_qr_task(void *ctx)
+{
+    char *payload = (char *)ctx;
+    lv_obj_t * lcd_scr = lv_scr_act();
+    lv_obj_clean(lcd_scr);
+    
+    // Scale QR code for 720px wide screen
+    lv_obj_t * qr = lv_qrcode_create(lcd_scr, 400, lv_color_black(), lv_color_white());
+    lv_qrcode_update(qr, payload, strlen(payload));
+    lv_obj_center(qr);
+    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -50);
+
+    lv_obj_t * label = lv_label_create(lcd_scr);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0);
+    lv_label_set_text(label, "Scan QR Code with App");
+    lv_obj_align_to(label, qr, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
+
+    // Re-create the status label so set_status calls don't crash or fail
+    s_status_label = lv_label_create(lcd_scr);
+    lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_align(s_status_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_status_label, "Provisioning Mode");
+    lv_obj_align(s_status_label, LV_ALIGN_TOP_MID, 0, 10);
+
+    free(payload);
+}
+
+esp_err_t kc_touch_display_show_qr(const char *payload)
+{
+    if (!payload) return ESP_ERR_INVALID_ARG;
+    char *p = strdup(payload);
+    if (!p) return ESP_ERR_NO_MEM;
+    return kc_touch_gui_dispatch(kc_touch_display_show_qr_task, p, 0);
+}
+
+static void kc_touch_display_update_label_task(void *ctx)
+{
+    char *msg = (char *)ctx;
+    if (s_status_label && lv_obj_is_valid(s_status_label)) {
+        lv_label_set_text(s_status_label, msg);
+    }
+    free(msg);
+}
+
+esp_err_t kc_touch_display_set_status(const char *fmt, ...)
+{
+    if (!s_display_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    char *msg = NULL;
+    va_list args;
+    va_start(args, fmt);
+    int len = vasprintf(&msg, fmt, args);
+    va_end(args);
+
+    if (len < 0 || !msg) {
+        return ESP_FAIL;
+    }
+
+    return kc_touch_gui_dispatch(kc_touch_display_update_label_task, msg, 0);
+}
+
 bool kc_touch_display_is_ready(void)
 {
     return s_display_ready;
@@ -234,6 +309,12 @@ esp_err_t kc_touch_display_set_provisioning_cb(kc_touch_display_prov_cb_t cb, vo
 {
     (void)cb;
     (void)ctx;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t kc_touch_display_set_status(const char *fmt, ...)
+{
+    (void)fmt;
     return ESP_ERR_NOT_SUPPORTED;
 }
 

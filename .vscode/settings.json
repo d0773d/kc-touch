@@ -1,20 +1,14 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
-  "idf.espIdfPathWin": "C:\\Users\\d0773\\esp\\v5.5.2\\esp-idf",
-  "idf.pythonInstallPath": "C:\\Espressif\\tools\\idf-python\\3.11.2\\python.exe",
-  "idf.openOcdConfigs": [
-    "board/esp32-wrover-kit-3.3v.cfg"
-  ],
-  "idf.portWin": "COM7",
-  "idf.toolsPathWin": "C:\\Espressif",
+  "idf.espIdfPath": "/home/dottedquad/code/kc-touch/esp-idf-v5.5.2",
+  "idf.pythonBinPath": "/home/dottedquad/.espressif/python_env/idf5.5_py3.12_env/bin/python",
+  "idf.toolsPath": "/home/dottedquad/.espressif",
+  "idf.customExtraPaths": "/home/dottedquad/.espressif/tools/riscv32-esp-elf-gdb/16.3_20250913/riscv32-esp-elf-gdb/bin:/home/dottedquad/.espressif/tools/riscv32-esp-elf/esp-14.2.0_20251107/riscv32-esp-elf/bin:/home/dottedquad/.espressif/tools/openocd-esp32/v0.12.0-esp32-20250707/openocd-esp32/bin",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32p4"
   },
-  "clangd.path": "c:\\Users\\d0773\\esp\\v5.5.2\\esp-idf\\tools\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
-  "clangd.arguments": [
-    "--background-index",
-    "--query-driver=**",
-    "--compile-commands-dir=c:\\Users\\d0773\\project-name\\build"
-  ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.port": "rfc2217://24.251.114.49:4000?ign_set_control",
+  "idf.flashBaudRate": "2000000",
+  "idf.monitorBaudRate": "115200"
 }

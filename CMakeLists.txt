@@ -6,10 +6,6 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
 
-# Fix for toolchain issue on ESP32P4 (missing default architecture flags)
-if(IDF_TARGET MATCHES "esp32p4")
-    idf_build_set_property(C_COMPILE_OPTIONS "-march=rv32imafc_zicsr_zifencei" APPEND)
-    idf_build_set_property(CXX_COMPILE_OPTIONS "-march=rv32imafc_zicsr_zifencei" APPEND)
-endif()
+
 
 project(kc-touch)
