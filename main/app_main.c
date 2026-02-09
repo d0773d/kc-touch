@@ -58,6 +58,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
                          (const char *) wifi_sta_cfg->ssid,
                          (const char *) wifi_sta_cfg->password);
                 kc_touch_display_set_status("Credentials Received\nConnecting to %s...", (const char *) wifi_sta_cfg->ssid);
+                kc_touch_display_prov_enable_back(false);
                 break;
             }
             case WIFI_PROV_CRED_FAIL: {
@@ -67,11 +68,13 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
                          (*reason == WIFI_PROV_STA_AUTH_ERROR) ?
                          "Wi-Fi station authentication failed" : "Wi-Fi access-point not found");
                 kc_touch_display_set_status("Provisioning Failed\nSee Logs");
+                kc_touch_display_prov_enable_back(true);
                 break;
             }
             case WIFI_PROV_CRED_SUCCESS:
                 ESP_LOGI(TAG, "Provisioning successful");
                 kc_touch_display_set_status("Provisioning Successful\nVerifying...");
+                kc_touch_display_prov_enable_back(true);
                 break;
             case WIFI_PROV_END:
                 /* De-initialize manager once provisioning is finished */
@@ -173,6 +176,17 @@ static void start_provisioning_callback(void *ctx)
     xTaskCreate(provisioning_task, "prov_task", 8192, NULL, 5, NULL);
 }
 
+static void cancel_provisioning_callback(void *ctx)
+{
+    ESP_LOGI(TAG, "Provisioning cancelled by user");
+    wifi_prov_mgr_stop_provisioning();
+    // Returning to root is handled by the display if we don't do it here,
+    // but the display won't know we stopped provisioning unless we tell it.
+    // Actually, kc_touch_display calls this callback.
+    // If we want to return to root, we should do:
+    kc_touch_gui_show_root();
+}
+
 /* Event handler for catching system events */
 static void event_handler(void* arg, esp_event_base_t event_base,
                           int32_t event_id, void* event_data)
@@ -268,6 +282,8 @@ void app_main(void)
             kc_touch_gui_show_root();
             
             kc_touch_display_set_provisioning_cb(start_provisioning_callback, NULL);
+            kc_touch_gui_set_provisioning_cb(start_provisioning_callback, NULL);
+            kc_touch_display_set_cancel_cb(cancel_provisioning_callback, NULL);
         }
     }
 

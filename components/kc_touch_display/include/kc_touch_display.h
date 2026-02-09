@@ -40,6 +40,19 @@ esp_err_t kc_touch_display_set_status(const char *fmt, ...);
  */
 esp_err_t kc_touch_display_show_qr(const char *payload);
 
+/**
+ * @brief Enable or disable the Back button on the provisioning screen.
+ * Thread-safe.
+ */
+esp_err_t kc_touch_display_prov_enable_back(bool enable);
+
+typedef void (*kc_touch_display_cancel_cb_t)(void *ctx);
+
+/**
+ * @brief Register a callback for when the user cancels provisioning (Back button).
+ */
+esp_err_t kc_touch_display_set_cancel_cb(kc_touch_display_cancel_cb_t cb, void *ctx);
+
 bool kc_touch_display_is_ready(void);
 bool kc_touch_touch_is_ready(void);
 

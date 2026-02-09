@@ -31,7 +31,10 @@ static lv_color_t s_lv_buf_a[BUFFER_PIXELS];
 static lv_color_t s_lv_buf_b[BUFFER_PIXELS];
 static kc_touch_display_prov_cb_t s_prov_cb;
 static void *s_prov_ctx;
+static kc_touch_display_cancel_cb_t s_cancel_cb = NULL;
+static void *s_cancel_ctx = NULL;
 static lv_obj_t *s_status_label;
+static lv_obj_t *s_prov_back_btn = NULL;
 
 #if CONFIG_KC_TOUCH_TOUCH_ENABLE
 static lv_indev_t *s_touch_indev;
@@ -231,29 +234,103 @@ esp_err_t kc_touch_display_set_provisioning_cb(kc_touch_display_prov_cb_t cb, vo
     return ESP_OK;
 }
 
+esp_err_t kc_touch_display_set_cancel_cb(kc_touch_display_cancel_cb_t cb, void *ctx)
+{
+    s_cancel_cb = cb;
+    s_cancel_ctx = ctx;
+    return ESP_OK;
+}
+
+static void kc_touch_display_enable_back_task(void *ctx) {
+    bool enable = (bool)ctx;
+    if (s_prov_back_btn && lv_obj_is_valid(s_prov_back_btn)) {
+        if (enable) {
+            lv_obj_clear_state(s_prov_back_btn, LV_STATE_DISABLED);
+            lv_obj_set_style_bg_color(s_prov_back_btn, lv_color_hex(0x888888), 0); // Restore color
+        } else {
+            lv_obj_add_state(s_prov_back_btn, LV_STATE_DISABLED);
+            lv_obj_set_style_bg_color(s_prov_back_btn, lv_color_hex(0x444444), 0); // Dim color
+        }
+    }
+}
+
+esp_err_t kc_touch_display_prov_enable_back(bool enable) {
+    return kc_touch_gui_dispatch(kc_touch_display_enable_back_task, (void*)enable, 0);
+}
+
+static void on_prov_back_click(lv_event_t *e) {
+    if (s_cancel_cb) {
+        s_cancel_cb(s_cancel_ctx);
+    } else {
+        // Fallback if no callback registered
+        kc_touch_gui_show_root();
+    }
+}
+
 static void kc_touch_display_show_qr_task(void *ctx)
 {
     char *payload = (char *)ctx;
     lv_obj_t * lcd_scr = lv_scr_act();
     lv_obj_clean(lcd_scr);
     
+    // Reset layout properties that might persist from Previous UI (e.g. Flex Row)
+    // In LVGL 8.3+, there isn't a direct "NONE" enum for flex flow, 
+    // but we can reset style flex flow or just not adding layout styles.
+    // However, if the object style had flex flow, we need to remove it.
+    // The safest way is to reset the style or manually remove the flex flag/style.
+    // Assuming we added flex flow via style in ui_root.c, cleaning the object (children) 
+    // doesn't remove the style from 'lcd_scr' itself if it was applied to the screen object.
+    
+    // We can force empty style or remove specific style properties.
+    // Or we can just create a confusing layout if we don't fix it.
+    // The simplest way to "disable" flex layout is to set it to a dummy value or clear the layout flag.
+    // But lv_obj_set_flex_flow wraps adding a style.
+    
+    // Let's reset the style of the screen completely to be safe.
+    lv_obj_remove_style_all(lcd_scr);
+    
+    // Re-apply basic screen style if needed (bg color etc), but for now default is white/black which is fine.
+    // Or just set the background explicitly.
+    lv_obj_set_style_bg_color(lcd_scr, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(lcd_scr, LV_OPA_COVER, 0);
+
     // Scale QR code for 720px wide screen
-    lv_obj_t * qr = lv_qrcode_create(lcd_scr, 400, lv_color_black(), lv_color_white());
+    int qr_size = 400;
+    if (DISPLAY_WIDTH < 480 || DISPLAY_HEIGHT < 480) qr_size = 200; // Constrain for smaller screens
+
+    lv_obj_t * qr = lv_qrcode_create(lcd_scr, qr_size, lv_color_black(), lv_color_white());
     lv_qrcode_update(qr, payload, strlen(payload));
     lv_obj_center(qr);
-    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -50);
+    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -30); // Shift up slightly to leave room for text
 
     lv_obj_t * label = lv_label_create(lcd_scr);
     lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0);
     lv_label_set_text(label, "Scan QR Code with App");
+    lv_obj_set_width(label, LV_PCT(90));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_align_to(label, qr, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
 
     // Re-create the status label so set_status calls don't crash or fail
     s_status_label = lv_label_create(lcd_scr);
     lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_align(s_status_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(s_status_label, LV_PCT(90));
+    lv_label_set_long_mode(s_status_label, LV_LABEL_LONG_WRAP);
     lv_label_set_text(s_status_label, "Provisioning Mode");
-    lv_obj_align(s_status_label, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_align(s_status_label, LV_ALIGN_TOP_MID, 0, 20);
+
+    // Back Button
+    s_prov_back_btn = lv_btn_create(lcd_scr);
+    lv_obj_set_size(s_prov_back_btn, 140, 60);
+    // Align to bottom-center of the SCREEN, not relative to QR
+    lv_obj_align(s_prov_back_btn, LV_ALIGN_BOTTOM_MID, 0, -30);
+    
+    lv_obj_set_style_bg_color(s_prov_back_btn, lv_color_hex(0x888888), 0);
+    lv_obj_t *lbl_back = lv_label_create(s_prov_back_btn);
+    lv_label_set_text(lbl_back, "Exit"); // "Exit" might be clearer than "Back" for mode switch
+    lv_obj_center(lbl_back);
+    lv_obj_add_event_cb(s_prov_back_btn, on_prov_back_click, LV_EVENT_CLICKED, NULL);
 
     free(payload);
 }
@@ -325,6 +402,19 @@ esp_err_t kc_touch_display_set_provisioning_cb(kc_touch_display_prov_cb_t cb, vo
 {
     (void)cb;
     (void)ctx;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t kc_touch_display_set_cancel_cb(kc_touch_display_cancel_cb_t cb, void *ctx)
+{
+    (void)cb;
+    (void)ctx;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t kc_touch_display_prov_enable_back(bool enable)
+{
+    (void)enable;
     return ESP_ERR_NOT_SUPPORTED;
 }
 

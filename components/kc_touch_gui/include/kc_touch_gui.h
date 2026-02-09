@@ -39,6 +39,10 @@ bool kc_touch_gui_is_ready(void);
 void kc_touch_gui_set_scanning(bool scanning);
 bool kc_touch_gui_is_scanning(void);
 
+typedef void (*kc_touch_gui_prov_cb_t)(void *ctx);
+void kc_touch_gui_set_provisioning_cb(kc_touch_gui_prov_cb_t cb, void *ctx);
+void kc_touch_gui_trigger_provisioning(void);
+
 #ifdef __cplusplus
 }
 #endif

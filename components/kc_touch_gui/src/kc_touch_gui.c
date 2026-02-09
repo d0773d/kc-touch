@@ -57,9 +57,26 @@ typedef struct {
     esp_timer_handle_t tick_timer;
     bool ready;
     volatile bool scanning;
+    kc_touch_gui_prov_cb_t prov_cb;
+    void *prov_ctx;
 } kc_touch_gui_runtime_t;
 
 static kc_touch_gui_runtime_t s_gui = {0};
+
+void kc_touch_gui_set_provisioning_cb(kc_touch_gui_prov_cb_t cb, void *ctx)
+{
+    s_gui.prov_cb = cb;
+    s_gui.prov_ctx = ctx;
+}
+
+void kc_touch_gui_trigger_provisioning(void)
+{
+    if (s_gui.prov_cb) {
+        s_gui.prov_cb(s_gui.prov_ctx);
+    } else {
+        ESP_LOGW(TAG, "Provisioning triggered but no callback registered");
+    }
+}
 
 void kc_touch_gui_set_scanning(bool scanning)
 {

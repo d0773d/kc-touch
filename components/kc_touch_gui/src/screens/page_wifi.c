@@ -225,9 +225,110 @@ static void start_scan(void) {
     }
 }
 
+/*
 static void on_scan_click(lv_event_t *e) {
     if(s_is_scanning) return;
     start_scan();
+}
+*/
+
+static lv_obj_t *s_menu_cont = NULL;
+static lv_obj_t *s_manual_cont = NULL;
+static lv_obj_t *s_ta_ssid = NULL;
+static lv_obj_t *s_ta_pass = NULL;
+static lv_obj_t *s_kb = NULL;
+
+static void show_manual_entry(void);
+static void show_menu(void);
+
+// -------------------------------------------------------------------------
+// QR Code / AP Mode Placeholders
+// -------------------------------------------------------------------------
+static void on_qr_click(lv_event_t *e) {
+    lv_obj_t *msgbox = lv_msgbox_create(NULL, "Not Available", "Camera driver not found.", NULL, true);
+    lv_obj_center(msgbox);
+}
+
+static void on_ap_click(lv_event_t *e) {
+    ESP_LOGI(TAG, "Requesting AP Mode");
+    kc_touch_gui_trigger_provisioning();
+    // Maybe show a spinner or status text update?
+    // The provisioning callback in app_main updates the display status text via kc_touch_display_set_status
+}
+
+// -------------------------------------------------------------------------
+// Manual Entry Logic
+// -------------------------------------------------------------------------
+static void manual_connect_click(lv_event_t *e) {
+    const char *ssid = lv_textarea_get_text(s_ta_ssid);
+    const char *pass = lv_textarea_get_text(s_ta_pass);
+    
+    if (strlen(ssid) == 0) return;
+
+    ESP_LOGI(TAG, "Manual Connect: %s", ssid);
+    
+    wifi_config_t wifi_config = {0};
+    strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
+    if (strlen(pass) > 0) {
+        strncpy((char *)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
+        wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    } else {
+         wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    }
+
+    esp_wifi_disconnect();
+    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    esp_wifi_connect();
+    
+    ESP_LOGI(TAG, "Connecting to %s...", ssid);
+    
+    // Return to menu or dashboard?
+    // Let's go back to menu but keep status updated
+    show_menu();
+}
+
+static void manual_cancel_click(lv_event_t *e) {
+    show_menu();
+}
+
+static void ta_event_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t *ta = lv_event_get_target(e);
+    if (code == LV_EVENT_CLICKED || code == LV_EVENT_FOCUSED) {
+        if (s_kb) {
+            lv_keyboard_set_textarea(s_kb, ta);
+            lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else if (code == LV_EVENT_DEFOCUSED) {
+        if (s_kb) {
+            lv_keyboard_set_textarea(s_kb, NULL);
+            lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void show_manual_entry(void) {
+    if (s_menu_cont) lv_obj_add_flag(s_menu_cont, LV_OBJ_FLAG_HIDDEN);
+    
+    if (!s_manual_cont) {
+        // Create container
+        s_manual_cont = lv_obj_create(lv_scr_act()); // Use screen or parent? Parent is safer in tabview
+                                                     // But s_menu_cont parent is 'parent' passed in init.
+                                                     // We should re-use that parent.
+        // Wait, page_wifi_init gets 'parent'. We need to store it or create s_manual_cont in init but hide it.
+        // Let's create everything in init.
+        // Just unhide it here.
+    }
+    lv_obj_clear_flag(s_manual_cont, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_menu(void) {
+    if (s_manual_cont) lv_obj_add_flag(s_manual_cont, LV_OBJ_FLAG_HIDDEN);
+    if (s_menu_cont) lv_obj_clear_flag(s_menu_cont, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void on_manual_mode_click(lv_event_t *e) {
+    show_manual_entry();
 }
 
 // -------------------------------------------------------------------------
@@ -237,54 +338,129 @@ static void page_cleanup(lv_event_t *e) {
     s_wifi_list = NULL;
     s_scan_btn_label = NULL;
     s_is_scanning = false;
-    // Unregister locally registered handler
+    
+    s_menu_cont = NULL;
+    s_manual_cont = NULL;
+    s_ta_ssid = NULL;
+    s_ta_pass = NULL;
+    s_kb = NULL;
+
     esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, wifi_scan_handler);
 }
 
 void page_wifi_init(lv_obj_t *parent)
 {
-    // Register handler locally for this page's lifetime
-    // Note: If multiple pages are pushed, this might duplicate, but we switch pages by clearing parent
-    // so previous page is deleted and cleanup calls unregister.
     esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, wifi_scan_handler, NULL);
     
-    // Main Layout (Column)
-    lv_obj_t *cont = lv_obj_create(parent);
-    lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(cont, 0, 0);
-    lv_obj_set_style_pad_all(cont, 0, 0);
-    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_gap(cont, 15, 0);
-    lv_obj_add_event_cb(cont, page_cleanup, LV_EVENT_DELETE, NULL);
+    // Root container
+    lv_obj_t *root = lv_obj_create(parent);
+    lv_obj_set_size(root, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_opa(root, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(root, 0, 0);
+    lv_obj_set_style_pad_all(root, 0, 0);
+    lv_obj_add_event_cb(root, page_cleanup, LV_EVENT_DELETE, NULL);
 
-    // 1. Controls Row
-    lv_obj_t *controls = lv_obj_create(cont);
-    lv_obj_set_width(controls, LV_PCT(100));
-    lv_obj_set_height(controls, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(controls, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(controls, 0, 0);
-    lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    // ================== MENU CONTAINER ==================
+    s_menu_cont = lv_obj_create(root);
+    lv_obj_set_size(s_menu_cont, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_opa(s_menu_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_menu_cont, 0, 0);
+    lv_obj_set_flex_flow(s_menu_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_menu_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_gap(s_menu_cont, 20, 0);
 
-    lv_obj_t *btn = lv_btn_create(controls);
-    lv_obj_set_height(btn, 40);
-    lv_obj_add_style(btn, &style_sidebar_btn_checked, 0); 
-    lv_obj_add_event_cb(btn, on_scan_click, LV_EVENT_CLICKED, NULL);
+    // Button Style
+    static lv_style_t style_menu_btn;
+    static bool style_init = false;
+    if (!style_init) {
+        lv_style_init(&style_menu_btn);
+        lv_style_set_width(&style_menu_btn, 250);
+        lv_style_set_height(&style_menu_btn, 60);
+        lv_style_set_radius(&style_menu_btn, 10);
+        lv_style_set_bg_color(&style_menu_btn, lv_color_hex(0x333333));
+        lv_style_set_text_color(&style_menu_btn, lv_color_white());
+        style_init = true;
+    }
+
+    // 1. Manual
+    lv_obj_t *btn1 = lv_btn_create(s_menu_cont);
+    lv_obj_add_style(btn1, &style_menu_btn, 0);
+    lv_obj_t *lbl1 = lv_label_create(btn1);
+    lv_label_set_text(lbl1, "Manual Entry");
+    lv_obj_center(lbl1);
+    lv_obj_add_event_cb(btn1, on_manual_mode_click, LV_EVENT_CLICKED, NULL);
+
+    // 2. QR Code
+    lv_obj_t *btn2 = lv_btn_create(s_menu_cont);
+    lv_obj_add_style(btn2, &style_menu_btn, 0);
+    lv_obj_t *lbl2 = lv_label_create(btn2);
+    lv_label_set_text(lbl2, "QR Code Scan");
+    lv_obj_center(lbl2);
+    lv_obj_add_event_cb(btn2, on_qr_click, LV_EVENT_CLICKED, NULL);
+
+    // 3. AP Mode
+    lv_obj_t *btn3 = lv_btn_create(s_menu_cont);
+    lv_obj_add_style(btn3, &style_menu_btn, 0);
+    lv_obj_t *lbl3 = lv_label_create(btn3);
+    lv_label_set_text(lbl3, "AP Mode");
+    lv_obj_center(lbl3);
+    lv_obj_add_event_cb(btn3, on_ap_click, LV_EVENT_CLICKED, NULL);
     
-    s_scan_btn_label = lv_label_create(btn);
-    lv_label_set_text(s_scan_btn_label, "Scan Networks");
-    lv_obj_center(s_scan_btn_label);
+    // ================== MANUAL CONTAINER ==================
+    s_manual_cont = lv_obj_create(root);
+    lv_obj_set_size(s_manual_cont, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_opa(s_manual_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_manual_cont, 0, 0);
+    lv_obj_set_flex_flow(s_manual_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_add_flag(s_manual_cont, LV_OBJ_FLAG_HIDDEN); // Hide initially
 
-    // 2. Scan Results List
-    s_wifi_list = lv_obj_create(cont);
-    lv_obj_set_width(s_wifi_list, LV_PCT(100));
-    lv_obj_set_flex_grow(s_wifi_list, 1); // Fill remaining space
-    lv_obj_set_style_bg_opa(s_wifi_list, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(s_wifi_list, 0, 0);
-    lv_obj_set_flex_flow(s_wifi_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_gap(s_wifi_list, 10, 0);
+    // SSID
+    lv_obj_t *lbl_ssid = lv_label_create(s_manual_cont);
+    lv_label_set_text(lbl_ssid, "SSID:");
     
-    // Initial Scan
-    start_scan();
+    s_ta_ssid = lv_textarea_create(s_manual_cont);
+    lv_obj_set_width(s_ta_ssid, LV_PCT(80));
+    lv_textarea_set_one_line(s_ta_ssid, true);
+    lv_obj_add_event_cb(s_ta_ssid, ta_event_cb, LV_EVENT_ALL, NULL);
+
+    // Password
+    lv_obj_t *lbl_pass = lv_label_create(s_manual_cont);
+    lv_label_set_text(lbl_pass, "Password:");
+    
+    s_ta_pass = lv_textarea_create(s_manual_cont);
+    lv_obj_set_width(s_ta_pass, LV_PCT(80));
+    lv_textarea_set_password_mode(s_ta_pass, true);
+    lv_textarea_set_one_line(s_ta_pass, true);
+    lv_obj_add_event_cb(s_ta_pass, ta_event_cb, LV_EVENT_ALL, NULL);
+
+    // Buttons Row
+    lv_obj_t *row = lv_obj_create(s_manual_cont);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *btn_conn = lv_btn_create(row);
+    lv_label_set_text(lv_label_create(btn_conn), "Connect");
+    lv_obj_add_event_cb(btn_conn, manual_connect_click, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *btn_cancel = lv_btn_create(row);
+    lv_label_set_text(lv_label_create(btn_cancel), "Cancel");
+    lv_obj_add_event_cb(btn_cancel, manual_cancel_click, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_style_bg_color(btn_cancel, lv_color_hex(0x888888), 0);
+
+    // Keyboard (Global for page)
+    s_kb = lv_keyboard_create(root);
+    lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    
+    // We do NOT start scan automatically anymore.
 }
+
+/*
+static void start_scan(void) {
+    // ... kept for future use if we add a "Scan" button in manual mode ...
+    // Or we repurpose "Manual" to be "Scan List + Manual" later.
+    // For now, based on user request, it's just the 3 buttons.
+}
+*/

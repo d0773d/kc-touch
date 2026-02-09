@@ -110,11 +110,12 @@ static lv_obj_t* create_nav_btn(lv_obj_t *parent, const char* icon, const char* 
 
 // --- Main Init ---
 void ui_root_init(void) {
-    // 0. Init Theme System
+    // 0. Clean Screen & Init Theme
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_clean(scr);
     ui_theme_init();
     
     // 1. Master Container (The physical screen)
-    lv_obj_t *scr = lv_scr_act();
     lv_obj_add_style(scr, &style_screen, 0);
     lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_ROW); // Left-Right Split
     lv_obj_set_style_pad_all(scr, 0, 0);
