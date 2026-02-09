@@ -181,8 +181,12 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         switch (event_id) {
             case WIFI_EVENT_STA_START:
                 if (!s_is_provisioning) {
-                    esp_wifi_connect();
-                    kc_touch_display_set_status("Connecting...");
+                   if (!kc_touch_gui_is_scanning()) {
+                        esp_wifi_connect();
+                        kc_touch_display_set_status("Connecting...");
+                   } else {
+                        kc_touch_display_set_status("Ready to Scan");
+                   }
                 }
                 break;
             case WIFI_EVENT_STA_DISCONNECTED:
@@ -190,6 +194,13 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                     ESP_LOGI(TAG, "Disconnected ignored due to provisioning");
                     break;
                 }
+                
+                if (kc_touch_gui_is_scanning()) {
+                    ESP_LOGI(TAG, "Disconnected (Scanning Active) - Auto-reconnect skipped");
+                    kc_touch_display_set_status("Scanning Networks...");
+                    break;
+                }
+
                 if (s_retry_num < 5) {
                     esp_wifi_connect();
                     s_retry_num++;
@@ -253,6 +264,9 @@ void app_main(void)
         if (display_err != ESP_OK) {
             ESP_LOGE(TAG, "Display init failed (%s)", esp_err_to_name(display_err));
         } else {
+            // Display is ready, show the main UI
+            kc_touch_gui_show_root();
+            
             kc_touch_display_set_provisioning_cb(start_provisioning_callback, NULL);
         }
     }

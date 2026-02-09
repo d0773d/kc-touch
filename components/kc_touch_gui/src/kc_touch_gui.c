@@ -56,9 +56,20 @@ typedef struct {
     TaskHandle_t task;
     esp_timer_handle_t tick_timer;
     bool ready;
+    volatile bool scanning;
 } kc_touch_gui_runtime_t;
 
 static kc_touch_gui_runtime_t s_gui = {0};
+
+void kc_touch_gui_set_scanning(bool scanning)
+{
+    s_gui.scanning = scanning;
+}
+
+bool kc_touch_gui_is_scanning(void)
+{
+    return s_gui.scanning;
+}
 
 static bool kc_touch_gui_validate_config(const kc_touch_gui_config_t *cfg)
 {
@@ -110,19 +121,18 @@ static void kc_touch_gui_cleanup_partial(void)
     s_gui.ready = false;
 }
 
+#include "screens/ui_root.h"
+
 #if CONFIG_KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN
-static void kc_touch_gui_build_placeholder(void *ctx)
+static void kc_touch_gui_build_ui(void *ctx)
 {
     (void)ctx;
     lv_obj_t *screen = lv_scr_act();
     if (!screen) {
         return;
     }
-
-    lv_obj_clean(screen);
-    lv_obj_t *label = lv_label_create(screen);
-    lv_label_set_text(label, "KC Touch UI ready");
-    lv_obj_center(label);
+    // Initialize the new specialized root UI
+    ui_root_init();
 }
 #endif
 
@@ -179,10 +189,6 @@ esp_err_t kc_touch_gui_init(const kc_touch_gui_config_t *config)
     ESP_LOGI(TAG, "LVGL core initialized (stack=%" PRIu32 ", period=%" PRIu32 " ms)",
              s_gui.cfg.task_stack_size, s_gui.cfg.task_period_ms);
 
-#if CONFIG_KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN
-    (void)kc_touch_gui_dispatch(kc_touch_gui_build_placeholder, NULL, 0);
-#endif
-
     return ESP_OK;
 }
 
@@ -205,6 +211,17 @@ esp_err_t kc_touch_gui_dispatch(kc_touch_gui_work_cb_t cb, void *ctx, TickType_t
         return ESP_ERR_TIMEOUT;
     }
     return ESP_OK;
+}
+
+static void kc_touch_gui_build_ui_wrapper(void *ctx)
+{
+    (void)ctx;
+    ui_root_init();
+}
+
+void kc_touch_gui_show_root(void)
+{
+    kc_touch_gui_dispatch(kc_touch_gui_build_ui_wrapper, NULL, 0);
 }
 
 bool kc_touch_gui_is_ready(void)

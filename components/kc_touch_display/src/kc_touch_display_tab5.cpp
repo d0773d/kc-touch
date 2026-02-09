@@ -44,7 +44,11 @@ esp_err_t kc_touch_tab5_init_hw(void)
     cfg.fallback_board = m5::board_t::board_M5Tab5;
 
     M5.begin(cfg);
-    M5.Display.setRotation(0);
+    // Force Landscape (M5 connector on bottom/top)
+    M5.Display.setRotation(1);
+    // Ensure colors align with LVGL's output (often needs swap if LVGL doesn't swap)
+    // M5.Display.setColorDepth(16); 
+    
     auto brightness = M5.Display.getBrightness();
     if (brightness == 0) {
         brightness = s_tab5_prev_brightness;
@@ -88,19 +92,15 @@ bool kc_touch_tab5_touch_sample(uint16_t *x, uint16_t *y)
         return false;
     }
 
-    M5.update();
-    if (M5.Touch.getCount() == 0) {
-        return false;
+    // Use M5.Display.getTouch to respect rotation settings
+    int32_t tx = 0, ty = 0;
+    if (M5.Display.getTouch(&tx, &ty)) {
+        *x = clamp_coord(tx, M5.Display.width() - 1);
+        *y = clamp_coord(ty, M5.Display.height() - 1);
+        return true;
     }
 
-    auto detail = M5.Touch.getDetail();
-    if (!detail.isPressed()) {
-        return false;
-    }
-
-    *x = clamp_coord(detail.x, M5.Display.width() - 1);
-    *y = clamp_coord(detail.y, M5.Display.height() - 1);
-    return true;
+    return false;
 }
 
 esp_err_t kc_touch_tab5_backlight_set(bool enable)

@@ -28,7 +28,16 @@ esp_err_t kc_touch_gui_init(const kc_touch_gui_config_t *config);
 
 esp_err_t kc_touch_gui_dispatch(kc_touch_gui_work_cb_t cb, void *ctx, TickType_t ticks_to_wait);
 
+void kc_touch_gui_show_root(void);
+
 bool kc_touch_gui_is_ready(void);
+
+/** 
+ * Set/Get global scanning state.
+ * When scanning is active, the app should avoid auto-connecting to Wi-Fi.
+ */
+void kc_touch_gui_set_scanning(bool scanning);
+bool kc_touch_gui_is_scanning(void);
 
 #ifdef __cplusplus
 }

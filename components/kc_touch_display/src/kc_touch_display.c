@@ -122,13 +122,28 @@ static void kc_touch_display_register_lvgl(void *ctx)
     (void)ctx;
     lv_disp_draw_buf_init(&s_lv_draw_buf, s_lv_buf_a, s_lv_buf_b, BUFFER_PIXELS);
     lv_disp_drv_init(&s_lv_disp_drv);
-    s_lv_disp_drv.hor_res = DISPLAY_WIDTH;
-    s_lv_disp_drv.ver_res = DISPLAY_HEIGHT;
     s_lv_disp_drv.flush_cb = kc_touch_display_flush_cb;
     s_lv_disp_drv.draw_buf = &s_lv_draw_buf;
+
+    // Handle rotation by swapping resolutions and disabling LVGL software rotation
+    // This assumes the underlying hardware/driver (M5GFX) is already rotated.
+    lv_disp_rot_t rot = kc_touch_display_rotation();
+    if (rot == LV_DISP_ROT_90 || rot == LV_DISP_ROT_270) {
+        s_lv_disp_drv.hor_res = DISPLAY_HEIGHT;
+        s_lv_disp_drv.ver_res = DISPLAY_WIDTH;
+    } else {
+        s_lv_disp_drv.hor_res = DISPLAY_WIDTH;
+        s_lv_disp_drv.ver_res = DISPLAY_HEIGHT;
+    }
+
     s_lv_display = lv_disp_drv_register(&s_lv_disp_drv);
-    lv_disp_set_rotation(s_lv_display, kc_touch_display_rotation());
-    kc_touch_display_build_scene(NULL);
+    
+    // Force NONE because we handled rotation via resolution swap and M5GFX
+    lv_disp_set_rotation(s_lv_display, LV_DISP_ROT_NONE);
+    
+    // We do NOT build the default scene here anymore, because kc_touch_gui
+    // is responsible for launching the main application UI (ui_root).
+    // kc_touch_display_build_scene(NULL); 
 }
 
 #if CONFIG_KC_TOUCH_TOUCH_ENABLE
@@ -146,6 +161,7 @@ static void kc_touch_touch_read_cb(lv_indev_drv_t *indev_drv, lv_indev_data_t *d
     uint16_t x = 0;
     uint16_t y = 0;
     if (kc_touch_touch_sample(&x, &y)) {
+        // ESP_LOGI(TAG, "Touch: x=%d, y=%d", x, y);
         data->point.x = x;
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
