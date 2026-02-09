@@ -53,6 +53,13 @@ typedef void (*kc_touch_display_cancel_cb_t)(void *ctx);
  */
 esp_err_t kc_touch_display_set_cancel_cb(kc_touch_display_cancel_cb_t cb, void *ctx);
 
+/**
+ * @brief Reset internal UI text/button references.
+ * Call this when the screen is cleared or switched externally to prevent
+ * updates to invalid objects.
+ */
+void kc_touch_display_reset_ui_state(void);
+
 bool kc_touch_display_is_ready(void);
 bool kc_touch_touch_is_ready(void);
 

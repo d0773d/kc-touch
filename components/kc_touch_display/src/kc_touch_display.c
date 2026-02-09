@@ -57,51 +57,7 @@ static lv_disp_rot_t kc_touch_display_rotation(void)
 #endif
 }
 
-static void kc_touch_display_force_prov_event(lv_event_t *event)
-{
-    (void)event;
-    if (s_prov_cb) {
-        s_prov_cb(s_prov_ctx);
-    } else {
-        ESP_LOGW(TAG, "Provision button pressed but no callback registered");
-    }
-}
 
-static void kc_touch_display_build_scene(void *ctx)
-{
-    (void)ctx;
-    lv_obj_t *screen = lv_scr_act();
-    lv_obj_clean(screen);
-
-    lv_obj_t *title = lv_label_create(screen);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_48, 0);
-    lv_label_set_text(title, "KC Touch Console");
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 50);
-
-    s_status_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_align(s_status_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(s_status_label, "Waiting for Wi-Fi...");
-    lv_obj_align(s_status_label, LV_ALIGN_TOP_MID, 0, 130);
-
-    lv_obj_t *btn = lv_btn_create(screen);
-    lv_obj_set_size(btn, 400, 120);
-    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 20);
-    lv_obj_add_event_cb(btn, kc_touch_display_force_prov_event, LV_EVENT_CLICKED, NULL);
-    
-    lv_obj_t *btn_label = lv_label_create(btn);
-    lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_28, 0);
-    lv_label_set_text(btn_label, "Start Provisioning");
-    lv_obj_center(btn_label);
-
-    lv_obj_t *note = lv_label_create(screen);
-    lv_obj_set_style_text_font(note, &lv_font_montserrat_28, 0);
-    lv_label_set_text(note, "Tap above to configure Wi-Fi.");
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(note, DISPLAY_WIDTH - 40);
-    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -50);
-}
 
 static void kc_touch_display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
 {
@@ -371,6 +327,14 @@ esp_err_t kc_touch_display_set_status(const char *fmt, ...)
     return kc_touch_gui_dispatch(kc_touch_display_update_label_task, msg, 0);
 }
 
+void kc_touch_display_reset_ui_state(void)
+{
+    // These objects are destroyed by lv_obj_clean() in the UI layer.
+    // We must forget them to avoid use-after-free in async tasks.
+    s_status_label = NULL;
+    s_prov_back_btn = NULL;
+}
+
 bool kc_touch_display_is_ready(void)
 {
     return s_display_ready;
@@ -422,6 +386,10 @@ esp_err_t kc_touch_display_set_status(const char *fmt, ...)
 {
     (void)fmt;
     return ESP_ERR_NOT_SUPPORTED;
+}
+
+void kc_touch_display_reset_ui_state(void)
+{
 }
 
 bool kc_touch_display_is_ready(void)

@@ -13,6 +13,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/event_groups.h>
+#include <freertos/timers.h>
 
 #include <esp_log.h>
 #include <esp_wifi.h>
@@ -34,12 +35,21 @@ static char prov_qr_payload[256];
 
 static const char *TAG = "app";
 
+#define STA_CONNECT_DELAY_MS 2000
+
 
 /* Signal Wi-Fi events on this event-group */
 const int WIFI_CONNECTED_EVENT = BIT0;
 static EventGroupHandle_t wifi_event_group;
 static bool s_is_provisioning = false;
 static int s_retry_num = 0;
+static TimerHandle_t s_sta_connect_timer;
+static wifi_config_t s_saved_sta_cfg;
+static bool s_has_saved_sta_cfg;
+static bool s_restore_sta_cfg;
+
+static void schedule_sta_connect(uint32_t delay_ms);
+static void sta_connect_timer_cb(TimerHandle_t xTimer);
 
 /* Handler for provisioning events */
 static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
@@ -75,6 +85,8 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
                 ESP_LOGI(TAG, "Provisioning successful");
                 kc_touch_display_set_status("Provisioning Successful\nVerifying...");
                 kc_touch_display_prov_enable_back(true);
+                s_restore_sta_cfg = false;
+                s_has_saved_sta_cfg = false;
                 break;
             case WIFI_PROV_END:
                 /* De-initialize manager once provisioning is finished */
@@ -89,16 +101,96 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
                      kc_touch_display_set_status("Online\nIP: " IPSTR, IP2STR(&ip_info.ip));
                      xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_EVENT);
                 } else {
-                     /* Not connected, force a reconnect attempt */
-                     ESP_LOGI(TAG, "Provisioning ended. Connecting to Wi-Fi...");
-                     kc_touch_display_set_status("Connecting...");
-                     esp_wifi_connect();
+                     /* Not connected, transition back to Station mode */
+                     ESP_LOGI(TAG, "Provisioning ended. Resetting to Station mode...");
+                     kc_touch_display_set_status("Resetting Wi-Fi...");
+                     
+                     if (s_restore_sta_cfg && s_has_saved_sta_cfg) {
+                         esp_err_t restore_err = esp_wifi_set_config(WIFI_IF_STA, &s_saved_sta_cfg);
+                         if (restore_err == ESP_OK) {
+                             ESP_LOGI(TAG, "Restored cached STA credentials for SSID: %s", (const char *)s_saved_sta_cfg.sta.ssid);
+                         } else {
+                             ESP_LOGW(TAG, "Failed to restore cached STA credentials: %s", esp_err_to_name(restore_err));
+                         }
+                         s_restore_sta_cfg = false;
+                     }
+
+                     /* Reset Wi-Fi state to force fresh STA restart */
+                     esp_err_t stop_err = esp_wifi_stop();
+                     if (stop_err != ESP_OK && stop_err != ESP_ERR_WIFI_NOT_INIT && stop_err != ESP_ERR_WIFI_STOP_STATE) {
+                         ESP_LOGW(TAG, "esp_wifi_stop after provisioning failed: %s", esp_err_to_name(stop_err));
+                     }
+
+                     esp_err_t null_err = esp_wifi_set_mode(WIFI_MODE_NULL);
+                     if (null_err != ESP_OK) {
+                         ESP_LOGW(TAG, "esp_wifi_set_mode(NULL) failed: %s", esp_err_to_name(null_err));
+                     }
+
+                     vTaskDelay(pdMS_TO_TICKS(200));
+
+                     esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_STA);
+                     if (mode_err != ESP_OK) {
+                         ESP_LOGE(TAG, "esp_wifi_set_mode(STA) failed: %s", esp_err_to_name(mode_err));
+                     }
+
+                     esp_err_t start_err = esp_wifi_start();
+                     if (start_err != ESP_OK && start_err != ESP_ERR_WIFI_CONN) {
+                         ESP_LOGW(TAG, "esp_wifi_start after provisioning failed: %s", esp_err_to_name(start_err));
+                     }
                 }
                 break;
             default:
                 break;
         }
     }
+}
+
+static void sta_connect_timer_cb(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+
+    if (s_is_provisioning) {
+        ESP_LOGI(TAG, "STA connect timer fired but provisioning is active");
+        return;
+    }
+
+    if (kc_touch_gui_is_scanning()) {
+        ESP_LOGI(TAG, "STA connect timer skipped (scan UI active)");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Calling esp_wifi_connect() after delayed STA start");
+    esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_connect (delayed) failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    kc_touch_display_set_status("Connecting...");
+}
+
+static void schedule_sta_connect(uint32_t delay_ms)
+{
+    if (!s_sta_connect_timer) {
+        ESP_LOGW(TAG, "STA connect timer not initialized");
+        return;
+    }
+
+    if (xTimerIsTimerActive(s_sta_connect_timer)) {
+        xTimerStop(s_sta_connect_timer, 0);
+    }
+
+    if (xTimerChangePeriod(s_sta_connect_timer, pdMS_TO_TICKS(delay_ms), 0) != pdPASS) {
+        ESP_LOGW(TAG, "Failed to update STA connect timer period");
+        return;
+    }
+
+    if (xTimerStart(s_sta_connect_timer, 0) != pdPASS) {
+        ESP_LOGW(TAG, "Failed to start STA connect timer");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Scheduled STA connect in %u ms", (unsigned)delay_ms);
 }
 
 /* Function to start provisioning manually - to be called by button press */
@@ -141,6 +233,20 @@ void start_wifi_provisioning(void)
     
     s_is_provisioning = true;
     s_retry_num = 0;
+    s_restore_sta_cfg = false;
+
+    wifi_config_t current_cfg = {0};
+    esp_err_t cfg_err = esp_wifi_get_config(WIFI_IF_STA, &current_cfg);
+    if (cfg_err == ESP_OK && current_cfg.sta.ssid[0] != 0) {
+        s_saved_sta_cfg = current_cfg;
+        s_has_saved_sta_cfg = true;
+        ESP_LOGI(TAG, "Cached STA credentials for SSID: %s", (const char *)current_cfg.sta.ssid);
+    } else {
+        if (cfg_err != ESP_OK) {
+            ESP_LOGW(TAG, "esp_wifi_get_config failed: %s", esp_err_to_name(cfg_err));
+        }
+        s_has_saved_sta_cfg = false;
+    }
     /* Force disconnect to ensure clean slate for provisioning */
     esp_wifi_disconnect();
 
@@ -179,11 +285,15 @@ static void start_provisioning_callback(void *ctx)
 static void cancel_provisioning_callback(void *ctx)
 {
     ESP_LOGI(TAG, "Provisioning cancelled by user");
+    
+    /* Safely detach from the Provisioning UI elements before they are destroyed */
+    kc_touch_display_reset_ui_state();
+
+    s_restore_sta_cfg = true;
+
+    // Stopping provisioning triggers WIFI_PROV_END, which handles cleanup and reconnection
     wifi_prov_mgr_stop_provisioning();
-    // Returning to root is handled by the display if we don't do it here,
-    // but the display won't know we stopped provisioning unless we tell it.
-    // Actually, kc_touch_display calls this callback.
-    // If we want to return to root, we should do:
+    // Return to root UI immediately
     kc_touch_gui_show_root();
 }
 
@@ -195,10 +305,10 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         switch (event_id) {
             case WIFI_EVENT_STA_START:
                 if (!s_is_provisioning) {
-                   if (!kc_touch_gui_is_scanning()) {
-                        esp_wifi_connect();
-                        kc_touch_display_set_status("Connecting...");
-                   } else {
+                    if (!kc_touch_gui_is_scanning()) {
+                        kc_touch_display_set_status("Preparing Wi-Fi...");
+                        schedule_sta_connect(STA_CONNECT_DELAY_MS);
+                    } else {
                         kc_touch_display_set_status("Ready to Scan");
                    }
                 }
@@ -267,6 +377,15 @@ void app_main(void)
     /* Initialize the event loop */
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_event_group = xEventGroupCreate();
+
+    s_sta_connect_timer = xTimerCreate("sta_conn",
+                                       pdMS_TO_TICKS(STA_CONNECT_DELAY_MS),
+                                       pdFALSE,
+                                       NULL,
+                                       sta_connect_timer_cb);
+    if (!s_sta_connect_timer) {
+        ESP_LOGE(TAG, "Failed to create STA connect timer");
+    }
 
     /* Initialize display early to setup I2C (M5Unified) */
     kc_touch_gui_config_t gui_cfg = kc_touch_gui_default_config();
