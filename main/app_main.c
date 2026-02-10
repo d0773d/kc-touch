@@ -26,6 +26,7 @@
 
 #include "kc_touch_gui.h"
 #include "kc_touch_display.h"
+#include "kc_touch_camera.h"
 #include "wifi_copro_hw.h"
 #include "wifi_copro_power.h"
 #include "wifi_copro_transport.h"
@@ -403,6 +404,15 @@ void app_main(void)
             kc_touch_display_set_provisioning_cb(start_provisioning_callback, NULL);
             kc_touch_gui_set_provisioning_cb(start_provisioning_callback, NULL);
             kc_touch_display_set_cancel_cb(cancel_provisioning_callback, NULL);
+
+            esp_err_t camera_err = kc_touch_camera_init();
+            bool camera_ready = (camera_err == ESP_OK);
+            kc_touch_gui_set_camera_ready(camera_ready);
+            if (!camera_ready) {
+                ESP_LOGE(TAG, "Camera init failed (%s)", esp_err_to_name(camera_err));
+            } else {
+                ESP_LOGI(TAG, "Camera driver initialized");
+            }
         }
     }
 
