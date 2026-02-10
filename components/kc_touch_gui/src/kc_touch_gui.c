@@ -57,6 +57,7 @@ typedef struct {
     esp_timer_handle_t tick_timer;
     bool ready;
     volatile bool scanning;
+    bool camera_ready;
     kc_touch_gui_prov_cb_t prov_cb;
     void *prov_ctx;
 } kc_touch_gui_runtime_t;
@@ -86,6 +87,16 @@ void kc_touch_gui_set_scanning(bool scanning)
 bool kc_touch_gui_is_scanning(void)
 {
     return s_gui.scanning;
+}
+
+void kc_touch_gui_set_camera_ready(bool ready)
+{
+    s_gui.camera_ready = ready;
+}
+
+bool kc_touch_gui_camera_ready(void)
+{
+    return s_gui.camera_ready;
 }
 
 static bool kc_touch_gui_validate_config(const kc_touch_gui_config_t *cfg)
@@ -263,6 +274,16 @@ esp_err_t kc_touch_gui_dispatch(kc_touch_gui_work_cb_t cb, void *ctx, TickType_t
 }
 
 bool kc_touch_gui_is_ready(void)
+{
+    return false;
+}
+
+void kc_touch_gui_set_camera_ready(bool ready)
+{
+    (void)ready;
+}
+
+bool kc_touch_gui_camera_ready(void)
 {
     return false;
 }
