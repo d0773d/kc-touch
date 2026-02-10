@@ -893,6 +893,7 @@ static const char* qr_start_session(void)
 }
 
 // Render RGB565 camera frame directly to preview (no grayscale roundtrip)
+// Byte-swap each pixel: MIPI-CSI camera may output big-endian RGB565
 static void qr_render_preview_rgb565(const uint8_t *frame, uint32_t src_w, uint32_t src_h, uint32_t stride)
 {
     if (!frame || !s_qr_preview_work_buf || src_w == 0 || src_h == 0) {
@@ -904,11 +905,15 @@ static void qr_render_preview_rgb565(const uint8_t *frame, uint32_t src_w, uint3
         if (s_qr_stop_flag) return;
         uint32_t sy = (uint64_t)py * src_h / QR_PREVIEW_HEIGHT;
         if (sy >= src_h) sy = src_h - 1;
-        const uint16_t *src_row = (const uint16_t *)(frame + sy * stride);
+        const uint8_t *src_row = frame + sy * stride;
         for (uint32_t px = 0; px < QR_PREVIEW_WIDTH; ++px) {
             uint32_t sx = (uint64_t)px * src_w / QR_PREVIEW_WIDTH;
             if (sx >= src_w) sx = src_w - 1;
-            dest[py * QR_PREVIEW_WIDTH + px] = src_row[sx];
+            // Read as two bytes and assemble as little-endian
+            // This handles any byte-order issues with mmap'd DMA buffers
+            uint32_t byte_off = sx * 2;
+            uint16_t pixel = src_row[byte_off] | ((uint16_t)src_row[byte_off + 1] << 8);
+            dest[py * QR_PREVIEW_WIDTH + px] = pixel;
         }
     }
 }
