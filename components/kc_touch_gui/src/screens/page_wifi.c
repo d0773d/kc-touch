@@ -893,7 +893,9 @@ static const char* qr_start_session(void)
 }
 
 // Render RGB565 camera frame directly to preview (no grayscale roundtrip)
-// Byte-swap each pixel: MIPI-CSI camera may output big-endian RGB565
+// Render RGB565 camera frame directly to preview buffer.
+// LV_COLOR_16_SWAP=y means LVGL stores pixels byte-swapped (big-endian RGB565).
+// Camera outputs native little-endian RGB565.  We must byte-swap each pixel.
 static void qr_render_preview_rgb565(const uint8_t *frame, uint32_t src_w, uint32_t src_h, uint32_t stride)
 {
     if (!frame || !s_qr_preview_work_buf || src_w == 0 || src_h == 0) {
@@ -909,11 +911,11 @@ static void qr_render_preview_rgb565(const uint8_t *frame, uint32_t src_w, uint3
         for (uint32_t px = 0; px < QR_PREVIEW_WIDTH; ++px) {
             uint32_t sx = (uint64_t)px * src_w / QR_PREVIEW_WIDTH;
             if (sx >= src_w) sx = src_w - 1;
-            // Read as two bytes and assemble as little-endian
-            // This handles any byte-order issues with mmap'd DMA buffers
             uint32_t byte_off = sx * 2;
-            uint16_t pixel = src_row[byte_off] | ((uint16_t)src_row[byte_off + 1] << 8);
-            dest[py * QR_PREVIEW_WIDTH + px] = pixel;
+            uint8_t lo = src_row[byte_off];
+            uint8_t hi = src_row[byte_off + 1];
+            // Swap bytes for LVGL's LV_COLOR_16_SWAP=y (big-endian storage)
+            dest[py * QR_PREVIEW_WIDTH + px] = ((uint16_t)lo << 8) | hi;
         }
     }
 }
@@ -943,23 +945,9 @@ static void qr_frame_operation_cb(uint8_t *frame, uint8_t buf_idx, uint32_t widt
         frame_log_count++;
     }
     
-    // Invalidate cache to ensure we read fresh DMA data from camera
-    size_t cache_line_size = 64;
-    void *aligned_addr = (void*)((uintptr_t)frame & ~(cache_line_size - 1));
-    size_t offset = (uintptr_t)frame - (uintptr_t)aligned_addr;
-    size_t aligned_size = ((size + offset + cache_line_size - 1) / cache_line_size) * cache_line_size;
-    
-    esp_err_t sync_err = esp_cache_msync(aligned_addr, aligned_size, 
-                                         ESP_CACHE_MSYNC_FLAG_DIR_M2C | 
-                                         ESP_CACHE_MSYNC_FLAG_INVALIDATE);
-    if (sync_err != ESP_OK) {
-        static bool logged_sync_err = false;
-        if (!logged_sync_err) {
-            ESP_LOGW(TAG, "Cache sync failed: %s (addr=%p, size=%u)", 
-                     esp_err_to_name(sync_err), aligned_addr, (unsigned)aligned_size);
-            logged_sync_err = true;
-        }
-    }
+    // NOTE: Do NOT call esp_cache_msync on mmap'd V4L2 DMA buffers.
+    // On ESP32-P4, the V4L2 driver's mmap returns non-cacheable DMA memory.
+    // Cache sync on such memory either fails or corrupts data.
     
     // Use saved stride from format query (bytesperline), not width*2
     uint32_t stride = s_stride ? s_stride : width * 2;
