@@ -35,10 +35,10 @@ static lv_obj_t *s_page_root = NULL;
 #define QR_PREVIEW_HEIGHT        240
 #define QR_PREVIEW_BPP           2
 #define QR_PREVIEW_BUF_SIZE      (QR_PREVIEW_WIDTH * QR_PREVIEW_HEIGHT * QR_PREVIEW_BPP)
-#define QR_DECODE_TARGET_WIDTH   320
-#define QR_DECODE_TARGET_HEIGHT  240
-#define QR_DECODE_MIN_WIDTH      160
-#define QR_DECODE_MIN_HEIGHT     120
+#define QR_DECODE_TARGET_WIDTH   640
+#define QR_DECODE_TARGET_HEIGHT  480
+#define QR_DECODE_MIN_WIDTH      320
+#define QR_DECODE_MIN_HEIGHT     180
 #define QR_CONVERT_YIELD_ROWS    1
 #define QR_CONVERT_CHUNK_PIXELS  64
 #define QR_V4L2_BUFFER_COUNT     3
@@ -537,7 +537,8 @@ static void qr_convert_frame_to_gray(const uint8_t *src,
         if (s_qr_stop_flag) {
             return;
         }
-        uint32_t sy = (uint64_t)dy * src_height / dst_height;
+        // Flip vertically: camera is mounted upside-down (180° rotation)
+        uint32_t sy = (uint64_t)(dst_height - 1 - dy) * src_height / dst_height;
         if (sy >= src_height) {
             sy = src_height - 1;
         }
@@ -549,7 +550,8 @@ static void qr_convert_frame_to_gray(const uint8_t *src,
                 chunk_end = dst_width;
             }
             for (; dx < chunk_end; ++dx) {
-                uint32_t sx = (uint64_t)dx * src_width / dst_width;
+                // Flip horizontally: camera is mounted upside-down (180° rotation)
+                uint32_t sx = (uint64_t)(dst_width - 1 - dx) * src_width / dst_width;
                 if (sx >= src_width) {
                     sx = src_width - 1;
                 }
@@ -905,11 +907,13 @@ static void qr_render_preview_rgb565(const uint8_t *frame, uint32_t src_w, uint3
     uint16_t *dest = (uint16_t *)s_qr_preview_work_buf;
     for (uint32_t py = 0; py < QR_PREVIEW_HEIGHT; ++py) {
         if (s_qr_stop_flag) return;
-        uint32_t sy = (uint64_t)py * src_h / QR_PREVIEW_HEIGHT;
+        // Flip vertically: camera is mounted upside-down
+        uint32_t sy = (uint64_t)(QR_PREVIEW_HEIGHT - 1 - py) * src_h / QR_PREVIEW_HEIGHT;
         if (sy >= src_h) sy = src_h - 1;
         const uint8_t *src_row = frame + sy * stride;
         for (uint32_t px = 0; px < QR_PREVIEW_WIDTH; ++px) {
-            uint32_t sx = (uint64_t)px * src_w / QR_PREVIEW_WIDTH;
+            // Flip horizontally: camera is mounted upside-down (180° rotation)
+            uint32_t sx = (uint64_t)(QR_PREVIEW_WIDTH - 1 - px) * src_w / QR_PREVIEW_WIDTH;
             if (sx >= src_w) sx = src_w - 1;
             uint32_t byte_off = sx * 2;
             uint8_t lo = src_row[byte_off];
@@ -982,14 +986,42 @@ static void qr_frame_operation_cb(uint8_t *frame, uint8_t buf_idx, uint32_t widt
                              s_decode_width,
                              s_decode_height,
                              gray);
+    
+    // Measure grayscale range BEFORE quirc_end (which binarizes the buffer)
+    int total_pixels = img_w * img_h;
+    uint8_t g_min = 255, g_max = 0;
+    for (int si = 0; si < total_pixels; si += total_pixels / 200 + 1) {
+        uint8_t g = gray[si];
+        if (g < g_min) g_min = g;
+        if (g > g_max) g_max = g;
+    }
+    
+    // Apply contrast stretching to improve quirc decode accuracy
+    // Stretch the actual grayscale range to 0..255 for better thresholding
+    if (g_max > g_min && (g_max - g_min) < 200) {
+        uint32_t range = g_max - g_min;
+        for (int si = 0; si < total_pixels; ++si) {
+            uint32_t v = gray[si];
+            v = (v <= g_min) ? 0 : ((v >= g_max) ? 255 : ((v - g_min) * 255 / range));
+            gray[si] = (uint8_t)v;
+        }
+    }
+    
     quirc_end(s_decoder);
     
     // Try to decode QR codes
     bool matched = false;
     int codes = quirc_count(s_decoder);
+    static int decode_log_count = 0;
+    if (decode_log_count < 20 || codes > 0) {
+        ESP_LOGI(TAG, "quirc_count=%d (frame %d) gray_range=[%u..%u]", codes, decode_log_count, g_min, g_max);
+        decode_log_count++;
+    }
     for (int i = 0; i < codes; ++i) {
         quirc_extract(s_decoder, i, s_code);
-        if (quirc_decode(s_code, s_data) == QUIRC_SUCCESS) {
+        quirc_decode_error_t err = quirc_decode(s_code, s_data);
+        if (err == QUIRC_SUCCESS) {
+            ESP_LOGI(TAG, "QR decoded: len=%d payload=%.64s", s_data->payload_len, (char *)s_data->payload);
             qr_wifi_creds_t creds;
             if (qr_parse_wifi_payload((const char *)s_data->payload, s_data->payload_len, &creds)) {
                 qr_wifi_creds_t *copy = malloc(sizeof(qr_wifi_creds_t));
@@ -1013,6 +1045,8 @@ static void qr_frame_operation_cb(uint8_t *frame, uint8_t buf_idx, uint32_t widt
                 matched = true;
                 break;
             }
+        } else {
+            ESP_LOGW(TAG, "quirc_decode error: %s", quirc_strerror(err));
         }
     }
 }
