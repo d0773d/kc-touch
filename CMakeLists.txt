@@ -8,4 +8,4 @@ idf_build_set_property(MINIMAL_BUILD ON)
 
 
 
-project(kc-touch)
+project(YamUI)
