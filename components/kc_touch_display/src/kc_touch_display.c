@@ -9,7 +9,6 @@
 #include "kc_touch_display_tab5.h"
 #include "kc_touch_gui.h"
 #include "lvgl.h"
-#include "extra/libs/qrcode/lv_qrcode.h"
 #include "sdkconfig.h"
 
 #if CONFIG_KC_TOUCH_DISPLAY_ENABLE
@@ -23,9 +22,7 @@ _Static_assert(BUFFER_LINES <= DISPLAY_HEIGHT, "LVGL buffer must not exceed pane
 
 static const char *TAG = "kc_touch_display";
 
-static lv_disp_t *s_lv_display;
-static lv_disp_draw_buf_t s_lv_draw_buf;
-static lv_disp_drv_t s_lv_disp_drv;
+static lv_display_t *s_lv_display;
 static bool s_display_ready;
 static lv_color_t s_lv_buf_a[BUFFER_PIXELS];
 static lv_color_t s_lv_buf_b[BUFFER_PIXELS];
@@ -38,71 +35,72 @@ static lv_obj_t *s_prov_back_btn = NULL;
 
 #if CONFIG_KC_TOUCH_TOUCH_ENABLE
 static lv_indev_t *s_touch_indev;
-static lv_indev_drv_t s_touch_drv;
 static bool s_touch_ready;
 #endif
 
-static lv_disp_rot_t kc_touch_display_rotation(void)
+static lv_display_rotation_t kc_touch_display_rotation(void)
 {
 #if defined(CONFIG_KC_TOUCH_DISPLAY_ROTATION_0) && CONFIG_KC_TOUCH_DISPLAY_ROTATION_0
-    return LV_DISP_ROT_NONE;
+    return LV_DISPLAY_ROTATION_0;
 #elif defined(CONFIG_KC_TOUCH_DISPLAY_ROTATION_90) && CONFIG_KC_TOUCH_DISPLAY_ROTATION_90
-    return LV_DISP_ROT_90;
+    return LV_DISPLAY_ROTATION_90;
 #elif defined(CONFIG_KC_TOUCH_DISPLAY_ROTATION_180) && CONFIG_KC_TOUCH_DISPLAY_ROTATION_180
-    return LV_DISP_ROT_180;
+    return LV_DISPLAY_ROTATION_180;
 #elif defined(CONFIG_KC_TOUCH_DISPLAY_ROTATION_270) && CONFIG_KC_TOUCH_DISPLAY_ROTATION_270
-    return LV_DISP_ROT_270;
+    return LV_DISPLAY_ROTATION_270;
 #else
-    return LV_DISP_ROT_NONE;
+    return LV_DISPLAY_ROTATION_0;
 #endif
 }
 
-
-
-static void kc_touch_display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
+static void kc_touch_display_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
-    if (!area || !color_p) {
-        lv_disp_flush_ready(disp_drv);
+    if (!area || !px_map) {
+        lv_display_flush_ready(disp);
         return;
     }
     if (area->x2 < area->x1 || area->y2 < area->y1) {
-        lv_disp_flush_ready(disp_drv);
+        lv_display_flush_ready(disp);
         return;
     }
+    lv_color_t *color_p = (lv_color_t *)px_map;
+#if CONFIG_LV_COLOR_DEPTH == 16
+    // Swap RGB565 byte order for the Tab5 panel (replacement for deprecated LV_COLOR_16_SWAP)
+    lv_draw_sw_rgb565_swap(color_p, lv_area_get_size(area));
+#endif
     esp_err_t err = kc_touch_tab5_flush(area->x1, area->y1, area->x2, area->y2, color_p);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Panel flush failed (%s)", esp_err_to_name(err));
     }
-    lv_disp_flush_ready(disp_drv);
+    lv_display_flush_ready(disp);
 }
 
 static void kc_touch_display_register_lvgl(void *ctx)
 {
     (void)ctx;
-    lv_disp_draw_buf_init(&s_lv_draw_buf, s_lv_buf_a, s_lv_buf_b, BUFFER_PIXELS);
-    lv_disp_drv_init(&s_lv_disp_drv);
-    s_lv_disp_drv.flush_cb = kc_touch_display_flush_cb;
-    s_lv_disp_drv.draw_buf = &s_lv_draw_buf;
+    lv_display_rotation_t rot = kc_touch_display_rotation();
+    int32_t hor_res = (rot == LV_DISPLAY_ROTATION_90 || rot == LV_DISPLAY_ROTATION_270) ? DISPLAY_HEIGHT : DISPLAY_WIDTH;
+    int32_t ver_res = (rot == LV_DISPLAY_ROTATION_90 || rot == LV_DISPLAY_ROTATION_270) ? DISPLAY_WIDTH : DISPLAY_HEIGHT;
 
-    // Handle rotation by swapping resolutions and disabling LVGL software rotation
-    // This assumes the underlying hardware/driver (M5GFX) is already rotated.
-    lv_disp_rot_t rot = kc_touch_display_rotation();
-    if (rot == LV_DISP_ROT_90 || rot == LV_DISP_ROT_270) {
-        s_lv_disp_drv.hor_res = DISPLAY_HEIGHT;
-        s_lv_disp_drv.ver_res = DISPLAY_WIDTH;
-    } else {
-        s_lv_disp_drv.hor_res = DISPLAY_WIDTH;
-        s_lv_disp_drv.ver_res = DISPLAY_HEIGHT;
+    s_lv_display = lv_display_create(hor_res, ver_res);
+    if (!s_lv_display) {
+        ESP_LOGE(TAG, "Failed to create LVGL display");
+        return;
     }
 
-    s_lv_display = lv_disp_drv_register(&s_lv_disp_drv);
-    
-    // Force NONE because we handled rotation via resolution swap and M5GFX
-    lv_disp_set_rotation(s_lv_display, LV_DISP_ROT_NONE);
-    
+    lv_display_set_color_format(s_lv_display, LV_COLOR_FORMAT_RGB565);
+    lv_display_set_render_mode(s_lv_display, LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_flush_cb(s_lv_display, kc_touch_display_flush_cb);
+
+    size_t buffer_bytes = sizeof(s_lv_buf_a);
+    lv_display_set_buffers(s_lv_display, s_lv_buf_a, s_lv_buf_b, buffer_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+
+    // Force 0-degree rotation because hardware rotation is handled externally
+    lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_0);
+
     // We do NOT build the default scene here anymore, because kc_touch_gui
     // is responsible for launching the main application UI (ui_root).
-    // kc_touch_display_build_scene(NULL); 
+    // kc_touch_display_build_scene(NULL);
 }
 
 #if CONFIG_KC_TOUCH_TOUCH_ENABLE
@@ -114,9 +112,9 @@ static bool kc_touch_touch_sample(uint16_t *x, uint16_t *y)
     return kc_touch_tab5_touch_sample(x, y);
 }
 
-static void kc_touch_touch_read_cb(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
+static void kc_touch_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
-    (void)indev_drv;
+    (void)indev;
     uint16_t x = 0;
     uint16_t y = 0;
     if (kc_touch_touch_sample(&x, &y)) {
@@ -135,10 +133,14 @@ static void kc_touch_touch_register_lvgl(void *ctx)
     if (!s_lv_display) {
         return;
     }
-    lv_indev_drv_init(&s_touch_drv);
-    s_touch_drv.type = LV_INDEV_TYPE_POINTER;
-    s_touch_drv.read_cb = kc_touch_touch_read_cb;
-    s_touch_indev = lv_indev_drv_register(&s_touch_drv);
+    s_touch_indev = lv_indev_create();
+    if (!s_touch_indev) {
+        ESP_LOGE(TAG, "Failed to create touch input device");
+        return;
+    }
+    lv_indev_set_type(s_touch_indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(s_touch_indev, kc_touch_touch_read_cb);
+    lv_indev_set_display(s_touch_indev, s_lv_display);
 }
 
 static esp_err_t kc_touch_touch_init(void)
@@ -254,7 +256,10 @@ static void kc_touch_display_show_qr_task(void *ctx)
     int qr_size = 400;
     if (DISPLAY_WIDTH < 480 || DISPLAY_HEIGHT < 480) qr_size = 200; // Constrain for smaller screens
 
-    lv_obj_t * qr = lv_qrcode_create(lcd_scr, qr_size, lv_color_black(), lv_color_white());
+    lv_obj_t * qr = lv_qrcode_create(lcd_scr);
+    lv_qrcode_set_size(qr, qr_size);
+    lv_qrcode_set_dark_color(qr, lv_color_black());
+    lv_qrcode_set_light_color(qr, lv_color_white());
     lv_qrcode_update(qr, payload, strlen(payload));
     lv_obj_center(qr);
     lv_obj_align(qr, LV_ALIGN_CENTER, 0, -30); // Shift up slightly to leave room for text

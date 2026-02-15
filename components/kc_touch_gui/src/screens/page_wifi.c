@@ -260,7 +260,8 @@ static void start_scan(void) {
     if(s_wifi_list) lv_obj_clean(s_wifi_list);
     
     // Add spinner
-    lv_obj_t *spinner = lv_spinner_create(s_wifi_list, 1000, 60);
+    lv_obj_t *spinner = lv_spinner_create(s_wifi_list);
+    lv_spinner_set_anim_params(spinner, 1000, 60);
     lv_obj_set_size(spinner, 40, 40);
     lv_obj_center(spinner);
 
@@ -812,10 +813,11 @@ static bool qr_create_overlay(void)
     }
 
     memset(&s_qr_preview_dsc, 0, sizeof(s_qr_preview_dsc));
-    s_qr_preview_dsc.header.always_zero = 0;
+    s_qr_preview_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    s_qr_preview_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
     s_qr_preview_dsc.header.w = QR_PREVIEW_WIDTH;
     s_qr_preview_dsc.header.h = QR_PREVIEW_HEIGHT;
-    s_qr_preview_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+    s_qr_preview_dsc.header.stride = QR_PREVIEW_WIDTH * QR_PREVIEW_BPP;
     s_qr_preview_dsc.data = s_qr_preview_disp_buf;
     s_qr_preview_dsc.data_size = QR_PREVIEW_BUF_SIZE;
 
@@ -838,7 +840,8 @@ static bool qr_create_overlay(void)
     lv_obj_set_style_border_color(s_qr_preview_img, lv_color_hex(0x555555), 0);
     lv_obj_set_style_border_width(s_qr_preview_img, 2, 0);
 
-    s_qr_spinner = lv_spinner_create(s_qr_overlay, 1000, 60);
+    s_qr_spinner = lv_spinner_create(s_qr_overlay);
+    lv_spinner_set_anim_params(s_qr_spinner, 1000, 60);
     lv_obj_set_size(s_qr_spinner, 60, 60);
 
     s_qr_status_label = lv_label_create(s_qr_overlay);
@@ -1190,11 +1193,10 @@ static void on_qr_click(lv_event_t *e) {
     (void)e;
     const char* error = qr_start_session();
     if (error) {
-        lv_obj_t *msgbox = lv_msgbox_create(NULL,
-                                            "QR Scanner Error",
-                                            error,
-                                            NULL,
-                                            true);
+        lv_obj_t *msgbox = lv_msgbox_create(NULL);
+        lv_msgbox_add_title(msgbox, "QR Scanner Error");
+        lv_msgbox_add_text(msgbox, error);
+        lv_msgbox_add_close_button(msgbox);
         lv_obj_center(msgbox);
     }
 }
