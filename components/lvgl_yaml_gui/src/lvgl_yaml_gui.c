@@ -114,7 +114,14 @@ static const char *yui_resolve_token(const sensor_record_t *sensor, const char *
         return sensor->id;
     }
     if (strcmp(token, "type") == 0) {
-        return sensor_manager_kind_name(sensor->kind);
+        return sensor->type;
+    }
+    if (strcmp(token, "firmware") == 0) {
+        return sensor->firmware;
+    }
+    if (strcmp(token, "address") == 0) {
+        snprintf(scratch, scratch_len, "0x%02X", sensor->address);
+        return scratch;
     }
     return "";
 }
@@ -221,7 +228,10 @@ static esp_err_t yui_render_schema(const yui_schema_t *schema)
         return ESP_ERR_NOT_FOUND;
     }
 
-    sensor_manager_tick();
+    esp_err_t sensor_err = sensor_manager_update();
+    if (sensor_err != ESP_OK) {
+        ESP_LOGW(TAG, "Sensor update failed (%s)", esp_err_to_name(sensor_err));
+    }
 
     lv_obj_t *screen = lv_scr_act();
     if (!screen) {
@@ -248,7 +258,7 @@ static esp_err_t yui_render_schema(const yui_schema_t *schema)
     lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
     for (size_t i = 0; i < sensor_count; ++i) {
-        const char *type_name = sensor_manager_kind_name(sensors[i].kind);
+        const char *type_name = sensors[i].type[0] != '\0' ? sensors[i].type : "unknown";
         const yui_template_t *tpl = yui_schema_get_template(schema, type_name);
         if (!tpl) {
             ESP_LOGW(TAG, "No template defined for sensor type '%s'", type_name);

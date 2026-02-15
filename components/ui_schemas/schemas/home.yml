@@ -19,9 +19,9 @@ styles:
     radius: 18
     padding: 16
 sensor_templates:
-  temperature:
+  ph:
     title: "{{name}}"
-    subtitle: "Live Temperature"
+    subtitle: "pH Monitoring"
     style: card_default
     widgets:
       - type: label
@@ -29,10 +29,13 @@ sensor_templates:
         text: "{{value}} {{unit}}"
       - type: label
         variant: status
-        text: "Safe Range {{min}}-{{max}}"
-  humidity:
+        text: "Target {{min}}-{{max}}"
+      - type: label
+        variant: meta
+        text: "FW {{firmware}} • {{address}}"
+  ec:
     title: "{{name}}"
-    subtitle: "Relative Humidity"
+    subtitle: "Electrical Conductivity"
     style: card_default
     widgets:
       - type: label
@@ -40,18 +43,35 @@ sensor_templates:
         text: "{{value}} {{unit}}"
       - type: label
         variant: status
-        text: "Comfortable"
-  pressure:
+        text: "Range {{min}}-{{max}}"
+      - type: label
+        variant: meta
+        text: "{{type}} • {{firmware}}"
+  rtd:
     title: "{{name}}"
-    subtitle: "Atmospheric Pressure"
+    subtitle: "Temperature"
     style: card_default
     widgets:
       - type: label
         variant: value
         text: "{{value}} {{unit}}"
-  light:
+      - type: label
+        variant: status
+        text: "Safe {{min}}-{{max}}"
+  do:
     title: "{{name}}"
-    subtitle: "Illuminance"
+    subtitle: "Dissolved Oxygen"
+    style: card_default
+    widgets:
+      - type: label
+        variant: value
+        text: "{{value}} {{unit}}"
+      - type: label
+        variant: status
+        text: "{{firmware}} • {{address}}"
+  orp:
+    title: "{{name}}"
+    subtitle: "Oxidation-Reduction"
     style: card_warning
     widgets:
       - type: label
@@ -59,4 +79,40 @@ sensor_templates:
         text: "{{value}} {{unit}}"
       - type: label
         variant: status
-        text: "Auto dimming ready"
+        text: "Window {{min}}-{{max}}"
+  co2:
+    title: "{{name}}"
+    subtitle: "CO₂ Concentration"
+    style: card_default
+    widgets:
+      - type: label
+        variant: value
+        text: "{{value}} {{unit}}"
+      - type: label
+        variant: status
+        text: "{{firmware}}"
+  o2:
+    title: "{{name}}"
+    subtitle: "Oxygen"
+    style: card_default
+    widgets:
+      - type: label
+        variant: value
+        text: "{{value}} {{unit}}"
+      - type: label
+        variant: status
+        text: "Calibration {{firmware}}"
+  default:
+    title: "{{name}}"
+    subtitle: "{{type}} sensor"
+    style: card_default
+    widgets:
+      - type: label
+        variant: value
+        text: "{{value}} {{unit}}"
+      - type: label
+        variant: status
+        text: "{{min}}-{{max}}"
+      - type: label
+        variant: meta
+        text: "{{address}}"

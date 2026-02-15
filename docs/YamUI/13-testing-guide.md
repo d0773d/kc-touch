@@ -55,6 +55,7 @@ mock_ezo_map[0x63] = RESP_PH;
 - Invalid response ignored.
 - Missing `?i` token ignored.
 - Timeout/slow response ignored.
+- `tests/test_sensor_manager`: enables `CONFIG_SENSOR_MANAGER_FORCE_FAKE_ONLY` so Unity can validate the simulated dataset and tick logic without physical hardware. Run with `idf.py -T test_sensor_manager`.
 
 ---
 

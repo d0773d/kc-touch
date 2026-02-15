@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -8,28 +9,21 @@
 extern "C" {
 #endif
 
-typedef enum {
-    SENSOR_KIND_TEMPERATURE = 0,
-    SENSOR_KIND_HUMIDITY,
-    SENSOR_KIND_PRESSURE,
-    SENSOR_KIND_LIGHT,
-    SENSOR_KIND_UNKNOWN,
-} sensor_kind_t;
-
 typedef struct {
-    sensor_kind_t kind;
+    char type[16];
     char name[32];
     char id[16];
     char unit[8];
+    char firmware[16];
     float value;
     float min;
     float max;
+    uint8_t address;
 } sensor_record_t;
 
 esp_err_t sensor_manager_init(void);
 const sensor_record_t *sensor_manager_get_snapshot(size_t *out_count);
-const char *sensor_manager_kind_name(sensor_kind_t kind);
-void sensor_manager_tick(void);
+esp_err_t sensor_manager_update(void);
 
 #ifdef __cplusplus
 }
