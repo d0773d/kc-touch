@@ -1,0 +1,53 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": ". ${workspaceFolder}/esp-idf-v5.5.2/export.sh && idf.py build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": {
+        "owner": "cpp",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^\\.\\./([^:]+):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    },
+    {
+      "label": "Remote Flash (RFC2217)",
+      "type": "shell",
+      "command": ". ${workspaceFolder}/esp-idf-v5.5.2/export.sh && esptool.py -p 'rfc2217://24.251.114.49:4000?ign_set_control' -b 460800 --before=no_reset --after=no_reset --chip esp32p4 write_flash --flash_mode dio --flash_size 2MB --flash_freq 80m 0x2000 build/bootloader/bootloader.bin 0x10000 build/kc-touch.bin 0x8000 build/partition_table/partition-table.bin",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "dependsOn": "Build"
+    },
+    {
+      "label": "Remote Monitor (RFC2217)",
+      "type": "shell",
+      "command": ". ${workspaceFolder}/esp-idf-v5.5.2/export.sh && python ${workspaceFolder}/esp-idf-v5.5.2/tools/idf_monitor.py -p 'rfc2217://24.251.114.49:4000?ign_set_control' -b 115200 --no-reset --toolchain-prefix riscv32-esp-elf- --target esp32p4 ${workspaceFolder}/build/kc-touch.elf",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Full Clean",
+      "type": "shell",
+      "command": ". ${workspaceFolder}/esp-idf-v5.5.2/export.sh && idf.py fullclean",
+      "group": "build"
+    }
+  ]
+}
