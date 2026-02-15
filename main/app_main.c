@@ -27,6 +27,7 @@
 #include "kc_touch_gui.h"
 #include "kc_touch_display.h"
 #include "kc_touch_camera.h"
+#include "sensor_manager.h"
 #include "wifi_copro_hw.h"
 #include "wifi_copro_power.h"
 #include "wifi_copro_transport.h"
@@ -398,6 +399,10 @@ void app_main(void)
         if (display_err != ESP_OK) {
             ESP_LOGE(TAG, "Display init failed (%s)", esp_err_to_name(display_err));
         } else {
+            esp_err_t sensor_err = sensor_manager_init();
+            if (sensor_err != ESP_OK) {
+                ESP_LOGW(TAG, "Sensor manager init failed (%s)", esp_err_to_name(sensor_err));
+            }
             // Display is ready, show the main UI
             kc_touch_gui_show_root();
             

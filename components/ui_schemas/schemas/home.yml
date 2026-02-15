@@ -1,0 +1,62 @@
+version: 1
+layout:
+  columns: 2
+  h_spacing: 18
+  v_spacing: 18
+  padding: 20
+  background_color: "#090912"
+styles:
+  card_default:
+    bg_color: "#151523"
+    text_color: "#F4F4F8"
+    accent_color: "#57B6FF"
+    radius: 20
+    padding: 16
+  card_warning:
+    bg_color: "#2A1720"
+    text_color: "#F9DEE3"
+    accent_color: "#FF6F91"
+    radius: 18
+    padding: 16
+sensor_templates:
+  temperature:
+    title: "{{name}}"
+    subtitle: "Live Temperature"
+    style: card_default
+    widgets:
+      - type: label
+        variant: value
+        text: "{{value}} {{unit}}"
+      - type: label
+        variant: status
+        text: "Safe Range {{min}}-{{max}}"
+  humidity:
+    title: "{{name}}"
+    subtitle: "Relative Humidity"
+    style: card_default
+    widgets:
+      - type: label
+        variant: value
+        text: "{{value}} {{unit}}"
+      - type: label
+        variant: status
+        text: "Comfortable"
+  pressure:
+    title: "{{name}}"
+    subtitle: "Atmospheric Pressure"
+    style: card_default
+    widgets:
+      - type: label
+        variant: value
+        text: "{{value}} {{unit}}"
+  light:
+    title: "{{name}}"
+    subtitle: "Illuminance"
+    style: card_warning
+    widgets:
+      - type: label
+        variant: value
+        text: "{{value}} {{unit}}"
+      - type: label
+        variant: status
+        text: "Auto dimming ready"

@@ -7,6 +7,7 @@ idf_component_register(
         wifi_copro_hw
         kc_touch_gui
         kc_touch_display
+        sensor_manager
         espressif__esp_video
         espressif__esp_cam_sensor
         espressif__esp_sccb_intf

@@ -149,6 +149,7 @@ static void kc_touch_gui_cleanup_partial(void)
     s_gui.ready = false;
 }
 
+#include "lvgl_yaml_gui.h"
 #include "screens/ui_root.h"
 
 #if CONFIG_KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN
@@ -244,7 +245,9 @@ esp_err_t kc_touch_gui_dispatch(kc_touch_gui_work_cb_t cb, void *ctx, TickType_t
 static void kc_touch_gui_build_ui_wrapper(void *ctx)
 {
     (void)ctx;
-    ui_root_init();
+    if (lvgl_yaml_gui_load_default() != ESP_OK) {
+        ui_root_init();
+    }
 }
 
 void kc_touch_gui_show_root(void)
