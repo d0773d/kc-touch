@@ -46,14 +46,6 @@ config KC_TOUCH_GUI_WORK_QUEUE_LENGTH
         Number of pending GUI work items (callbacks) that can be queued for the
         GUI task. Increase for complex scenes that schedule frequent updates.
 
-config KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN
-    bool "Create placeholder splash screen"
-    default y
-    help
-        Automatically create a placeholder splash screen that confirms the LVGL
-        core booted successfully. Disable when the final application provides its
-        own startup scene.
-
 endif # KC_TOUCH_GUI_ENABLE
 
 endmenu

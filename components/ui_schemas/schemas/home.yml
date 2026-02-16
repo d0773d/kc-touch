@@ -1,137 +1,127 @@
-version: 1
-layout:
-  columns: 2
-  h_spacing: 18
-  v_spacing: 18
-  padding: 20
-  background_color: "#090912"
+version: 2
+app:
+  initial_screen: home
+  locale: en-US
 state:
-  dev.test_counter: "0"
+  provisioning.stage: "welcome"
+  wifi.selected_ssid: "none"
 styles:
-  card_default:
-    bg_color: "#151523"
-    text_color: "#F4F4F8"
-    accent_color: "#57B6FF"
-    radius: 20
-    padding: 16
-  card_warning:
-    bg_color: "#2A1720"
-    text_color: "#F9DEE3"
-    accent_color: "#FF6F91"
+  hero_label:
+    text_color: "#FFFFFF"
+    text_font: "montserrat_24"
+  body_text:
+    text_color: "#A0A6C3"
+  primary_button:
+    bg_color: "#4C7DFF"
+    text_color: "#FFFFFF"
     radius: 18
     padding: 16
+  ghost_button:
+    bg_color: "#2F3347"
+    text_color: "#FFFFFF"
+    radius: 16
+    padding: 12
+  card_panel:
+    bg_color: "#1F2334"
+    text_color: "#FFFFFF"
+    radius: 18
+    padding: 18
+    spacing: 8
 components:
-  DevDiagnosticsModal:
+  InfoCard:
+    props: [title, subtitle]
     layout:
-      padding: 16
+      type: column
+      gap: 6
     widgets:
       - type: label
-        text: "Diagnostics modal"
+        text: "{{title}}"
+        style: hero_label
       - type: label
-        text: "Counter {{dev.test_counter}}"
-sensor_templates:
-  ph:
-    title: "{{sensor.name}}"
-    subtitle: "pH Monitoring"
-    style: card_default
+        text: "{{subtitle}}"
+        style: body_text
+  ProvisionDialog:
+    layout:
+      type: column
+      gap: 14
+      align: center
+    widgets:
+      - type: img
+        src: "symbol:wifi"
+        align: center
+      - type: label
+        text: "Start Wi-Fi Provisioning?"
+        align: center
+        style: hero_label
+      - type: label
+        text: "This will walk you through Wi-Fi setup."
+        align: center
+        style: body_text
+      - type: row
+        layout:
+          gap: 10
+          align: center
+        widgets:
+          - type: button
+            text: "Close"
+            style: ghost_button
+            on_click: close_modal()
+          - type: button
+            text: "Start"
+            style: primary_button
+            on_click:
+              - push(provision)
+              - close_modal()
+screens:
+  home:
+    layout:
+      type: column
+      gap: 18
+    widgets:
+      - type: img
+        src: "symbol:wifi"
+        align: center
+      - type: label
+        text: "YamUI Starter App"
+        style: hero_label
+        align: center
+      - type: panel
+        style: card_panel
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: InfoCard
+            title: "Current SSID"
+            subtitle: "{{wifi.selected_ssid}}"
+          - type: InfoCard
+            title: "Provisioning Stage"
+            subtitle: "{{provisioning.stage}}"
+      - type: button
+        text: "Provision Wi-Fi"
+        style: primary_button
+        on_click: push(provision)
+      - type: button
+        text: "Open Modal"
+        style: primary_button
+        on_click: modal(ProvisionDialog)
+  provision:
+    layout:
+      type: column
+      gap: 12
     widgets:
       - type: label
-        variant: value
-        text: "{{sensor.value}} {{sensor.unit}}"
-        on_load:
-          - set(dev.test_counter, "{{dev.test_counter | int + 1}}")
-          - modal(DevDiagnosticsModal)
-          - close_modal()
-      - type: label
-        variant: status
-        text: "Target {{sensor.min}}-{{sensor.max}}"
-      - type: label
-        variant: meta
-        text: "FW {{sensor.firmware}} • {{sensor.address}}"
-  ec:
-    title: "{{sensor.name}}"
-    subtitle: "Electrical Conductivity"
-    style: card_default
-    widgets:
-      - type: label
-        variant: value
-        text: "{{sensor.value}} {{sensor.unit}}"
-      - type: label
-        variant: status
-        text: "Range {{sensor.min}}-{{sensor.max}}"
-      - type: label
-        variant: meta
-        text: "{{sensor.type}} • {{sensor.firmware}}"
-  rtd:
-    title: "{{sensor.name}}"
-    subtitle: "Temperature"
-    style: card_default
-    widgets:
-      - type: label
-        variant: value
-        text: "{{sensor.value}} {{sensor.unit}}"
-      - type: label
-        variant: status
-        text: "Safe {{sensor.min}}-{{sensor.max}}"
-  do:
-    title: "{{sensor.name}}"
-    subtitle: "Dissolved Oxygen"
-    style: card_default
-    widgets:
-      - type: label
-        variant: value
-        text: "{{sensor.value}} {{sensor.unit}}"
-      - type: label
-        variant: status
-        text: "{{sensor.firmware}} • {{sensor.address}}"
-  orp:
-    title: "{{sensor.name}}"
-    subtitle: "Oxidation-Reduction"
-    style: card_warning
-    widgets:
-      - type: label
-        variant: value
-        text: "{{sensor.value}} {{sensor.unit}}"
-      - type: label
-        variant: status
-        text: "Window {{sensor.min}}-{{sensor.max}}"
-  co2:
-    title: "{{sensor.name}}"
-    subtitle: "CO₂ Concentration"
-    style: card_default
-    widgets:
-      - type: label
-        variant: value
-        text: "{{sensor.value}} {{sensor.unit}}"
-      - type: label
-        variant: status
-        text: "{{sensor.firmware}}"
-  o2:
-    title: "{{sensor.name}}"
-    subtitle: "Oxygen"
-    style: card_default
-    widgets:
-      - type: label
-        variant: value
-        text: "{{sensor.value}} {{sensor.unit}}"
-      - type: label
-        variant: status
-        text: "Calibration {{sensor.firmware}}"
-  default:
-    title: "{{sensor.name}}"
-    subtitle: "{{sensor.type}} sensor"
-    style: card_default
-    widgets:
-      - type: label
-        variant: value
-        text: "{{sensor.value}} {{sensor.unit}}"
-        on_load:
-          - set(dev.test_counter, "{{dev.test_counter | int + 1}}")
-          - modal(DevDiagnosticsModal)
-          - close_modal()
-      - type: label
-        variant: status
-        text: "{{sensor.min}}-{{sensor.max}}"
-      - type: label
-        variant: meta
-        text: "{{sensor.address}}"
+        text: "Provisioning Stage: {{provisioning.stage}}"
+        style: hero_label
+      - type: button
+        text: "Set Credentials Stage"
+        style: primary_button
+        on_click:
+          - set(provisioning.stage, "credentials")
+          - pop()
+      - type: button
+        text: "Mark Complete"
+        on_click:
+          - set(wifi.selected_ssid, "YamUI-Guest")
+          - set(provisioning.stage, "done")
+          - pop()

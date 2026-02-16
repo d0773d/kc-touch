@@ -13,6 +13,8 @@ typedef enum {
     YUI_NAV_REQUEST_GOTO = 0,
     YUI_NAV_REQUEST_PUSH,
     YUI_NAV_REQUEST_POP,
+    YUI_NAV_REQUEST_SHOW_MODAL,
+    YUI_NAV_REQUEST_CLOSE_MODAL,
 } yui_nav_request_type_t;
 
 typedef esp_err_t (*yui_nav_request_executor_t)(yui_nav_request_type_t type, const char *arg, void *user_ctx);

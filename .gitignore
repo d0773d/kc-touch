@@ -41,12 +41,14 @@ CurrentTask.md
 esp-idf-v*/
 esp-idf/
 .espressif/
-tools/
+tools/*
+!tools/yamui_bundle.py
 dist/
 
 # ESP-IDF Component Manager
 managed_components/
 dependencies.lock
+components/ui_schemas/generated/
 
 # CMake generated files
 CMakeCache.txt

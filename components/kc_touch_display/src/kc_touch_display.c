@@ -98,8 +98,8 @@ static void kc_touch_display_register_lvgl(void *ctx)
     // Force 0-degree rotation because hardware rotation is handled externally
     lv_display_set_rotation(s_lv_display, LV_DISPLAY_ROTATION_0);
 
-    // We do NOT build the default scene here anymore, because kc_touch_gui
-    // is responsible for launching the main application UI (ui_root).
+    // We do NOT build the default scene here anymore because kc_touch_gui
+    // loads the YamUI bundle as the main application UI.
     // kc_touch_display_build_scene(NULL);
 }
 
@@ -231,19 +231,10 @@ static void kc_touch_display_show_qr_task(void *ctx)
     lv_obj_t * lcd_scr = lv_scr_act();
     lv_obj_clean(lcd_scr);
     
-    // Reset layout properties that might persist from Previous UI (e.g. Flex Row)
-    // In LVGL 8.3+, there isn't a direct "NONE" enum for flex flow, 
-    // but we can reset style flex flow or just not adding layout styles.
-    // However, if the object style had flex flow, we need to remove it.
-    // The safest way is to reset the style or manually remove the flex flag/style.
-    // Assuming we added flex flow via style in ui_root.c, cleaning the object (children) 
-    // doesn't remove the style from 'lcd_scr' itself if it was applied to the screen object.
-    
-    // We can force empty style or remove specific style properties.
-    // Or we can just create a confusing layout if we don't fix it.
-    // The simplest way to "disable" flex layout is to set it to a dummy value or clear the layout flag.
-    // But lv_obj_set_flex_flow wraps adding a style.
-    
+    // Reset layout properties that might persist from the previous YamUI scene
+    // (e.g., flex flow on the screen object). Clearing styles avoids residual
+    // alignment constraints when provisioning temporarily takes over the screen.
+
     // Let's reset the style of the screen completely to be safe.
     lv_obj_remove_style_all(lcd_scr);
     

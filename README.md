@@ -32,14 +32,14 @@ The kc-touch firmware now includes a dedicated LVGL wrapper component located at
 - Enable or tune the subsystem under `idf.py menuconfig → Component config → KC Touch GUI`.
 - `kc_touch_gui_init(NULL)` loads defaults and spins up a GUI FreeRTOS task plus the LVGL tick timer. The call is issued from [main/app_main.c](main/app_main.c#L1), so the GUI is alive before provisioning finishes.
 - Use `kc_touch_gui_dispatch()` to schedule UI work (widget creation, screen swaps, etc.) from any task without worrying about LVGL's single-threaded requirement.
-- When `CONFIG_KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN=y`, the component draws a simple splash screen to confirm LVGL booted; disable it once the real UI ships.
+- The YamUI bundle now renders the entire root scene via `lvgl_yaml_gui`; there is no legacy top bar/dashboard fallback anymore, so keep the bundled schemas up to date.
 
 ### Display and touch bring-up
 
 The [components/kc_touch_display](components/kc_touch_display) component is now purpose-built for the M5Stack Tab5. It leverages the upstream `M5Unified` + `M5GFX` drivers to light up the native MIPI DSI panel, GT911 touch controller, and PWM backlight—no GPIO bookkeeping required as long as PSRAM runs at 200 MHz.
 
-- `kc_touch_display_init()` runs right after `kc_touch_gui_init()` in [main/app_main.c](main/app_main.c#L1) so LVGL registers a real flush callback instead of the textual placeholder.
-- A starter scene (title, subtitle, and button) renders through LVGL to prove the panel is alive. Touch input feeds LVGL through a pointer driver whenever it is enabled.
+- `kc_touch_display_init()` runs right after `kc_touch_gui_init()` in [main/app_main.c](main/app_main.c#L1) so LVGL registers a real flush callback before the YamUI scene tree renders.
+- YamUI-generated layouts now serve as the first visual confirmation that the panel is alive; touch input feeds LVGL through a pointer driver whenever it is enabled.
 - `kc_touch_display_backlight_set()` proxies straight to the Tab5 brightness control exposed by M5Unified.
 
 ## How to use example

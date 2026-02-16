@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <string.h>
 
-extern const uint8_t _binary_home_yml_start[];
-extern const uint8_t _binary_home_yml_end[];
+extern const uint8_t _binary_yamui_bundle_yml_start[];
+extern const uint8_t _binary_yamui_bundle_yml_end[];
 
 typedef struct {
     const char *name;
@@ -14,7 +14,7 @@ typedef struct {
 } yui_schema_blob_t;
 
 static const yui_schema_blob_t s_schema_blobs[] = {
-    {"home", _binary_home_yml_start, _binary_home_yml_end},
+    {"home", _binary_yamui_bundle_yml_start, _binary_yamui_bundle_yml_end},
 };
 
 static const char *s_default_schema_name = "home";

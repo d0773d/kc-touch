@@ -1,96 +1,392 @@
 #include "lvgl_yaml_gui.h"
 
-#include <ctype.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "esp_timer.h"
 #include "kc_touch_display.h"
 #include "lvgl.h"
-#include "sensor_manager.h"
 #include "ui_schemas.h"
 #include "yaml_core.h"
 #include "yaml_ui.h"
-#include "yamui_logging.h"
 #include "yamui_events.h"
 #include "yamui_expr.h"
+#include "yamui_logging.h"
 #include "yamui_runtime.h"
 #include "yamui_state.h"
 #include "yui_navigation_queue.h"
 
-static const char *yui_resolve_token(const sensor_record_t *sensor, const char *token, char *scratch, size_t scratch_len);
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 
-static char *yui_strdup_local(const char *src)
-{
-    if (!src) {
-        return NULL;
-    }
-    size_t len = strlen(src) + 1U;
-    char *copy = (char *)malloc(len);
-    if (copy) {
-        memcpy(copy, src, len);
-    }
-    return copy;
-}
+#define YUI_TEXT_BUFFER_MAX 256
 
-typedef struct {
-    const lv_event_t *lv_event;
-    const sensor_record_t *sensor;
-} yui_event_resolver_ctx_t;
+#ifndef LV_FLEX_ALIGN_STRETCH
+#define LV_FLEX_ALIGN_STRETCH LV_FLEX_ALIGN_START
+#endif
 
-typedef struct {
-    const yui_widget_t *widget;
-    const sensor_record_t *sensor;
-    lv_obj_t *event_target;
-    lv_obj_t *text_target;
-    yui_state_watch_handle_t *watch_handles;
-    size_t watch_count;
-} yui_widget_instance_t;
+typedef struct yui_component_scope yui_component_scope_t;
+typedef struct yui_component_prop yui_component_prop_t;
+typedef struct yui_widget_runtime yui_widget_runtime_t;
 
 typedef struct {
     char *name;
     yml_node_t *root;
     yui_schema_t schema;
-} yui_screen_instance_t;
+} yui_schema_runtime_t;
 
 typedef struct {
-    const yui_component_t *component;
-    lv_obj_t *overlay;
-    lv_obj_t *container;
-} yui_modal_instance_t;
+    yui_schema_runtime_t *schema;
+    char *screen_name;
+} yui_screen_frame_t;
+
+struct yui_component_prop {
+    char *name;
+    char *template_value;
+    char *resolved_value;
+    char **dependencies;
+    size_t dependency_count;
+};
+
+struct yui_component_scope {
+    yui_component_scope_t *parent;
+    yui_component_prop_t *props;
+    size_t prop_count;
+    size_t ref_count;
+};
+
+struct yui_widget_runtime {
+    lv_obj_t *event_target;
+    lv_obj_t *text_target;
+    char *text_template;
+    char **bindings;
+    size_t binding_count;
+    yui_state_watch_handle_t *watch_handles;
+    size_t watch_count;
+    yui_component_scope_t *scope;
+    yui_widget_events_t events;
+};
+
+static void yui_widget_refresh_text(yui_widget_runtime_t *runtime);
+static void yui_format_text(const char *tmpl, yui_component_scope_t *scope, char *out, size_t out_len);
+static char *yui_strdup_local(const char *value);
+static esp_err_t yui_collect_bindings_from_text(const char *text, char ***out_tokens, size_t *out_count);
+static void yui_apply_layout(lv_obj_t *obj, const yml_node_t *layout_node, const char *default_type);
+static lv_flex_align_t yui_flex_align_from_string(const char *value, lv_flex_align_t def);
+static esp_err_t yui_render_widget_list(const yml_node_t *widgets_node, yui_schema_runtime_t *schema, lv_obj_t *parent, yui_component_scope_t *scope);
 
 typedef struct {
-    const sensor_record_t *sensor;
+    const char *yaml_key;
+    yui_widget_event_type_t event_type;
+    lv_event_code_t lv_event;
+} yui_widget_event_field_t;
+
+typedef struct {
+    yui_component_scope_t *scope;
 } yui_expression_ctx_t;
 
-static void yui_widget_event_cb(lv_event_t *event);
-static void yui_widget_instance_refresh_text(yui_widget_instance_t *instance);
-static void yui_format_text(const char *tmpl, const sensor_record_t *sensor, char *out, size_t out_len);
-static void yui_render_widget(const yui_widget_t *widget, const sensor_record_t *sensor, const yui_style_t *style, lv_obj_t *parent);
-static esp_err_t yui_render_schema(const yui_schema_t *schema);
-static const yui_component_t *yui_find_component(const char *name);
-static esp_err_t yui_modal_push_component(const yui_component_t *component);
-static void yui_modal_instance_destroy(yui_modal_instance_t *instance, bool emit_event);
-static void yui_modal_clear_stack(void);
-static lv_color_t yui_color_from_string(const char *hex, lv_color_t fallback);
-static lv_flex_align_t yui_align_to_lv(yui_component_align_t align);
-static lv_flex_flow_t yui_flow_to_lv(yui_component_flow_t flow);
-static void yui_component_apply_layout(lv_obj_t *obj, const yui_component_layout_t *layout);
-static esp_err_t yui_render_component(const yui_component_t *component, lv_obj_t *parent);
-static lv_obj_t *yui_modal_create_overlay(void);
-static void yui_modal_emit_event(const char *event, const char *component_name);
-static esp_err_t yui_modal_ensure_capacity(size_t desired);
-static esp_err_t yui_modal_render_component(yui_modal_instance_t *instance, const yui_component_t *component);
+typedef struct {
+    const lv_event_t *lv_event;
+    yui_component_scope_t *scope;
+} yui_event_resolver_ctx_t;
 
-static yui_screen_instance_t *s_screen_stack;
-static size_t s_screen_count;
-static size_t s_screen_capacity;
-static yui_modal_instance_t *s_modal_stack;
+static const yui_widget_event_field_t s_widget_events[] = {
+    {"on_click", YUI_WIDGET_EVENT_CLICK, LV_EVENT_CLICKED},
+    {"on_press", YUI_WIDGET_EVENT_PRESS, LV_EVENT_PRESSED},
+    {"on_release", YUI_WIDGET_EVENT_RELEASE, LV_EVENT_RELEASED},
+    {"on_change", YUI_WIDGET_EVENT_CHANGE, LV_EVENT_VALUE_CHANGED},
+    {"on_focus", YUI_WIDGET_EVENT_FOCUS, LV_EVENT_FOCUSED},
+    {"on_blur", YUI_WIDGET_EVENT_BLUR, LV_EVENT_DEFOCUSED},
+};
+static const size_t s_widget_event_count = sizeof(s_widget_events) / sizeof(s_widget_events[0]);
+
+typedef struct {
+    const char *name;
+    const char *glyph;
+} yui_symbol_entry_t;
+
+static const yui_symbol_entry_t s_symbol_entries[] = {
+    {"wifi", LV_SYMBOL_WIFI},
+    {"ok", LV_SYMBOL_OK},
+    {"warning", LV_SYMBOL_WARNING},
+    {"left", LV_SYMBOL_LEFT},
+    {"right", LV_SYMBOL_RIGHT},
+};
+
+static const char *yui_symbol_lookup(const char *name)
+{
+    if (!name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < sizeof(s_symbol_entries) / sizeof(s_symbol_entries[0]); ++i) {
+        if (strcasecmp(name, s_symbol_entries[i].name) == 0) {
+            return s_symbol_entries[i].glyph;
+        }
+    }
+    return NULL;
+}
+
+static void yui_scope_acquire(yui_component_scope_t *scope)
+{
+    if (scope) {
+        scope->ref_count++;
+    }
+}
+
+static void yui_scope_destroy(yui_component_scope_t *scope);
+
+static void yui_scope_release(yui_component_scope_t *scope)
+{
+    if (!scope || scope->ref_count == 0U) {
+        return;
+    }
+    scope->ref_count--;
+    if (scope->ref_count == 0U) {
+        yui_scope_destroy(scope);
+    }
+}
+
+static void yui_prop_free_dependencies(yui_component_prop_t *prop)
+{
+    if (!prop || !prop->dependencies) {
+        return;
+    }
+    for (size_t i = 0; i < prop->dependency_count; ++i) {
+        free(prop->dependencies[i]);
+    }
+    free(prop->dependencies);
+    prop->dependencies = NULL;
+    prop->dependency_count = 0U;
+}
+
+static void yui_scope_destroy(yui_component_scope_t *scope)
+{
+    if (!scope) {
+        return;
+    }
+    if (scope->props) {
+        for (size_t i = 0; i < scope->prop_count; ++i) {
+            yui_component_prop_t *prop = &scope->props[i];
+            free(prop->name);
+            free(prop->template_value);
+            free(prop->resolved_value);
+            yui_prop_free_dependencies(prop);
+        }
+        free(scope->props);
+    }
+    scope->props = NULL;
+    scope->prop_count = 0U;
+    if (scope->parent) {
+        yui_scope_release(scope->parent);
+    }
+    free(scope);
+}
+
+static yui_component_prop_t *yui_scope_find_prop(yui_component_scope_t *scope, const char *name)
+{
+    if (!scope || !name) {
+        return NULL;
+    }
+    for (yui_component_scope_t *cursor = scope; cursor; cursor = cursor->parent) {
+        for (size_t i = 0; i < cursor->prop_count; ++i) {
+            yui_component_prop_t *prop = &cursor->props[i];
+            if (prop->name && strcmp(prop->name, name) == 0) {
+                return prop;
+            }
+        }
+    }
+    return NULL;
+}
+
+static yui_component_scope_t *yui_scope_create(yui_component_scope_t *parent, const yui_component_def_t *component, const yml_node_t *instance_node)
+{
+    yui_component_scope_t *scope = (yui_component_scope_t *)calloc(1, sizeof(yui_component_scope_t));
+    if (!scope) {
+        return NULL;
+    }
+    scope->parent = parent;
+    scope->ref_count = 1U;
+    if (parent) {
+        yui_scope_acquire(parent);
+    }
+    if (!component || component->prop_count == 0U) {
+        return scope;
+    }
+    scope->prop_count = component->prop_count;
+    scope->props = (yui_component_prop_t *)calloc(scope->prop_count, sizeof(yui_component_prop_t));
+    if (!scope->props) {
+        yui_scope_release(scope);
+        return NULL;
+    }
+    for (size_t i = 0; i < component->prop_count; ++i) {
+        yui_component_prop_t *prop = &scope->props[i];
+        const char *prop_name = component->props[i];
+        prop->name = prop_name ? yui_strdup_local(prop_name) : NULL;
+        const yml_node_t *value_node = (instance_node && prop_name) ? yml_node_get_child(instance_node, prop_name) : NULL;
+        const char *scalar = value_node ? yml_node_get_scalar(value_node) : NULL;
+        prop->template_value = scalar ? yui_strdup_local(scalar) : yui_strdup_local("");
+        if (!prop->template_value) {
+            yui_scope_release(scope);
+            return NULL;
+        }
+        esp_err_t dep_err = yui_collect_bindings_from_text(prop->template_value, &prop->dependencies, &prop->dependency_count);
+        if (dep_err != ESP_OK) {
+            yui_scope_release(scope);
+            return NULL;
+        }
+    }
+    return scope;
+}
+
+static const char *yui_scope_resolve_prop(yui_component_scope_t *scope, const char *name)
+{
+    yui_component_prop_t *prop = yui_scope_find_prop(scope, name);
+    if (!prop) {
+        return NULL;
+    }
+    if (!prop->template_value) {
+        return prop->resolved_value ? prop->resolved_value : "";
+    }
+    yui_component_scope_t *resolver_scope = scope ? scope->parent : NULL;
+    char buffer[YUI_TEXT_BUFFER_MAX];
+    buffer[0] = '\0';
+    yui_format_text(prop->template_value, resolver_scope, buffer, sizeof(buffer));
+    if (!prop->resolved_value || strcmp(prop->resolved_value, buffer) != 0) {
+        free(prop->resolved_value);
+        prop->resolved_value = yui_strdup_local(buffer);
+    }
+    return prop->resolved_value ? prop->resolved_value : "";
+}
+
+static void yui_scope_delete_cb(lv_event_t *event)
+{
+    if (!event || lv_event_get_code(event) != LV_EVENT_DELETE) {
+        return;
+    }
+    yui_component_scope_t *scope = (yui_component_scope_t *)lv_event_get_user_data(event);
+    yui_scope_release(scope);
+}
+
+static yui_schema_runtime_t *s_loaded_schema;
+static yui_screen_frame_t *s_nav_stack;
+static size_t s_nav_count;
+static size_t s_nav_capacity;
+typedef struct {
+    lv_obj_t *overlay;
+} yui_modal_frame_t;
+static yui_modal_frame_t *s_modal_stack;
 static size_t s_modal_count;
 static size_t s_modal_capacity;
+
+static esp_err_t yui_modal_ensure_capacity(size_t desired)
+{
+    if (desired <= s_modal_capacity) {
+        return ESP_OK;
+    }
+    size_t new_capacity = s_modal_capacity == 0 ? 2U : s_modal_capacity * 2U;
+    while (new_capacity < desired) {
+        new_capacity *= 2U;
+    }
+    yui_modal_frame_t *next = (yui_modal_frame_t *)realloc(s_modal_stack, new_capacity * sizeof(yui_modal_frame_t));
+    if (!next) {
+        return ESP_ERR_NO_MEM;
+    }
+    for (size_t i = s_modal_capacity; i < new_capacity; ++i) {
+        next[i].overlay = NULL;
+    }
+    s_modal_stack = next;
+    s_modal_capacity = new_capacity;
+    return ESP_OK;
+}
+
+static void yui_modal_close_all(void)
+{
+    while (s_modal_count > 0U) {
+        yui_modal_frame_t *frame = &s_modal_stack[--s_modal_count];
+        if (frame->overlay) {
+            lv_obj_del(frame->overlay);
+            frame->overlay = NULL;
+        }
+    }
+}
+
+static esp_err_t yui_modal_close_top(void)
+{
+    if (s_modal_count == 0U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    yui_modal_frame_t *frame = &s_modal_stack[s_modal_count - 1U];
+    if (frame->overlay) {
+        lv_obj_del(frame->overlay);
+        frame->overlay = NULL;
+    }
+    s_modal_count--;
+    return ESP_OK;
+}
+
+static esp_err_t yui_modal_show_component(const char *component_name)
+{
+    if (!s_loaded_schema) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!component_name || component_name[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const yui_component_def_t *component = yui_schema_get_component(&s_loaded_schema->schema, component_name);
+    if (!component) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    esp_err_t err = yui_modal_ensure_capacity(s_modal_count + 1U);
+    if (err != ESP_OK) {
+        return err;
+    }
+    lv_obj_t *root = lv_scr_act();
+    if (!root) {
+        return ESP_FAIL;
+    }
+    lv_obj_t *overlay = lv_obj_create(root);
+    lv_obj_remove_style_all(overlay);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_60, 0);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(overlay);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x25293C), 0);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(panel, 18, 0);
+    lv_obj_set_style_radius(panel, 16, 0);
+    
+    /* Panel Sizing: Fixed width, dynamic height up to 90% of screen */
+    lv_obj_set_width(panel, 420);
+    lv_obj_set_height(panel, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(panel, lv_pct(90), 0);
+    
+    /* Allow scrolling if content is too tall */
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    
+    lv_obj_set_style_pad_row(panel, 12, 0);
+    lv_obj_set_style_pad_column(panel, 12, 0);
+    lv_obj_center(panel);
+    yui_apply_layout(panel, component->layout_node, "column");
+
+    yui_component_scope_t *scope = yui_scope_create(NULL, component, NULL);
+    if (!scope) {
+        lv_obj_del(overlay);
+        return ESP_ERR_NO_MEM;
+    }
+    lv_obj_add_event_cb(panel, yui_scope_delete_cb, LV_EVENT_DELETE, scope);
+    err = yui_render_widget_list(component->widgets_node, s_loaded_schema, panel, scope);
+    if (err != ESP_OK) {
+        lv_obj_del(overlay);
+        return err;
+    }
+    s_modal_stack[s_modal_count++] = (yui_modal_frame_t){
+        .overlay = overlay,
+    };
+    return ESP_OK;
+}
 
 static esp_err_t yui_runtime_goto_screen(const char *screen);
 static esp_err_t yui_runtime_push_screen(const char *screen);
@@ -99,9 +395,6 @@ static esp_err_t yui_runtime_show_modal(const char *component);
 static esp_err_t yui_runtime_close_modal(void);
 static esp_err_t yui_runtime_call_native(const char *function, const char **args, size_t arg_count);
 static esp_err_t yui_runtime_emit_event(const char *event, const char **args, size_t arg_count);
-static esp_err_t yui_navigation_replace_top(const char *screen);
-static esp_err_t yui_navigation_push_screen(const char *screen);
-static esp_err_t yui_navigation_pop_screen_internal(void);
 
 static const yui_action_runtime_t s_runtime_vtable = {
     .goto_screen = yui_runtime_goto_screen,
@@ -113,27 +406,6 @@ static const yui_action_runtime_t s_runtime_vtable = {
     .emit_event = yui_runtime_emit_event,
 };
 
-static char *yui_trimmed_copy(const char *start, size_t len)
-{
-    if (!start) {
-        return NULL;
-    }
-    while (len > 0U && isspace((unsigned char)*start)) {
-        ++start;
-        --len;
-    }
-    while (len > 0U && isspace((unsigned char)start[len - 1U])) {
-        --len;
-    }
-    char *copy = (char *)malloc(len + 1U);
-    if (!copy) {
-        return NULL;
-    }
-    memcpy(copy, start, len);
-    copy[len] = '\0';
-    return copy;
-}
-
 static bool yui_expression_symbol_resolver(const char *identifier, void *ctx, yui_expr_value_t *out)
 {
     if (!out) {
@@ -143,110 +415,19 @@ static bool yui_expression_symbol_resolver(const char *identifier, void *ctx, yu
     if (!identifier || identifier[0] == '\0') {
         return true;
     }
-    yui_expression_ctx_t *runtime = (yui_expression_ctx_t *)ctx;
-    if (strncmp(identifier, "sensor.", 7) == 0) {
-        const char *sub = identifier + 7;
-        char scratch[32];
-        const sensor_record_t *sensor = runtime ? runtime->sensor : NULL;
-        const char *resolved = yui_resolve_token(sensor, sub, scratch, sizeof(scratch));
-        yui_expr_value_set_string_copy(out, resolved);
-        return true;
+    yui_expression_ctx_t *expr_ctx = (yui_expression_ctx_t *)ctx;
+    const char *value = NULL;
+    if (expr_ctx && expr_ctx->scope) {
+        value = yui_scope_resolve_prop(expr_ctx->scope, identifier);
     }
-    const char *state_value = yui_state_get(identifier, NULL);
-    if (state_value) {
-        yui_expr_value_set_string_ref(out, state_value);
-    } else {
-        yui_expr_value_set_string_ref(out, "");
+    if (!value) {
+        value = yui_state_get(identifier, "");
     }
+    if (!value) {
+        value = "";
+    }
+    yui_expr_value_set_string_ref(out, value);
     return true;
-}
-
-static bool yui_widget_has_events(const yui_widget_t *widget)
-{
-    if (!widget) {
-        return false;
-    }
-    for (size_t i = 0; i < YUI_WIDGET_EVENT_COUNT; ++i) {
-        if (widget->events.lists[i].count > 0U) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static yui_widget_event_type_t yui_widget_event_from_lv(lv_event_code_t code)
-{
-    switch (code) {
-        case LV_EVENT_CLICKED:
-            return YUI_WIDGET_EVENT_CLICK;
-        case LV_EVENT_PRESSED:
-            return YUI_WIDGET_EVENT_PRESS;
-        case LV_EVENT_RELEASED:
-            return YUI_WIDGET_EVENT_RELEASE;
-        case LV_EVENT_VALUE_CHANGED:
-            return YUI_WIDGET_EVENT_CHANGE;
-        case LV_EVENT_FOCUSED:
-            return YUI_WIDGET_EVENT_FOCUS;
-        case LV_EVENT_DEFOCUSED:
-            return YUI_WIDGET_EVENT_BLUR;
-        default:
-            return YUI_WIDGET_EVENT_INVALID;
-    }
-}
-
-static const char *yui_widget_event_name(yui_widget_event_type_t type)
-{
-    static const char *names[] = {
-        [YUI_WIDGET_EVENT_CLICK] = "on_click",
-        [YUI_WIDGET_EVENT_PRESS] = "on_press",
-        [YUI_WIDGET_EVENT_RELEASE] = "on_release",
-        [YUI_WIDGET_EVENT_CHANGE] = "on_change",
-        [YUI_WIDGET_EVENT_FOCUS] = "on_focus",
-        [YUI_WIDGET_EVENT_BLUR] = "on_blur",
-        [YUI_WIDGET_EVENT_LOAD] = "on_load",
-    };
-    if (type < 0 || type >= YUI_WIDGET_EVENT_COUNT) {
-        return "unknown";
-    }
-    const char *name = names[type];
-    return name ? name : "unknown";
-}
-
-static const char *yui_widget_debug_label(const yui_widget_t *widget)
-{
-    if (!widget) {
-        return NULL;
-    }
-    if (widget->text && widget->text[0] != '\0') {
-        return widget->text;
-    }
-    switch (widget->type) {
-        case YUI_WIDGET_LABEL:
-            return "<label>";
-        case YUI_WIDGET_BUTTON:
-            return "<button>";
-        case YUI_WIDGET_SPACER:
-            return "<spacer>";
-        default:
-            return "<widget>";
-    }
-}
-
-static void yui_copy_string(char *dest, size_t dest_len, const char *src)
-{
-    if (!dest || dest_len == 0U) {
-        return;
-    }
-    if (!src) {
-        dest[0] = '\0';
-        return;
-    }
-    size_t len = strlen(src);
-    if (len >= dest_len) {
-        len = dest_len - 1U;
-    }
-    memcpy(dest, src, len);
-    dest[len] = '\0';
 }
 
 static const char *yui_event_resolve_value(const yui_event_resolver_ctx_t *ctx, char *buffer, size_t buffer_len)
@@ -258,27 +439,24 @@ static const char *yui_event_resolve_value(const yui_event_resolver_ctx_t *ctx, 
     if (!ctx || !ctx->lv_event) {
         return buffer;
     }
-    lv_event_t *mutable_event = (lv_event_t *)ctx->lv_event;
-    lv_obj_t *target = lv_event_get_target(mutable_event);
+    lv_event_t *evt = (lv_event_t *)ctx->lv_event;
+    lv_obj_t *target = lv_event_get_target(evt);
     if (!target) {
         return buffer;
     }
 #if LV_USE_TEXTAREA
     if (lv_obj_check_type(target, &lv_textarea_class)) {
-        const char *txt = lv_textarea_get_text(target);
-        yui_copy_string(buffer, buffer_len, txt);
+        const char *text = lv_textarea_get_text(target);
+        if (text) {
+            strncpy(buffer, text, buffer_len - 1U);
+            buffer[buffer_len - 1U] = '\0';
+        }
         return buffer;
     }
 #endif
 #if LV_USE_DROPDOWN
     if (lv_obj_check_type(target, &lv_dropdown_class)) {
         lv_dropdown_get_selected_str(target, buffer, buffer_len);
-        return buffer;
-    }
-#endif
-#if LV_USE_ROLLER
-    if (lv_obj_check_type(target, &lv_roller_class)) {
-        lv_roller_get_selected_str(target, buffer, buffer_len);
         return buffer;
     }
 #endif
@@ -289,17 +467,10 @@ static const char *yui_event_resolve_value(const yui_event_resolver_ctx_t *ctx, 
         return buffer;
     }
 #endif
-#if LV_USE_SPINBOX
-    if (lv_obj_check_type(target, &lv_spinbox_class)) {
-        int32_t value = lv_spinbox_get_value(target);
-        snprintf(buffer, buffer_len, "%ld", (long)value);
-        return buffer;
-    }
-#endif
-    const void *param = lv_event_get_param(mutable_event);
+    const void *param = lv_event_get_param(evt);
     if (param) {
-        yui_copy_string(buffer, buffer_len, (const char *)param);
-        return buffer;
+        strncpy(buffer, (const char *)param, buffer_len - 1U);
+        buffer[buffer_len - 1U] = '\0';
     }
     return buffer;
 }
@@ -309,18 +480,18 @@ static const char *yui_event_resolve_checked(const yui_event_resolver_ctx_t *ctx
     if (!buffer || buffer_len == 0U) {
         return "";
     }
-    if (!ctx || !ctx->lv_event) {
-        buffer[0] = '\0';
-        return buffer;
+    bool checked = false;
+    if (ctx && ctx->lv_event) {
+        lv_event_t *evt = (lv_event_t *)ctx->lv_event;
+        lv_obj_t *target = lv_event_get_target(evt);
+        checked = target && lv_obj_has_state(target, LV_STATE_CHECKED);
     }
-    lv_event_t *mutable_event = (lv_event_t *)ctx->lv_event;
-    lv_obj_t *target = lv_event_get_target(mutable_event);
-    bool checked = target && lv_obj_has_state(target, LV_STATE_CHECKED);
-    yui_copy_string(buffer, buffer_len, checked ? "true" : "false");
+    strncpy(buffer, checked ? "true" : "false", buffer_len - 1U);
+    buffer[buffer_len - 1U] = '\0';
     return buffer;
 }
 
-static const char *yui_event_symbol_resolver(const char *symbol, void *ctx, char *buffer, size_t buffer_len)
+const char *yui_event_symbol_resolver(const char *symbol, void *ctx, char *buffer, size_t buffer_len)
 {
     if (!symbol) {
         if (buffer && buffer_len > 0U) {
@@ -328,7 +499,6 @@ static const char *yui_event_symbol_resolver(const char *symbol, void *ctx, char
         }
         return buffer;
     }
-
     yui_event_resolver_ctx_t *resolver_ctx = (yui_event_resolver_ctx_t *)ctx;
     if (strcmp(symbol, "value") == 0) {
         return yui_event_resolve_value(resolver_ctx, buffer, buffer_len);
@@ -336,599 +506,846 @@ static const char *yui_event_symbol_resolver(const char *symbol, void *ctx, char
     if (strcmp(symbol, "checked") == 0) {
         return yui_event_resolve_checked(resolver_ctx, buffer, buffer_len);
     }
-    if (resolver_ctx && resolver_ctx->sensor && strncmp(symbol, "sensor.", 7) == 0) {
-        const char *sub = symbol + 7;
-        return yui_resolve_token(resolver_ctx->sensor, sub, buffer, buffer_len);
+    const char *state_value = NULL;
+    if (resolver_ctx && resolver_ctx->scope) {
+        state_value = yui_scope_resolve_prop(resolver_ctx->scope, symbol);
     }
-
-    const char *state_value = yui_state_get(symbol, NULL);
+    if (!state_value) {
+        state_value = yui_state_get(symbol, "");
+    }
     if (state_value) {
         return state_value;
     }
-
     if (buffer && buffer_len > 0U) {
         buffer[0] = '\0';
     }
     return buffer;
 }
 
-static void yui_fire_widget_load_event(const yui_widget_instance_t *instance)
+static char *yui_strdup_local(const char *value)
 {
-    if (!instance || !instance->widget) {
+    if (!value) {
+        return NULL;
+    }
+    size_t len = strlen(value) + 1U;
+    char *copy = (char *)malloc(len);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, value, len);
+    return copy;
+}
+
+static const char *yui_node_scalar(const yml_node_t *node, const char *key)
+{
+    if (!node || !key) {
+        return NULL;
+    }
+    const yml_node_t *child = yml_node_get_child(node, key);
+    return child ? yml_node_get_scalar(child) : NULL;
+}
+
+static int32_t yui_node_i32(const yml_node_t *node, const char *key, int32_t def)
+{
+    const char *scalar = yui_node_scalar(node, key);
+    return scalar ? atoi(scalar) : def;
+}
+
+static void yui_widget_runtime_destroy(void *ptr)
+{
+    yui_widget_runtime_t *runtime = (yui_widget_runtime_t *)ptr;
+    if (!runtime) {
         return;
     }
-    const yui_action_list_t *list = &instance->widget->events.lists[YUI_WIDGET_EVENT_LOAD];
+    if (runtime->watch_handles) {
+        for (size_t i = 0; i < runtime->watch_count; ++i) {
+            if (runtime->watch_handles[i] != 0U) {
+                yui_state_unwatch(runtime->watch_handles[i]);
+            }
+        }
+        free(runtime->watch_handles);
+    }
+    if (runtime->bindings) {
+        for (size_t i = 0; i < runtime->binding_count; ++i) {
+            free(runtime->bindings[i]);
+        }
+        free(runtime->bindings);
+    }
+    for (size_t i = 0; i < YUI_WIDGET_EVENT_COUNT; ++i) {
+        yui_action_list_free(&runtime->events.lists[i]);
+    }
+    if (runtime->scope) {
+        yui_scope_release(runtime->scope);
+        runtime->scope = NULL;
+    }
+    free(runtime->text_template);
+    free(runtime);
+}
+
+static void yui_widget_event_cb(lv_event_t *event)
+{
+    yui_widget_runtime_t *runtime = (yui_widget_runtime_t *)lv_event_get_user_data(event);
+    if (!runtime) {
+        return;
+    }
+    if (lv_event_get_code(event) == LV_EVENT_DELETE) {
+        yui_widget_runtime_destroy(runtime);
+        return;
+    }
+    lv_event_code_t code = lv_event_get_code(event);
+    yui_widget_event_type_t type = YUI_WIDGET_EVENT_INVALID;
+    for (size_t i = 0; i < s_widget_event_count; ++i) {
+        if (s_widget_events[i].lv_event == code) {
+            type = s_widget_events[i].event_type;
+            break;
+        }
+    }
+    if (type == YUI_WIDGET_EVENT_INVALID) {
+        return;
+    }
+    const yui_action_list_t *list = &runtime->events.lists[type];
     if (!list || list->count == 0U) {
         return;
     }
-    yui_event_resolver_ctx_t ctx = {
-        .lv_event = NULL,
-        .sensor = instance->sensor,
+    yui_event_resolver_ctx_t resolver_ctx = {
+        .lv_event = event,
+        .scope = runtime->scope,
     };
     yui_action_eval_ctx_t eval_ctx = {
         .resolver = yui_event_symbol_resolver,
-        .resolver_ctx = &ctx,
+        .resolver_ctx = &resolver_ctx,
     };
     esp_err_t err = yui_action_list_execute(list, &eval_ctx);
     if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "on_load actions failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "Widget action failed (%s)", esp_err_to_name(err));
     }
 }
 
-static void yui_widget_instance_refresh_text(yui_widget_instance_t *instance)
+static yui_widget_runtime_t *yui_widget_runtime_create(lv_obj_t *event_target, yui_component_scope_t *scope)
 {
-    if (!instance || !instance->widget || !instance->text_target || !instance->widget->text) {
+    if (!event_target) {
+        return NULL;
+    }
+    yui_widget_runtime_t *runtime = (yui_widget_runtime_t *)calloc(1, sizeof(yui_widget_runtime_t));
+    if (!runtime) {
+        return NULL;
+    }
+    runtime->event_target = event_target;
+    runtime->text_target = event_target;
+    runtime->scope = scope;
+    if (scope) {
+        yui_scope_acquire(scope);
+    }
+    lv_obj_add_event_cb(event_target, yui_widget_event_cb, LV_EVENT_ALL, runtime);
+    return runtime;
+}
+
+static void yui_format_text(const char *tmpl, yui_component_scope_t *scope, char *out, size_t out_len)
+{
+    if (!tmpl || !out || out_len == 0U) {
         return;
     }
-    if (!lv_obj_is_valid(instance->text_target)) {
+    yui_expression_ctx_t ctx = {
+        .scope = scope,
+    };
+    size_t pos = 0;
+    out[0] = '\0';
+    while (*tmpl && pos + 1U < out_len) {
+        if (tmpl[0] == '{' && tmpl[1] == '{') {
+            const char *end = strstr(tmpl + 2, "}}");
+            if (!end) {
+                break;
+            }
+            size_t expr_len = (size_t)(end - (tmpl + 2));
+            char *expr = (char *)malloc(expr_len + 1U);
+            if (!expr) {
+                break;
+            }
+            memcpy(expr, tmpl + 2, expr_len);
+            expr[expr_len] = '\0';
+            size_t remaining = out_len - pos;
+            esp_err_t err = yui_expr_eval_to_string(expr, yui_expression_symbol_resolver, &ctx, out + pos, remaining);
+            free(expr);
+            if (err == ESP_OK) {
+                pos += strlen(out + pos);
+            }
+            tmpl = end + 2;
+            continue;
+        }
+        out[pos++] = *tmpl++;
+    }
+    out[pos] = '\0';
+}
+
+static void yui_widget_refresh_text(yui_widget_runtime_t *runtime)
+{
+    if (!runtime || !runtime->text_target || !runtime->text_template) {
         return;
     }
-    char buffer[128];
-    yui_format_text(instance->widget->text, instance->sensor, buffer, sizeof(buffer));
-    lv_label_set_text(instance->text_target, buffer);
+    char buffer[YUI_TEXT_BUFFER_MAX];
+    yui_format_text(runtime->text_template, runtime->scope, buffer, sizeof(buffer));
+    lv_label_set_text(runtime->text_target, buffer);
 }
 
 static void yui_widget_state_cb(const char *key, const char *value, void *user_ctx)
 {
     (void)key;
     (void)value;
-    yui_widget_instance_t *instance = (yui_widget_instance_t *)user_ctx;
-    if (!instance || !instance->text_target || !lv_obj_is_valid(instance->text_target)) {
+    yui_widget_runtime_t *runtime = (yui_widget_runtime_t *)user_ctx;
+    if (!runtime) {
         return;
     }
-    yui_widget_instance_refresh_text(instance);
+    yui_widget_refresh_text(runtime);
 }
 
-static void yui_widget_instance_destroy(yui_widget_instance_t *instance)
+static bool yui_is_valid_token(const char *token)
 {
-    if (!instance) {
-        return;
+    if (!token || token[0] == '\0') {
+        return false;
     }
-    if (instance->watch_handles) {
-        for (size_t i = 0; i < instance->watch_count; ++i) {
-            if (instance->watch_handles[i] != 0U) {
-                yui_state_unwatch(instance->watch_handles[i]);
-            }
-        }
-        free(instance->watch_handles);
-        instance->watch_handles = NULL;
-    }
-    free(instance);
-}
-
-static yui_widget_instance_t *yui_widget_instance_create(const yui_widget_t *widget, const sensor_record_t *sensor, lv_obj_t *event_target, lv_obj_t *text_target)
-{
-    if (!widget || !event_target) {
-        return NULL;
-    }
-    yui_widget_instance_t *instance = (yui_widget_instance_t *)calloc(1, sizeof(yui_widget_instance_t));
-    if (!instance) {
-        return NULL;
-    }
-    instance->widget = widget;
-    instance->sensor = sensor;
-    instance->event_target = event_target;
-    instance->text_target = text_target ? text_target : event_target;
-
-    if (widget->state_binding_count > 0U) {
-        instance->watch_handles = (yui_state_watch_handle_t *)calloc(widget->state_binding_count, sizeof(yui_state_watch_handle_t));
-        if (!instance->watch_handles) {
-            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_STATE, "Failed to allocate watch handle buffer");
-        } else {
-            for (size_t i = 0; i < widget->state_binding_count; ++i) {
-                const char *binding = widget->state_bindings[i];
-                if (!binding) {
-                    continue;
-                }
-                yui_state_watch_handle_t handle = 0;
-                esp_err_t err = yui_state_watch(binding, yui_widget_state_cb, instance, &handle);
-                if (err == ESP_OK) {
-                    instance->watch_handles[instance->watch_count++] = handle;
-                } else {
-                    yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_STATE, "Failed to watch state key '%s' (%s)", binding, esp_err_to_name(err));
-                }
-            }
+    for (const char *cursor = token; *cursor; ++cursor) {
+        char ch = *cursor;
+        if (!(isalnum((unsigned char)ch) || ch == '_' || ch == '-' || ch == '.')) {
+            return false;
         }
     }
-
-    return instance;
+    return true;
 }
 
-static void yui_bind_widget_runtime(lv_obj_t *event_target, lv_obj_t *text_target, const yui_widget_t *widget, const sensor_record_t *sensor)
+static esp_err_t yui_collect_bindings_from_text(const char *text, char ***out_tokens, size_t *out_count)
 {
-    if (!event_target || !widget) {
-        return;
+    if (!out_tokens || !out_count) {
+        return ESP_ERR_INVALID_ARG;
     }
-    bool needs_events = yui_widget_has_events(widget);
-    bool needs_watchers = widget->state_binding_count > 0U;
-    if (!needs_events && !needs_watchers) {
-        return;
+    *out_tokens = NULL;
+    *out_count = 0;
+    if (!text) {
+        return ESP_OK;
     }
-    yui_widget_instance_t *instance = yui_widget_instance_create(widget, sensor, event_target, text_target);
-    if (!instance) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Failed to initialize widget runtime context");
-        return;
+    const char *cursor = text;
+    while (true) {
+        const char *open = strstr(cursor, "{{");
+        if (!open) {
+            break;
+        }
+        const char *close = strstr(open + 2, "}}");
+        if (!close) {
+            break;
+        }
+        const char *token_start = open + 2;
+        size_t len = (size_t)(close - token_start);
+        while (len > 0U && isspace((unsigned char)*token_start)) {
+            ++token_start;
+            --len;
+        }
+        while (len > 0U && isspace((unsigned char)token_start[len - 1U])) {
+            --len;
+        }
+        if (len > 0U) {
+            char *token = (char *)malloc(len + 1U);
+            if (!token) {
+                return ESP_ERR_NO_MEM;
+            }
+            memcpy(token, token_start, len);
+            token[len] = '\0';
+            if (yui_is_valid_token(token)) {
+                char **next = (char **)realloc(*out_tokens, (*out_count + 1U) * sizeof(char *));
+                if (!next) {
+                    free(token);
+                    return ESP_ERR_NO_MEM;
+                }
+                *out_tokens = next;
+                (*out_tokens)[(*out_count)++] = token;
+            } else {
+                free(token);
+            }
+        }
+        cursor = close + 2;
     }
-    lv_obj_add_event_cb(event_target, yui_widget_event_cb, LV_EVENT_ALL, instance);
-    if (needs_events) {
-        yui_fire_widget_load_event(instance);
-    }
+    return ESP_OK;
 }
 
-static void yui_widget_event_cb(lv_event_t *event)
+static esp_err_t yui_widget_append_watch(yui_widget_runtime_t *runtime, yui_state_watch_handle_t handle)
 {
-    yui_widget_instance_t *instance = (yui_widget_instance_t *)lv_event_get_user_data(event);
-    if (!instance) {
-        return;
+    if (!runtime || handle == 0U) {
+        return ESP_OK;
     }
-    if (lv_event_get_code(event) == LV_EVENT_DELETE) {
-        yui_widget_instance_destroy(instance);
-        return;
+    yui_state_watch_handle_t *next = (yui_state_watch_handle_t *)realloc(runtime->watch_handles, (runtime->watch_count + 1U) * sizeof(yui_state_watch_handle_t));
+    if (!next) {
+        return ESP_ERR_NO_MEM;
     }
-    if (!instance->widget || !yui_widget_has_events(instance->widget)) {
-        return;
+    runtime->watch_handles = next;
+    runtime->watch_handles[runtime->watch_count++] = handle;
+    return ESP_OK;
+}
+
+static esp_err_t yui_widget_watch_state(yui_widget_runtime_t *runtime, const char *key)
+{
+    if (!runtime || !key || key[0] == '\0') {
+        return ESP_OK;
     }
-    yui_widget_event_type_t mapped = yui_widget_event_from_lv(lv_event_get_code(event));
-    if (mapped == YUI_WIDGET_EVENT_INVALID) {
-        return;
+    yui_state_watch_handle_t handle = 0;
+    esp_err_t err = yui_state_watch(key, yui_widget_state_cb, runtime, &handle);
+    if (err != ESP_OK || handle == 0U) {
+        return err;
     }
-    const yui_action_list_t *list = &instance->widget->events.lists[mapped];
-    if (!list || list->count == 0U) {
-        return;
+    esp_err_t append_err = yui_widget_append_watch(runtime, handle);
+    if (append_err != ESP_OK) {
+        yui_state_unwatch(handle);
+        return append_err;
     }
-    yamui_telemetry_widget_event(yui_widget_debug_label(instance->widget), yui_widget_event_name(mapped));
-    yui_event_resolver_ctx_t ctx = {
-        .lv_event = event,
-        .sensor = instance->sensor,
-    };
-    yui_action_eval_ctx_t eval_ctx = {
-        .resolver = yui_event_symbol_resolver,
-        .resolver_ctx = &ctx,
-    };
-    esp_err_t err = yui_action_list_execute(list, &eval_ctx);
+    return ESP_OK;
+}
+
+static esp_err_t yui_widget_bind_text(yui_widget_runtime_t *runtime, const char *text, lv_obj_t *target)
+{
+    if (!runtime || !text || !target) {
+        return ESP_OK;
+    }
+    runtime->text_target = target;
+    runtime->text_template = yui_strdup_local(text);
+    if (!runtime->text_template) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = yui_collect_bindings_from_text(text, &runtime->bindings, &runtime->binding_count);
     if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "Action execution failed (%s)", esp_err_to_name(err));
+        return err;
     }
+    for (size_t i = 0; i < runtime->binding_count; ++i) {
+        const char *token = runtime->bindings[i];
+        if (!token) {
+            continue;
+        }
+        bool handled = false;
+        if (runtime->scope) {
+            yui_component_prop_t *prop = yui_scope_find_prop(runtime->scope, token);
+            if (prop) {
+                handled = true;
+                for (size_t dep = 0; dep < prop->dependency_count; ++dep) {
+                    err = yui_widget_watch_state(runtime, prop->dependencies[dep]);
+                    if (err != ESP_OK) {
+                        return err;
+                    }
+                }
+            }
+        }
+        if (!handled) {
+            err = yui_widget_watch_state(runtime, token);
+            if (err != ESP_OK) {
+                return err;
+            }
+        }
+    }
+    yui_widget_refresh_text(runtime);
+    return ESP_OK;
 }
 
-static esp_err_t yui_navigation_execute_request(yui_nav_request_type_t type, const char *arg, void *user_ctx)
+static esp_err_t yui_widget_parse_events(const yml_node_t *node, yui_widget_runtime_t *runtime)
 {
-    (void)user_ctx;
-    switch (type) {
-        case YUI_NAV_REQUEST_GOTO:
-            if (!arg || arg[0] == '\0') {
-                return ESP_ERR_INVALID_ARG;
-            }
-            return yui_navigation_replace_top(arg);
-        case YUI_NAV_REQUEST_PUSH:
-            if (!arg || arg[0] == '\0') {
-                return ESP_ERR_INVALID_ARG;
-            }
-            return yui_navigation_push_screen(arg);
-        case YUI_NAV_REQUEST_POP:
-            return yui_navigation_pop_screen_internal();
-        default:
-            return ESP_ERR_INVALID_ARG;
+    if (!node || !runtime) {
+        return ESP_OK;
     }
+    for (size_t i = 0; i < s_widget_event_count; ++i) {
+        const yml_node_t *event_node = yml_node_get_child(node, s_widget_events[i].yaml_key);
+        if (!event_node) {
+            continue;
+        }
+        esp_err_t err = yui_action_list_from_node(event_node, &runtime->events.lists[s_widget_events[i].event_type]);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    return ESP_OK;
 }
 
-static void yui_screen_instance_destroy(yui_screen_instance_t *instance)
+static lv_color_t yui_color_from_string(const char *hex, lv_color_t fallback)
 {
-    if (!instance) {
+    if (!hex || hex[0] != '#') {
+        return fallback;
+    }
+    size_t len = strlen(hex);
+    if (len != 7U && len != 9U) {
+        return fallback;
+    }
+    uint32_t value = (uint32_t)strtoul(hex + 1, NULL, 16);
+    if (len == 9U) {
+        value >>= 8;
+    }
+    return lv_color_hex(value & 0xFFFFFFU);
+}
+
+static void yui_apply_style(lv_obj_t *obj, const yui_style_t *style)
+{
+    if (!obj || !style) {
         return;
     }
-    free(instance->name);
-    instance->name = NULL;
-    if (instance->root) {
-        yml_node_free(instance->root);
-        instance->root = NULL;
+    if (style->background_color) {
+        lv_obj_set_style_bg_color(obj, yui_color_from_string(style->background_color, lv_color_hex(0x101018)), 0);
+        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     }
-    yui_schema_free(&instance->schema);
-    memset(&instance->schema, 0, sizeof(instance->schema));
+    if (style->padding > 0) {
+        lv_obj_set_style_pad_all(obj, style->padding, 0);
+    }
+    if (style->padding_x >= 0) {
+        lv_obj_set_style_pad_left(obj, style->padding_x, 0);
+        lv_obj_set_style_pad_right(obj, style->padding_x, 0);
+    }
+    if (style->padding_y >= 0) {
+        lv_obj_set_style_pad_top(obj, style->padding_y, 0);
+        lv_obj_set_style_pad_bottom(obj, style->padding_y, 0);
+    }
+    if (style->radius > 0) {
+        lv_obj_set_style_radius(obj, style->radius, 0);
+    }
 }
 
-static void yui_navigation_clear_stack(void)
+static void yui_apply_layout(lv_obj_t *obj, const yml_node_t *layout_node, const char *default_type)
 {
-    yui_nav_queue_reset();
-    yui_modal_clear_stack();
-    if (!s_screen_stack) {
-        s_screen_count = 0;
+    const char *type = layout_node ? yui_node_scalar(layout_node, "type") : NULL;
+    const char *mode = type ? type : default_type;
+    if (!mode || strcmp(mode, "column") == 0) {
+        lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
+    } else if (strcmp(mode, "row") == 0) {
+        lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_ROW);
+    } else {
+        lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
+    }
+    int32_t gap = yui_node_i32(layout_node, "gap", 12);
+    lv_obj_set_style_pad_row(obj, gap, 0);
+    lv_obj_set_style_pad_column(obj, gap, 0);
+    const char *align = layout_node ? yui_node_scalar(layout_node, "align") : NULL;
+    const char *justify = layout_node ? yui_node_scalar(layout_node, "justify") : NULL;
+    lv_obj_set_flex_align(
+        obj,
+        yui_flex_align_from_string(justify, LV_FLEX_ALIGN_START),
+        yui_flex_align_from_string(align, LV_FLEX_ALIGN_START),
+        LV_FLEX_ALIGN_STRETCH);
+}
+
+static bool yui_node_parse_size(const yml_node_t *node, const char *key, lv_coord_t *out_value)
+{
+    if (!node || !key || !out_value) {
+        return false;
+    }
+    const yml_node_t *child = yml_node_get_child(node, key);
+    if (!child) {
+        return false;
+    }
+    const char *scalar = yml_node_get_scalar(child);
+    if (!scalar) {
+        return false;
+    }
+    size_t len = strlen(scalar);
+    if (len > 1U && scalar[len - 1U] == '%') {
+        *out_value = LV_PCT(atoi(scalar));
+        return true;
+    }
+    *out_value = (lv_coord_t)atoi(scalar);
+    return true;
+}
+
+static lv_align_t yui_align_from_string(const char *value, lv_align_t def)
+{
+    if (!value) {
+        return def;
+    }
+    if (strcasecmp(value, "center") == 0) {
+        return LV_ALIGN_CENTER;
+    }
+    if (strcasecmp(value, "top") == 0) {
+        return LV_ALIGN_TOP_MID;
+    }
+    if (strcasecmp(value, "bottom") == 0) {
+        return LV_ALIGN_BOTTOM_MID;
+    }
+    if (strcasecmp(value, "left") == 0) {
+        return LV_ALIGN_LEFT_MID;
+    }
+    if (strcasecmp(value, "right") == 0) {
+        return LV_ALIGN_RIGHT_MID;
+    }
+    return def;
+}
+
+static lv_flex_align_t yui_flex_align_from_string(const char *value, lv_flex_align_t def)
+{
+    if (!value) {
+        return def;
+    }
+    if (strcasecmp(value, "start") == 0) {
+        return LV_FLEX_ALIGN_START;
+    }
+    if (strcasecmp(value, "center") == 0) {
+        return LV_FLEX_ALIGN_CENTER;
+    }
+    if (strcasecmp(value, "end") == 0) {
+        return LV_FLEX_ALIGN_END;
+    }
+    if (strcasecmp(value, "space_between") == 0) {
+        return LV_FLEX_ALIGN_SPACE_BETWEEN;
+    }
+    if (strcasecmp(value, "space_around") == 0) {
+        return LV_FLEX_ALIGN_SPACE_AROUND;
+    }
+    if (strcasecmp(value, "space_evenly") == 0) {
+        return LV_FLEX_ALIGN_SPACE_EVENLY;
+    }
+    if (strcasecmp(value, "stretch") == 0) {
+        return LV_FLEX_ALIGN_STRETCH;
+    }
+    return def;
+}
+
+static void yui_apply_common_widget_attrs(lv_obj_t *obj, const yml_node_t *node, yui_schema_runtime_t *schema)
+{
+    if (!obj || !node || !schema) {
         return;
     }
-    for (size_t i = 0; i < s_screen_count; ++i) {
-        yui_screen_instance_destroy(&s_screen_stack[i]);
+    const char *style_name = yui_node_scalar(node, "style");
+    if (style_name) {
+        const yui_style_t *style = yui_schema_get_style(&schema->schema, style_name);
+        yui_apply_style(obj, style);
     }
-    s_screen_count = 0;
+    lv_coord_t size_value = 0;
+    if (yui_node_parse_size(node, "width", &size_value)) {
+        lv_obj_set_width(obj, size_value);
+    }
+    if (yui_node_parse_size(node, "height", &size_value)) {
+        lv_obj_set_height(obj, size_value);
+    }
+    const char *align = yui_node_scalar(node, "align");
+    if (align) {
+        lv_obj_align(obj, yui_align_from_string(align, LV_ALIGN_CENTER), 0, 0);
+    }
+    int32_t grow = yui_node_i32(node, "grow", -1);
+    if (grow >= 0) {
+        lv_obj_set_flex_grow(obj, (uint8_t)grow);
+    }
+}
+
+static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t *schema, lv_obj_t *parent, yui_component_scope_t *scope);
+
+static esp_err_t yui_render_widget_list(const yml_node_t *widgets_node, yui_schema_runtime_t *schema, lv_obj_t *parent, yui_component_scope_t *scope)
+{
+    if (!widgets_node || yml_node_get_type(widgets_node) != YML_NODE_SEQUENCE) {
+        return ESP_OK;
+    }
+    for (const yml_node_t *child = yml_node_child_at(widgets_node, 0); child; child = yml_node_next(child)) {
+        esp_err_t err = yui_render_widget(child, schema, parent, scope);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    return ESP_OK;
+}
+
+static esp_err_t yui_render_component_instance(const yui_component_def_t *component, const yml_node_t *instance_node, yui_schema_runtime_t *schema, lv_obj_t *parent, yui_component_scope_t *parent_scope)
+{
+    if (!component || !schema || !parent) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    yui_component_scope_t *scope = yui_scope_create(parent_scope, component, instance_node);
+    if (!scope) {
+        return ESP_ERR_NO_MEM;
+    }
+    lv_obj_t *container = lv_obj_create(parent);
+    lv_obj_set_style_bg_opa(container, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+    /* Size to fit content by default */
+    lv_obj_set_size(container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    yui_apply_layout(container, component->layout_node, "column");
+    lv_obj_add_event_cb(container, yui_scope_delete_cb, LV_EVENT_DELETE, scope);
+    esp_err_t err = yui_render_widget_list(component->widgets_node, schema, container, scope);
+    if (err != ESP_OK) {
+        lv_obj_del(container);
+    }
+    return err;
+}
+
+static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t *schema, lv_obj_t *parent, yui_component_scope_t *scope)
+{
+    if (!node || !schema || !parent || yml_node_get_type(node) != YML_NODE_MAPPING) {
+        return ESP_OK;
+    }
+    const char *type = yui_node_scalar(node, "type");
+    if (!type) {
+        return ESP_OK;
+    }
+    const yui_component_def_t *component = yui_schema_get_component(&schema->schema, type);
+    if (component) {
+        return yui_render_component_instance(component, node, schema, parent, scope);
+    }
+    if (strcmp(type, "label") == 0) {
+        lv_obj_t *label = lv_label_create(parent);
+        yui_apply_common_widget_attrs(label, node, schema);
+        const char *text = yui_node_scalar(node, "text");
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(label, scope);
+        if (runtime && text) {
+            (void)yui_widget_bind_text(runtime, text, label);
+        } else if (text) {
+            lv_label_set_text(label, text);
+        }
+        if (runtime) {
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+    }
+    if (strcmp(type, "img") == 0) {
+        const char *src = yui_node_scalar(node, "src");
+        if (!src) {
+            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Image widget missing src");
+            return ESP_OK;
+        }
+        if (strncmp(src, "symbol:", 7) == 0) {
+            const char *glyph = yui_symbol_lookup(src + 7);
+            lv_obj_t *symbol = lv_label_create(parent);
+            yui_apply_common_widget_attrs(symbol, node, schema);
+            lv_label_set_text(symbol, glyph ? glyph : "");
+            return ESP_OK;
+        }
+        lv_obj_t *img = lv_img_create(parent);
+        yui_apply_common_widget_attrs(img, node, schema);
+        lv_img_set_src(img, src);
+        return ESP_OK;
+    }
+    if (strcmp(type, "button") == 0) {
+        lv_obj_t *btn = lv_btn_create(parent);
+        lv_obj_set_width(btn, LV_PCT(100));
+        lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+        yui_apply_common_widget_attrs(btn, node, schema);
+        lv_obj_t *label = lv_label_create(btn);
+        lv_obj_center(label);
+        const char *text = yui_node_scalar(node, "text");
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(btn, scope);
+        if (runtime) {
+            runtime->text_target = label;
+            if (text) {
+                (void)yui_widget_bind_text(runtime, text, label);
+            }
+            (void)yui_widget_parse_events(node, runtime);
+        } else if (text) {
+            lv_label_set_text(label, text);
+        }
+        return ESP_OK;
+    }
+    if (strcmp(type, "spacer") == 0) {
+        lv_obj_t *spacer = lv_obj_create(parent);
+        lv_obj_remove_style_all(spacer);
+        lv_obj_set_height(spacer, yui_node_i32(node, "size", 12));
+        lv_obj_set_width(spacer, LV_PCT(100));
+        lv_obj_clear_flag(spacer, LV_OBJ_FLAG_CLICKABLE);
+        yui_apply_common_widget_attrs(spacer, node, schema);
+        return ESP_OK;
+    }
+    if (strcmp(type, "row") == 0 || strcmp(type, "column") == 0) {
+        lv_obj_t *container = lv_obj_create(parent);
+        lv_obj_set_style_bg_opa(container, LV_OPA_TRANSP, 0);
+        lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+        /* Size to fit content by default */
+        lv_obj_set_size(container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        yui_apply_layout(container, yml_node_get_child(node, "layout"), type);
+        yui_apply_common_widget_attrs(container, node, schema);
+        return yui_render_widget_list(yml_node_get_child(node, "widgets"), schema, container, scope);
+    }
+    if (strcmp(type, "panel") == 0) {
+        lv_obj_t *panel = lv_obj_create(parent);
+        lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+        yui_apply_common_widget_attrs(panel, node, schema);
+        const yml_node_t *layout = yml_node_get_child(node, "layout");
+        if (layout) {
+            yui_apply_layout(panel, layout, "column");
+        }
+        return yui_render_widget_list(yml_node_get_child(node, "widgets"), schema, panel, scope);
+    }
+    yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Unsupported widget type '%s'", type);
+    return ESP_OK;
+}
+
+static esp_err_t yui_render_screen(const yml_node_t *screen_node, yui_schema_runtime_t *schema)
+{
+    if (!screen_node || !schema) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    lv_obj_t *root = lv_scr_act();
+    if (!root) {
+        return ESP_FAIL;
+    }
+    kc_touch_display_reset_ui_state();
+    yui_modal_close_all();
+    lv_obj_clean(root);
+
+    lv_obj_t *container = lv_obj_create(root);
+    lv_obj_set_size(container, LV_PCT(100), LV_PCT(100));
+    lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+    yui_apply_layout(container, yml_node_get_child(screen_node, "layout"), "column");
+
+    const yml_node_t *widgets = yml_node_get_child(screen_node, "widgets");
+    esp_err_t err = yui_render_widget_list(widgets, schema, container, NULL);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    const yml_node_t *on_load = yml_node_get_child(screen_node, "on_load");
+    if (on_load) {
+        yui_action_list_t list = {0};
+        if (yui_action_list_from_node(on_load, &list) == ESP_OK && list.count > 0U) {
+            yui_action_eval_ctx_t eval_ctx = {
+                .resolver = yui_event_symbol_resolver,
+                .resolver_ctx = NULL,
+            };
+            (void)yui_action_list_execute(&list, &eval_ctx);
+        }
+        yui_action_list_free(&list);
+    }
+
+    return ESP_OK;
+}
+
+static void yui_screen_frame_destroy(yui_screen_frame_t *frame)
+{
+    if (!frame) {
+        return;
+    }
+    free(frame->screen_name);
+    frame->screen_name = NULL;
+    frame->schema = NULL;
+}
+
+static void yui_schema_runtime_destroy(yui_schema_runtime_t *schema)
+{
+    if (!schema) {
+        return;
+    }
+    free(schema->name);
+    if (schema->root) {
+        yml_node_free(schema->root);
+    }
+    yui_schema_free(&schema->schema);
+    free(schema);
+}
+
+static yui_schema_runtime_t *yui_schema_runtime_load(const char *name)
+{
+    if (s_loaded_schema && s_loaded_schema->name && name && strcasecmp(s_loaded_schema->name, name) == 0) {
+        return s_loaded_schema;
+    }
+    size_t blob_size = 0;
+    const uint8_t *blob = ui_schemas_get_named(name, &blob_size);
+    if (!blob || blob_size == 0U) {
+        return NULL;
+    }
+    yml_node_t *root = NULL;
+    if (yaml_core_parse_buffer((const char *)blob, blob_size, &root) != ESP_OK) {
+        return NULL;
+    }
+    yui_schema_t schema = {0};
+    if (yui_schema_from_tree(root, &schema) != ESP_OK) {
+        yml_node_free(root);
+        return NULL;
+    }
+    yui_schema_runtime_t *runtime = (yui_schema_runtime_t *)calloc(1, sizeof(yui_schema_runtime_t));
+    if (!runtime) {
+        yui_schema_free(&schema);
+        yml_node_free(root);
+        return NULL;
+    }
+    runtime->name = yui_strdup_local(name);
+    runtime->root = root;
+    runtime->schema = schema;
+    if (s_loaded_schema) {
+        yui_schema_runtime_destroy(s_loaded_schema);
+    }
+    s_loaded_schema = runtime;
+    return runtime;
+}
+
+static const yml_node_t *yui_schema_resolve_screen(yui_schema_runtime_t *schema, const char *screen)
+{
+    if (!schema) {
+        return NULL;
+    }
+    const char *target = screen;
+    if (!target || target[0] == '\0') {
+        target = yui_schema_default_screen(&schema->schema);
+    }
+    return yui_schema_get_screen(&schema->schema, target);
 }
 
 static esp_err_t yui_navigation_ensure_capacity(size_t desired)
 {
-    if (desired <= s_screen_capacity) {
+    if (desired <= s_nav_capacity) {
         return ESP_OK;
     }
-    size_t new_capacity = s_screen_capacity == 0 ? 2 : s_screen_capacity * 2;
+    size_t new_capacity = s_nav_capacity == 0 ? 4 : s_nav_capacity * 2;
     while (new_capacity < desired) {
         new_capacity *= 2;
     }
-    yui_screen_instance_t *resized = (yui_screen_instance_t *)realloc(s_screen_stack, new_capacity * sizeof(yui_screen_instance_t));
-    if (!resized) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Failed to grow navigation stack");
+    yui_screen_frame_t *next = (yui_screen_frame_t *)realloc(s_nav_stack, new_capacity * sizeof(yui_screen_frame_t));
+    if (!next) {
         return ESP_ERR_NO_MEM;
     }
-    for (size_t i = s_screen_capacity; i < new_capacity; ++i) {
-        memset(&resized[i], 0, sizeof(yui_screen_instance_t));
+    for (size_t i = s_nav_capacity; i < new_capacity; ++i) {
+        memset(&next[i], 0, sizeof(yui_screen_frame_t));
     }
-    s_screen_stack = resized;
-    s_screen_capacity = new_capacity;
-    return ESP_OK;
-}
-
-static const char *yui_navigation_resolve_name(const char *name)
-{
-    if (name && name[0] != '\0') {
-        return name;
-    }
-    return ui_schemas_get_default_name();
-}
-
-static lv_flex_align_t yui_align_to_lv(yui_component_align_t align)
-{
-    switch (align) {
-        case YUI_COMPONENT_ALIGN_CENTER:
-            return LV_FLEX_ALIGN_CENTER;
-        case YUI_COMPONENT_ALIGN_END:
-            return LV_FLEX_ALIGN_END;
-        case YUI_COMPONENT_ALIGN_STRETCH:
-#ifdef LV_FLEX_ALIGN_STRETCH
-            return LV_FLEX_ALIGN_STRETCH;
-#else
-            return LV_FLEX_ALIGN_START;
-#endif
-        case YUI_COMPONENT_ALIGN_START:
-        default:
-            return LV_FLEX_ALIGN_START;
-    }
-}
-
-static lv_flex_flow_t yui_flow_to_lv(yui_component_flow_t flow)
-{
-    return flow == YUI_COMPONENT_FLOW_ROW ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN;
-}
-
-static void yui_component_apply_layout(lv_obj_t *obj, const yui_component_layout_t *layout)
-{
-    if (!obj) {
-        return;
-    }
-    uint8_t padding = layout ? layout->padding : 16;
-    uint8_t gap = layout ? layout->gap : 12;
-    lv_obj_set_style_pad_all(obj, padding, 0);
-    lv_obj_set_style_pad_row(obj, gap, 0);
-    lv_obj_set_style_pad_column(obj, gap, 0);
-    lv_obj_set_style_radius(obj, 14, 0);
-    lv_obj_set_style_border_width(obj, 0, 0);
-    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
-    const char *bg = layout ? layout->background_color : NULL;
-    lv_color_t color = yui_color_from_string(bg, lv_color_hex(0x1F1F2B));
-    lv_obj_set_style_bg_color(obj, color, 0);
-    lv_obj_set_flex_flow(obj, yui_flow_to_lv(layout ? layout->flow : YUI_COMPONENT_FLOW_COLUMN));
-    lv_flex_align_t main_align = yui_align_to_lv(layout ? layout->main_align : YUI_COMPONENT_ALIGN_START);
-    lv_flex_align_t cross_align = yui_align_to_lv(layout ? layout->cross_align : YUI_COMPONENT_ALIGN_START);
-    lv_obj_set_flex_align(obj, main_align, cross_align, cross_align);
-}
-
-static const yui_component_t *yui_find_component(const char *name)
-{
-    if (!name || name[0] == '\0') {
-        return NULL;
-    }
-    for (size_t i = s_screen_count; i > 0; --i) {
-        const yui_component_t *component = yui_schema_get_component(&s_screen_stack[i - 1U].schema, name);
-        if (component) {
-            return component;
-        }
-    }
-    return NULL;
-}
-
-static esp_err_t yui_render_component(const yui_component_t *component, lv_obj_t *parent)
-{
-    if (!component || !parent) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    for (size_t i = 0; i < component->widget_count; ++i) {
-        yui_render_widget(&component->widgets[i], NULL, NULL, parent);
-    }
-    return ESP_OK;
-}
-
-static lv_obj_t *yui_modal_create_overlay(void)
-{
-    lv_obj_t *screen = lv_scr_act();
-    if (!screen) {
-        return NULL;
-    }
-    lv_obj_t *overlay = lv_obj_create(screen);
-    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_50, 0);
-    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
-    return overlay;
-}
-
-static void yui_modal_emit_event(const char *event, const char *component_name)
-{
-    if (!event) {
-        return;
-    }
-    const char *args[1] = {component_name ? component_name : ""};
-    size_t arg_count = (component_name && component_name[0] != '\0') ? 1U : 0U;
-    (void)yamui_runtime_emit_event(event, arg_count > 0U ? args : NULL, arg_count);
-}
-
-static void yui_modal_instance_destroy(yui_modal_instance_t *instance, bool emit_event)
-{
-    if (!instance) {
-        return;
-    }
-    const char *component_name = (instance->component && instance->component->name) ? instance->component->name : NULL;
-    if (instance->overlay && lv_obj_is_valid(instance->overlay)) {
-        lv_obj_del(instance->overlay);
-    }
-    instance->overlay = NULL;
-    instance->container = NULL;
-    instance->component = NULL;
-    if (emit_event) {
-        yui_modal_emit_event("modal.closed", component_name);
-    }
-}
-
-static esp_err_t yui_modal_ensure_capacity(size_t desired)
-{
-    if (desired <= s_modal_capacity) {
-        return ESP_OK;
-    }
-    size_t new_capacity = s_modal_capacity == 0 ? 2 : s_modal_capacity * 2;
-    while (new_capacity < desired) {
-        new_capacity *= 2;
-    }
-    yui_modal_instance_t *resized = (yui_modal_instance_t *)realloc(s_modal_stack, new_capacity * sizeof(yui_modal_instance_t));
-    if (!resized) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_MODAL, "Failed to grow modal stack");
-        return ESP_ERR_NO_MEM;
-    }
-    for (size_t i = s_modal_capacity; i < new_capacity; ++i) {
-        memset(&resized[i], 0, sizeof(yui_modal_instance_t));
-    }
-    s_modal_stack = resized;
-    s_modal_capacity = new_capacity;
-    return ESP_OK;
-}
-
-static void yui_modal_clear_stack(void)
-{
-    if (!s_modal_stack) {
-        s_modal_count = 0;
-        return;
-    }
-    for (size_t i = 0; i < s_modal_count; ++i) {
-        yui_modal_instance_destroy(&s_modal_stack[i], true);
-    }
-    s_modal_count = 0;
-}
-
-static esp_err_t yui_modal_render_component(yui_modal_instance_t *instance, const yui_component_t *component)
-{
-    if (!instance || !component) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    lv_obj_t *overlay = yui_modal_create_overlay();
-    if (!overlay) {
-        return ESP_ERR_NO_MEM;
-    }
-    lv_obj_t *container = lv_obj_create(overlay);
-    yui_component_apply_layout(container, &component->layout);
-    lv_obj_set_width(container, LV_PCT(80));
-    lv_obj_center(container);
-    esp_err_t err = yui_render_component(component, container);
-    if (err != ESP_OK) {
-        lv_obj_del(overlay);
-        return err;
-    }
-    instance->overlay = overlay;
-    instance->container = container;
-    instance->component = component;
-    return ESP_OK;
-}
-
-static esp_err_t yui_modal_push_component(const yui_component_t *component)
-{
-    if (!component) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    esp_err_t err = yui_modal_ensure_capacity(s_modal_count + 1U);
-    if (err != ESP_OK) {
-        return err;
-    }
-    yui_modal_instance_t instance = {0};
-    err = yui_modal_render_component(&instance, component);
-    if (err != ESP_OK) {
-        return err;
-    }
-    s_modal_stack[s_modal_count++] = instance;
-    yui_modal_emit_event("modal.opened", component->name);
-    return ESP_OK;
-}
-
-static esp_err_t yui_screen_instance_load(const char *name, yui_screen_instance_t *out)
-{
-    if (!out) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    memset(out, 0, sizeof(*out));
-    const char *resolved = yui_navigation_resolve_name(name);
-    if (!resolved) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "No schema name resolved");
-        yamui_telemetry_error("nav", "no_schema");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    size_t blob_size = 0;
-    const uint8_t *blob = ui_schemas_get_named(resolved, &blob_size);
-    if (!blob || blob_size == 0U) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Schema '%s' not found", resolved);
-        yamui_telemetry_error("nav", "schema_not_found");
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    yml_node_t *root = NULL;
-    esp_err_t err = yaml_core_parse_buffer((const char *)blob, blob_size, &root);
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Failed to parse schema '%s' (%s)", resolved, esp_err_to_name(err));
-        return err;
-    }
-
-    yui_schema_t schema = {0};
-    err = yui_schema_from_tree(root, &schema);
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Schema '%s' invalid (%s)", resolved, esp_err_to_name(err));
-        yml_node_free(root);
-        return err;
-    }
-
-    out->name = yui_strdup_local(resolved);
-    if (!out->name) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Failed to track schema name");
-        yui_schema_free(&schema);
-        yml_node_free(root);
-        return ESP_ERR_NO_MEM;
-    }
-    out->root = root;
-    out->schema = schema;
+    s_nav_stack = next;
+    s_nav_capacity = new_capacity;
     return ESP_OK;
 }
 
 static esp_err_t yui_navigation_render_current(void)
 {
-    if (s_screen_count == 0U) {
+    if (s_nav_count == 0U) {
         return ESP_ERR_INVALID_STATE;
     }
-    int64_t render_start = esp_timer_get_time();
-    if (yui_nav_queue_begin_render() != ESP_OK) {
-        return ESP_ERR_INVALID_STATE;
+    yui_screen_frame_t *frame = &s_nav_stack[s_nav_count - 1U];
+    const yml_node_t *screen_node = yui_schema_resolve_screen(frame->schema, frame->screen_name);
+    if (!screen_node) {
+        return ESP_ERR_NOT_FOUND;
     }
-    yui_modal_clear_stack();
-    esp_err_t err = yui_render_schema(&s_screen_stack[s_screen_count - 1U].schema);
+    esp_err_t begin_err = yui_nav_queue_begin_render();
+    if (begin_err != ESP_OK) {
+        return begin_err;
+    }
+    esp_err_t err = yui_render_screen(screen_node, frame->schema);
     yui_nav_queue_end_render(err == ESP_OK);
-    if (err == ESP_OK) {
-        const char *screen_name = s_screen_stack[s_screen_count - 1U].name ? s_screen_stack[s_screen_count - 1U].name : "<screen>";
-        yamui_telemetry_screen_load(screen_name);
-        double elapsed_ms = (double)(esp_timer_get_time() - render_start) / 1000.0;
-        yamui_telemetry_perf("render_screen", screen_name, elapsed_ms);
-        yamui_log(YAMUI_LOG_LEVEL_INFO, YAMUI_LOG_CAT_NAV, "Rendered screen '%s' in %.2f ms", screen_name, elapsed_ms);
-    } else {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "Render failed (%s)", esp_err_to_name(err));
-        yamui_telemetry_error("nav", "render_failed");
-    }
     return err;
 }
 
-static esp_err_t yui_navigation_push_instance(yui_screen_instance_t *instance)
+static esp_err_t yui_navigation_push(const char *screen)
 {
-    if (!instance) {
-        return ESP_ERR_INVALID_ARG;
+    if (!s_loaded_schema) {
+        return ESP_ERR_INVALID_STATE;
     }
-    esp_err_t err = yui_navigation_ensure_capacity(s_screen_count + 1U);
+    esp_err_t err = yui_navigation_ensure_capacity(s_nav_count + 1U);
     if (err != ESP_OK) {
-        yui_screen_instance_destroy(instance);
         return err;
     }
-    s_screen_stack[s_screen_count++] = *instance;
-    memset(instance, 0, sizeof(*instance));
-    err = yui_navigation_render_current();
-    if (err != ESP_OK) {
-        yui_screen_instance_destroy(&s_screen_stack[--s_screen_count]);
-    }
-    return err;
+    yui_screen_frame_t frame = {
+        .schema = s_loaded_schema,
+        .screen_name = yui_strdup_local(screen ? screen : yui_schema_default_screen(&s_loaded_schema->schema)),
+    };
+    s_nav_stack[s_nav_count++] = frame;
+    return yui_navigation_render_current();
 }
 
 static esp_err_t yui_navigation_replace_top(const char *screen)
 {
-    yui_screen_instance_t new_instance = {0};
-    esp_err_t err = yui_screen_instance_load(screen, &new_instance);
-    if (err != ESP_OK) {
-        return err;
+    if (s_nav_count == 0U) {
+        return yui_navigation_push(screen);
     }
-    if (s_screen_count == 0U) {
-        return yui_navigation_push_instance(&new_instance);
-    }
-
-    size_t top_index = s_screen_count - 1U;
-    yui_screen_instance_t old_instance = s_screen_stack[top_index];
-    s_screen_stack[top_index] = new_instance;
-    err = yui_navigation_render_current();
-    if (err != ESP_OK) {
-        yui_screen_instance_destroy(&s_screen_stack[top_index]);
-        s_screen_stack[top_index] = old_instance;
-        (void)yui_navigation_render_current();
-        return err;
-    }
-    yui_screen_instance_destroy(&old_instance);
-    return ESP_OK;
+    yui_screen_frame_t *frame = &s_nav_stack[s_nav_count - 1U];
+    free(frame->screen_name);
+    frame->screen_name = yui_strdup_local(screen);
+    return yui_navigation_render_current();
 }
 
-static esp_err_t yui_navigation_push_screen(const char *screen)
+static esp_err_t yui_navigation_pop_internal(void)
 {
-    yui_screen_instance_t instance = {0};
-    esp_err_t err = yui_screen_instance_load(screen, &instance);
-    if (err != ESP_OK) {
-        return err;
-    }
-    return yui_navigation_push_instance(&instance);
-}
-
-static esp_err_t yui_navigation_pop_screen_internal(void)
-{
-    if (s_screen_count <= 1U) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "Cannot pop root screen");
+    if (s_nav_count <= 1U) {
         return ESP_ERR_INVALID_STATE;
     }
-    yui_screen_instance_t old_instance = s_screen_stack[--s_screen_count];
-    esp_err_t err = yui_navigation_render_current();
-    if (err != ESP_OK) {
-        s_screen_stack[s_screen_count++] = old_instance;
-        (void)yui_navigation_render_current();
-        return err;
-    }
-    yui_screen_instance_destroy(&old_instance);
-    return ESP_OK;
-}
-
-static esp_err_t yui_navigation_reset(const char *screen)
-{
-    yui_navigation_clear_stack();
-    return yui_navigation_push_screen(screen);
+    yui_screen_frame_destroy(&s_nav_stack[--s_nav_count]);
+    return yui_navigation_render_current();
 }
 
 static esp_err_t yui_runtime_goto_screen(const char *screen)
@@ -948,352 +1365,54 @@ static esp_err_t yui_runtime_pop_screen(void)
 
 static esp_err_t yui_runtime_show_modal(const char *component)
 {
-    const yui_component_t *definition = yui_find_component(component);
-    if (!definition) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_MODAL, "Modal component '%s' not found", component ? component : "<null>");
-        yamui_telemetry_error("modal", "component_not_found");
-        return ESP_ERR_NOT_FOUND;
-    }
-    return yui_modal_push_component(definition);
+    return yui_nav_queue_submit(YUI_NAV_REQUEST_SHOW_MODAL, component);
 }
 
 static esp_err_t yui_runtime_close_modal(void)
 {
-    if (s_modal_count == 0U) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_MODAL, "No modal to close");
-        return ESP_ERR_INVALID_STATE;
-    }
-    yui_modal_instance_destroy(&s_modal_stack[--s_modal_count], true);
-    return ESP_OK;
+    return yui_nav_queue_submit(YUI_NAV_REQUEST_CLOSE_MODAL, NULL);
 }
 
 static esp_err_t yui_runtime_call_native(const char *function, const char **args, size_t arg_count)
 {
-    if (!function || function[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
-    }
-    esp_err_t err = yamui_runtime_call_function(function, args, arg_count);
-    if (err == ESP_ERR_NOT_FOUND) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NATIVE, "Native function '%s' not registered", function);
-        yamui_telemetry_error("native", "not_registered");
-    }
-    return err;
+    return yamui_runtime_call_function(function, args, arg_count);
 }
 
 static esp_err_t yui_runtime_emit_event(const char *event, const char **args, size_t arg_count)
 {
-    if (!event || event[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
-    }
     return yamui_runtime_emit_event(event, args, arg_count);
 }
 
-static lv_color_t yui_color_from_string(const char *hex, lv_color_t fallback)
+static esp_err_t yui_navigation_execute_request(yui_nav_request_type_t type, const char *arg, void *ctx)
 {
-    if (!hex || hex[0] != '#') {
-        return fallback;
-    }
-    size_t len = strlen(hex);
-    if (len != 7U && len != 9U) {
-        return fallback;
-    }
-    uint32_t value = (uint32_t)strtoul(hex + 1, NULL, 16);
-    if (len == 7U) {
-        return lv_color_hex(value & 0xFFFFFFU);
-    }
-    return lv_color_hex(value >> 8); // ignore alpha for now
-}
-
-static void yui_style_card(lv_obj_t *obj, const yui_style_t *style)
-{
-    if (!obj) {
-        return;
-    }
-    if (style && style->background_color) {
-        lv_color_t bg = yui_color_from_string(style->background_color, lv_color_hex(0x151523));
-        lv_obj_set_style_bg_color(obj, bg, 0);
-        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
-    } else {
-        lv_obj_set_style_bg_color(obj, lv_color_hex(0x1E1E2E), 0);
-        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
-    }
-    int32_t radius = style ? style->radius : 16;
-    int32_t padding = style ? style->padding : 16;
-    lv_obj_set_style_radius(obj, radius, 0);
-    lv_obj_set_style_pad_all(obj, padding, 0);
-    lv_obj_set_style_border_width(obj, 0, 0);
-    lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-}
-
-static void yui_apply_label_variant(lv_obj_t *label, const yui_widget_t *widget, const yui_style_t *style)
-{
-    if (!label || !widget) {
-        return;
-    }
-    const lv_font_t *font = &lv_font_montserrat_20;
-    lv_color_t color = style && style->text_color ? yui_color_from_string(style->text_color, lv_color_hex(0xF4F4F8)) : lv_color_hex(0xF4F4F8);
-    if (widget->variant) {
-        if (strcmp(widget->variant, "value") == 0) {
-            font = &lv_font_montserrat_20;
-            if (style && style->accent_color) {
-                color = yui_color_from_string(style->accent_color, color);
-            }
-        } else if (strcmp(widget->variant, "status") == 0) {
-            font = LV_FONT_DEFAULT;
-        }
-    }
-    lv_obj_set_style_text_font(label, font, 0);
-    lv_obj_set_style_text_color(label, color, 0);
-}
-
-static void yui_assign_card_width(lv_obj_t *card, uint8_t columns)
-{
-    if (columns <= 1U) {
-        lv_obj_set_width(card, LV_PCT(100));
-    } else if (columns == 2U) {
-        lv_obj_set_width(card, LV_PCT(48));
-    } else if (columns == 3U) {
-        lv_obj_set_width(card, LV_PCT(30));
-    } else {
-        lv_obj_set_width(card, LV_PCT(22));
-    }
-}
-
-static const char *yui_resolve_token(const sensor_record_t *sensor, const char *token, char *scratch, size_t scratch_len)
-{
-    if (!token || !sensor) {
-        const char *state_value = yui_state_get(token, "");
-        return state_value ? state_value : "";
-    }
-    if (strcmp(token, "name") == 0) {
-        return sensor->name;
-    }
-    if (strcmp(token, "value") == 0) {
-        snprintf(scratch, scratch_len, "%.1f", sensor->value);
-        return scratch;
-    }
-    if (strcmp(token, "unit") == 0) {
-        return sensor->unit;
-    }
-    if (strcmp(token, "min") == 0) {
-        snprintf(scratch, scratch_len, "%.1f", sensor->min);
-        return scratch;
-    }
-    if (strcmp(token, "max") == 0) {
-        snprintf(scratch, scratch_len, "%.1f", sensor->max);
-        return scratch;
-    }
-    if (strcmp(token, "id") == 0) {
-        return sensor->id;
-    }
-    if (strcmp(token, "type") == 0) {
-        return sensor->type;
-    }
-    if (strcmp(token, "firmware") == 0) {
-        return sensor->firmware;
-    }
-    if (strcmp(token, "address") == 0) {
-        snprintf(scratch, scratch_len, "0x%02X", sensor->address);
-        return scratch;
-    }
-    const char *state_value = yui_state_get(token, "");
-    if (state_value) {
-        return state_value;
-    }
-    return "";
-}
-
-static void yui_format_text(const char *tmpl, const sensor_record_t *sensor, char *out, size_t out_len)
-{
-    if (!tmpl || !out || out_len == 0U) {
-        return;
-    }
-    yui_expression_ctx_t ctx = {
-        .sensor = sensor,
-    };
-    size_t pos = 0;
-    out[0] = '\0';
-    while (*tmpl && pos + 1U < out_len) {
-        if (tmpl[0] == '{' && tmpl[1] == '{') {
-            const char *end = strstr(tmpl + 2, "}}");
-            if (!end) {
-                break;
-            }
-            size_t expr_len = (size_t)(end - (tmpl + 2));
-            char *expr = yui_trimmed_copy(tmpl + 2, expr_len);
-            if (expr) {
-                size_t remaining = out_len - pos;
-                esp_err_t err = yui_expr_eval_to_string(expr, yui_expression_symbol_resolver, &ctx, out + pos, remaining);
-                if (err == ESP_OK) {
-                    pos += strlen(out + pos);
-                }
-                free(expr);
-            }
-            tmpl = end + 2;
-            continue;
-        }
-        out[pos++] = *tmpl++;
-    }
-    out[pos] = '\0';
-}
-
-static void yui_render_widget(const yui_widget_t *widget, const sensor_record_t *sensor, const yui_style_t *style, lv_obj_t *parent)
-{
-    if (!widget || !parent) {
-        return;
-    }
-    char buffer[128] = "";
-    if (widget->text) {
-        yui_format_text(widget->text, sensor, buffer, sizeof(buffer));
-    }
-    switch (widget->type) {
-        case YUI_WIDGET_LABEL: {
-            lv_obj_t *label = lv_label_create(parent);
-            yui_apply_label_variant(label, widget, style);
-            lv_label_set_text(label, widget->text ? buffer : "");
-            lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-            lv_obj_set_width(label, LV_PCT(100));
-            yui_bind_widget_runtime(label, label, widget, sensor);
-            break;
-        }
-        case YUI_WIDGET_BUTTON: {
-            lv_obj_t *btn = lv_btn_create(parent);
-            lv_obj_set_width(btn, LV_PCT(100));
-            lv_obj_set_style_bg_color(btn, lv_color_hex(0x36364A), 0);
-            lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-            lv_obj_set_style_pad_all(btn, 12, 0);
-            lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_t *label = lv_label_create(btn);
-            lv_label_set_text(label, widget->text ? buffer : "");
-            lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-            lv_obj_center(label);
-            yui_bind_widget_runtime(btn, label, widget, sensor);
-            break;
-        }
-        case YUI_WIDGET_SPACER: {
-            lv_obj_t *spacer = lv_obj_create(parent);
-            lv_obj_remove_style_all(spacer);
-            lv_obj_set_height(spacer, widget->size > 0 ? widget->size : 8);
-            lv_obj_set_width(spacer, LV_PCT(100));
-            lv_obj_clear_flag(spacer, LV_OBJ_FLAG_CLICKABLE);
-            break;
-        }
+    (void)ctx;
+    switch (type) {
+        case YUI_NAV_REQUEST_GOTO:
+            return yui_navigation_replace_top(arg);
+        case YUI_NAV_REQUEST_PUSH:
+            return yui_navigation_push(arg);
+        case YUI_NAV_REQUEST_POP:
+            return yui_navigation_pop_internal();
+        case YUI_NAV_REQUEST_SHOW_MODAL:
+            return yui_modal_show_component(arg);
+        case YUI_NAV_REQUEST_CLOSE_MODAL:
+            return yui_modal_close_top();
         default:
-            break;
+            return ESP_ERR_INVALID_ARG;
     }
-}
-
-static esp_err_t yui_render_card(const yui_template_t *tpl, const yui_schema_t *schema, const sensor_record_t *sensor, lv_obj_t *parent)
-{
-    if (!tpl || !schema || !sensor || !parent) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    const yui_style_t *style = tpl->style ? yui_schema_get_style(schema, tpl->style) : NULL;
-    lv_obj_t *card = lv_obj_create(parent);
-    yui_assign_card_width(card, schema->layout.columns);
-    yui_style_card(card, style);
-
-    if (tpl->title) {
-        char buffer[128];
-        yui_format_text(tpl->title, sensor, buffer, sizeof(buffer));
-        lv_obj_t *title = lv_label_create(card);
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
-        lv_label_set_text(title, buffer);
-        lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(title, LV_PCT(100));
-    }
-
-    if (tpl->subtitle) {
-        char buffer[128];
-        yui_format_text(tpl->subtitle, sensor, buffer, sizeof(buffer));
-        lv_obj_t *subtitle = lv_label_create(card);
-        lv_obj_set_style_text_font(subtitle, LV_FONT_DEFAULT, 0);
-        lv_color_t color = style && style->accent_color ? yui_color_from_string(style->accent_color, lv_color_hex(0x8E9AC0)) : lv_color_hex(0x8E9AC0);
-        lv_obj_set_style_text_color(subtitle, color, 0);
-        lv_label_set_text(subtitle, buffer);
-        lv_label_set_long_mode(subtitle, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(subtitle, LV_PCT(100));
-    }
-
-    for (size_t i = 0; i < tpl->widget_count; ++i) {
-        yui_render_widget(&tpl->widgets[i], sensor, style, card);
-    }
-
-    return ESP_OK;
-}
-
-static esp_err_t yui_render_schema(const yui_schema_t *schema)
-{
-    size_t sensor_count = 0;
-    const sensor_record_t *sensors = sensor_manager_get_snapshot(&sensor_count);
-    if (!sensors || sensor_count == 0U) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "No sensors available for YAML UI");
-        yamui_telemetry_error("sensor", "none_available");
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    esp_err_t sensor_err = sensor_manager_update();
-    if (sensor_err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Sensor update failed (%s)", esp_err_to_name(sensor_err));
-    }
-
-    lv_obj_t *screen = lv_scr_act();
-    if (!screen) {
-        return ESP_FAIL;
-    }
-
-    kc_touch_display_reset_ui_state();
-    lv_obj_clean(screen);
-
-    if (schema->layout.background_color) {
-        lv_color_t bg = yui_color_from_string(schema->layout.background_color, lv_color_hex(0x090912));
-        lv_obj_set_style_bg_color(screen, bg, 0);
-        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
-    }
-
-    lv_obj_t *grid = lv_obj_create(screen);
-    lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(grid, 0, 0);
-    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_pad_all(grid, schema->layout.padding, 0);
-    lv_obj_set_style_pad_row(grid, schema->layout.v_spacing, 0);
-    lv_obj_set_style_pad_column(grid, schema->layout.h_spacing, 0);
-    lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
-
-    for (size_t i = 0; i < sensor_count; ++i) {
-        const char *type_name = sensors[i].type[0] != '\0' ? sensors[i].type : "unknown";
-        const yui_template_t *tpl = yui_schema_get_template(schema, type_name);
-        if (!tpl) {
-            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "No template defined for sensor type '%s'", type_name);
-            continue;
-        }
-        yui_render_card(tpl, schema, &sensors[i], grid);
-    }
-
-    return ESP_OK;
 }
 
 static void yui_native_fn_goto(int argc, const char **argv)
 {
-    if (argc < 1 || !argv || !argv[0]) {
-        return;
-    }
-    esp_err_t err = yui_runtime_goto_screen(argv[0]);
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "ui_goto failed (%s)", esp_err_to_name(err));
+    if (argc > 0 && argv) {
+        (void)yui_runtime_goto_screen(argv[0]);
     }
 }
 
 static void yui_native_fn_push(int argc, const char **argv)
 {
-    if (argc < 1 || !argv || !argv[0]) {
-        return;
-    }
-    esp_err_t err = yui_runtime_push_screen(argv[0]);
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "ui_push failed (%s)", esp_err_to_name(err));
+    if (argc > 0 && argv) {
+        (void)yui_runtime_push_screen(argv[0]);
     }
 }
 
@@ -1301,98 +1420,35 @@ static void yui_native_fn_pop(int argc, const char **argv)
 {
     (void)argc;
     (void)argv;
-    esp_err_t err = yui_runtime_pop_screen();
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "ui_pop failed (%s)", esp_err_to_name(err));
-    }
-}
-
-static void yui_native_fn_show_modal(int argc, const char **argv)
-{
-    if (argc < 1 || !argv || !argv[0]) {
-        return;
-    }
-    esp_err_t err = yui_runtime_show_modal(argv[0]);
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_MODAL, "ui_show_modal failed (%s)", esp_err_to_name(err));
-    }
-}
-
-static void yui_native_fn_close_modal(int argc, const char **argv)
-{
-    (void)argc;
-    (void)argv;
-    esp_err_t err = yui_runtime_close_modal();
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_MODAL, "ui_close_modal failed (%s)", esp_err_to_name(err));
-    }
-}
-
-static void yui_native_fn_refresh(int argc, const char **argv)
-{
-    (void)argc;
-    (void)argv;
-    esp_err_t err = sensor_manager_update();
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Sensor refresh failed (%s)", esp_err_to_name(err));
-    }
-    err = yui_navigation_render_current();
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "Unable to rerender after refresh (%s)", esp_err_to_name(err));
-    }
-}
-
-static void yui_native_fn_reset_display(int argc, const char **argv)
-{
-    (void)argc;
-    (void)argv;
-    kc_touch_display_reset_ui_state();
-    esp_err_t err = yui_navigation_render_current();
-    if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "Display reset render failed (%s)", esp_err_to_name(err));
-    }
+    (void)yui_runtime_pop_screen();
 }
 
 static void yui_register_builtin_natives(void)
 {
-    const struct {
-        const char *name;
-        yamui_native_fn_t fn;
-    } entries[] = {
-        {"ui_goto", yui_native_fn_goto},
-        {"ui_push", yui_native_fn_push},
-        {"ui_pop", yui_native_fn_pop},
-        {"ui_show_modal", yui_native_fn_show_modal},
-        {"ui_close_modal", yui_native_fn_close_modal},
-        {"ui_refresh", yui_native_fn_refresh},
-        {"ui_reset_display", yui_native_fn_reset_display},
-    };
-    for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); ++i) {
-        esp_err_t err = yamui_runtime_register_function(entries[i].name, entries[i].fn);
-        if (err != ESP_OK) {
-            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NATIVE, "Failed to register native '%s' (%s)", entries[i].name, esp_err_to_name(err));
-        }
-    }
+    yamui_runtime_register_function("ui_goto", yui_native_fn_goto);
+    yamui_runtime_register_function("ui_push", yui_native_fn_push);
+    yamui_runtime_register_function("ui_pop", yui_native_fn_pop);
 }
 
 esp_err_t lvgl_yaml_gui_load_default(void)
 {
-    esp_err_t init_err = yamui_runtime_init();
-    if (init_err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_RUNTIME, "Runtime init failed (%s)", esp_err_to_name(init_err));
+    esp_err_t runtime_err = yamui_runtime_init();
+    if (runtime_err != ESP_OK) {
+        return runtime_err;
     }
     yui_register_builtin_natives();
     yui_nav_queue_init(yui_navigation_execute_request, NULL);
     yui_events_set_runtime(&s_runtime_vtable);
-    const char *default_screen = ui_schemas_get_default_name();
-    if (!default_screen) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "No default schema configured");
-        yamui_telemetry_error("nav", "no_default_schema");
-        return ESP_ERR_INVALID_STATE;
+
+    const char *default_schema = ui_schemas_get_default_name();
+    yui_schema_runtime_t *schema = yui_schema_runtime_load(default_schema);
+    if (!schema) {
+        return ESP_ERR_NOT_FOUND;
     }
-    esp_err_t err = yui_navigation_reset(default_screen);
+    const char *initial_screen = yui_schema_default_screen(&schema->schema);
+    esp_err_t err = yui_navigation_push(initial_screen);
     if (err != ESP_OK) {
-        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Failed to load default schema '%s' (%s)", default_screen, esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Failed to load initial screen (%s)", esp_err_to_name(err));
     }
     return err;
 }

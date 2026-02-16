@@ -59,7 +59,10 @@ The YamUI build pipeline consists of:
 7. **Firmware Embedding**  
 8. **Runtime Initialization**  
 
-Each stage is described below.
+Each stage is described below. In the reference firmware this pipeline is executed
+by `tools/yamui_bundle.py`, which runs automatically from the `ui_schemas`
+component’s `CMakeLists.txt` so every `idf.py build` produces a fresh bundle and
+manifest.
 
 ---
 

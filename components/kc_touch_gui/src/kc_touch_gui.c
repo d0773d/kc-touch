@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/queue.h"
@@ -150,20 +151,6 @@ static void kc_touch_gui_cleanup_partial(void)
 }
 
 #include "lvgl_yaml_gui.h"
-#include "screens/ui_root.h"
-
-#if CONFIG_KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN
-static void kc_touch_gui_build_ui(void *ctx)
-{
-    (void)ctx;
-    lv_obj_t *screen = lv_scr_act();
-    if (!screen) {
-        return;
-    }
-    // Initialize the new specialized root UI
-    ui_root_init();
-}
-#endif
 
 esp_err_t kc_touch_gui_init(const kc_touch_gui_config_t *config)
 {
@@ -242,17 +229,18 @@ esp_err_t kc_touch_gui_dispatch(kc_touch_gui_work_cb_t cb, void *ctx, TickType_t
     return ESP_OK;
 }
 
-static void kc_touch_gui_build_ui_wrapper(void *ctx)
+static void kc_touch_gui_build_ui(void *ctx)
 {
     (void)ctx;
-    if (lvgl_yaml_gui_load_default() != ESP_OK) {
-        ui_root_init();
+    esp_err_t err = lvgl_yaml_gui_load_default();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load YamUI bundle (%s)", esp_err_to_name(err));
     }
 }
 
 void kc_touch_gui_show_root(void)
 {
-    kc_touch_gui_dispatch(kc_touch_gui_build_ui_wrapper, NULL, 0);
+    kc_touch_gui_dispatch(kc_touch_gui_build_ui, NULL, 0);
 }
 
 bool kc_touch_gui_is_ready(void)
