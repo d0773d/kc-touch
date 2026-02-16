@@ -7,19 +7,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_log.h"
+#include "esp_timer.h"
 #include "kc_touch_display.h"
 #include "lvgl.h"
 #include "sensor_manager.h"
 #include "ui_schemas.h"
 #include "yaml_core.h"
 #include "yaml_ui.h"
+#include "yamui_logging.h"
 #include "yamui_events.h"
 #include "yamui_expr.h"
 #include "yamui_runtime.h"
 #include "yamui_state.h"
-
-static const char *TAG = "lvgl_yaml";
+#include "yui_navigation_queue.h"
 
 static const char *yui_resolve_token(const sensor_record_t *sensor, const char *token, char *scratch, size_t scratch_len);
 
@@ -66,16 +66,24 @@ typedef struct {
     const sensor_record_t *sensor;
 } yui_expression_ctx_t;
 
-typedef enum {
-    YUI_NAV_REQUEST_GOTO = 0,
-    YUI_NAV_REQUEST_PUSH,
-    YUI_NAV_REQUEST_POP,
-} yui_nav_request_type_t;
-
-typedef struct {
-    yui_nav_request_type_t type;
-    char *arg;
-} yui_nav_request_t;
+static void yui_widget_event_cb(lv_event_t *event);
+static void yui_widget_instance_refresh_text(yui_widget_instance_t *instance);
+static void yui_format_text(const char *tmpl, const sensor_record_t *sensor, char *out, size_t out_len);
+static void yui_render_widget(const yui_widget_t *widget, const sensor_record_t *sensor, const yui_style_t *style, lv_obj_t *parent);
+static esp_err_t yui_render_schema(const yui_schema_t *schema);
+static const yui_component_t *yui_find_component(const char *name);
+static esp_err_t yui_modal_push_component(const yui_component_t *component);
+static void yui_modal_instance_destroy(yui_modal_instance_t *instance, bool emit_event);
+static void yui_modal_clear_stack(void);
+static lv_color_t yui_color_from_string(const char *hex, lv_color_t fallback);
+static lv_flex_align_t yui_align_to_lv(yui_component_align_t align);
+static lv_flex_flow_t yui_flow_to_lv(yui_component_flow_t flow);
+static void yui_component_apply_layout(lv_obj_t *obj, const yui_component_layout_t *layout);
+static esp_err_t yui_render_component(const yui_component_t *component, lv_obj_t *parent);
+static lv_obj_t *yui_modal_create_overlay(void);
+static void yui_modal_emit_event(const char *event, const char *component_name);
+static esp_err_t yui_modal_ensure_capacity(size_t desired);
+static esp_err_t yui_modal_render_component(yui_modal_instance_t *instance, const yui_component_t *component);
 
 static yui_screen_instance_t *s_screen_stack;
 static size_t s_screen_count;
@@ -83,10 +91,6 @@ static size_t s_screen_capacity;
 static yui_modal_instance_t *s_modal_stack;
 static size_t s_modal_count;
 static size_t s_modal_capacity;
-static bool s_navigation_rendering;
-static yui_nav_request_t *s_nav_queue;
-static size_t s_nav_queue_count;
-static size_t s_nav_queue_capacity;
 
 static esp_err_t yui_runtime_goto_screen(const char *screen);
 static esp_err_t yui_runtime_push_screen(const char *screen);
@@ -190,6 +194,44 @@ static yui_widget_event_type_t yui_widget_event_from_lv(lv_event_code_t code)
     }
 }
 
+static const char *yui_widget_event_name(yui_widget_event_type_t type)
+{
+    static const char *names[] = {
+        [YUI_WIDGET_EVENT_CLICK] = "on_click",
+        [YUI_WIDGET_EVENT_PRESS] = "on_press",
+        [YUI_WIDGET_EVENT_RELEASE] = "on_release",
+        [YUI_WIDGET_EVENT_CHANGE] = "on_change",
+        [YUI_WIDGET_EVENT_FOCUS] = "on_focus",
+        [YUI_WIDGET_EVENT_BLUR] = "on_blur",
+        [YUI_WIDGET_EVENT_LOAD] = "on_load",
+    };
+    if (type < 0 || type >= YUI_WIDGET_EVENT_COUNT) {
+        return "unknown";
+    }
+    const char *name = names[type];
+    return name ? name : "unknown";
+}
+
+static const char *yui_widget_debug_label(const yui_widget_t *widget)
+{
+    if (!widget) {
+        return NULL;
+    }
+    if (widget->text && widget->text[0] != '\0') {
+        return widget->text;
+    }
+    switch (widget->type) {
+        case YUI_WIDGET_LABEL:
+            return "<label>";
+        case YUI_WIDGET_BUTTON:
+            return "<button>";
+        case YUI_WIDGET_SPACER:
+            return "<spacer>";
+        default:
+            return "<widget>";
+    }
+}
+
 static void yui_copy_string(char *dest, size_t dest_len, const char *src)
 {
     if (!dest || dest_len == 0U) {
@@ -216,7 +258,8 @@ static const char *yui_event_resolve_value(const yui_event_resolver_ctx_t *ctx, 
     if (!ctx || !ctx->lv_event) {
         return buffer;
     }
-    lv_obj_t *target = lv_event_get_target(ctx->lv_event);
+    lv_event_t *mutable_event = (lv_event_t *)ctx->lv_event;
+    lv_obj_t *target = lv_event_get_target(mutable_event);
     if (!target) {
         return buffer;
     }
@@ -253,7 +296,7 @@ static const char *yui_event_resolve_value(const yui_event_resolver_ctx_t *ctx, 
         return buffer;
     }
 #endif
-    const void *param = lv_event_get_param(ctx->lv_event);
+    const void *param = lv_event_get_param(mutable_event);
     if (param) {
         yui_copy_string(buffer, buffer_len, (const char *)param);
         return buffer;
@@ -270,7 +313,8 @@ static const char *yui_event_resolve_checked(const yui_event_resolver_ctx_t *ctx
         buffer[0] = '\0';
         return buffer;
     }
-    lv_obj_t *target = lv_event_get_target(ctx->lv_event);
+    lv_event_t *mutable_event = (lv_event_t *)ctx->lv_event;
+    lv_obj_t *target = lv_event_get_target(mutable_event);
     bool checked = target && lv_obj_has_state(target, LV_STATE_CHECKED);
     yui_copy_string(buffer, buffer_len, checked ? "true" : "false");
     return buffer;
@@ -327,7 +371,7 @@ static void yui_fire_widget_load_event(const yui_widget_instance_t *instance)
     };
     esp_err_t err = yui_action_list_execute(list, &eval_ctx);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "on_load actions failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "on_load actions failed (%s)", esp_err_to_name(err));
     }
 }
 
@@ -389,7 +433,7 @@ static yui_widget_instance_t *yui_widget_instance_create(const yui_widget_t *wid
     if (widget->state_binding_count > 0U) {
         instance->watch_handles = (yui_state_watch_handle_t *)calloc(widget->state_binding_count, sizeof(yui_state_watch_handle_t));
         if (!instance->watch_handles) {
-            ESP_LOGW(TAG, "Failed to allocate watch handle buffer");
+            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_STATE, "Failed to allocate watch handle buffer");
         } else {
             for (size_t i = 0; i < widget->state_binding_count; ++i) {
                 const char *binding = widget->state_bindings[i];
@@ -401,7 +445,7 @@ static yui_widget_instance_t *yui_widget_instance_create(const yui_widget_t *wid
                 if (err == ESP_OK) {
                     instance->watch_handles[instance->watch_count++] = handle;
                 } else {
-                    ESP_LOGW(TAG, "Failed to watch state key '%s' (%s)", binding, esp_err_to_name(err));
+                    yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_STATE, "Failed to watch state key '%s' (%s)", binding, esp_err_to_name(err));
                 }
             }
         }
@@ -422,7 +466,7 @@ static void yui_bind_widget_runtime(lv_obj_t *event_target, lv_obj_t *text_targe
     }
     yui_widget_instance_t *instance = yui_widget_instance_create(widget, sensor, event_target, text_target);
     if (!instance) {
-        ESP_LOGW(TAG, "Failed to initialize widget runtime context");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Failed to initialize widget runtime context");
         return;
     }
     lv_obj_add_event_cb(event_target, yui_widget_event_cb, LV_EVENT_ALL, instance);
@@ -452,6 +496,7 @@ static void yui_widget_event_cb(lv_event_t *event)
     if (!list || list->count == 0U) {
         return;
     }
+    yamui_telemetry_widget_event(yui_widget_debug_label(instance->widget), yui_widget_event_name(mapped));
     yui_event_resolver_ctx_t ctx = {
         .lv_event = event,
         .sensor = instance->sensor,
@@ -462,76 +507,13 @@ static void yui_widget_event_cb(lv_event_t *event)
     };
     esp_err_t err = yui_action_list_execute(list, &eval_ctx);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Action execution failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "Action execution failed (%s)", esp_err_to_name(err));
     }
 }
 
-static void yui_navigation_queue_reset_request(yui_nav_request_t *request)
+static esp_err_t yui_navigation_execute_request(yui_nav_request_type_t type, const char *arg, void *user_ctx)
 {
-    if (!request) {
-        return;
-    }
-    free(request->arg);
-    request->arg = NULL;
-}
-
-static void yui_navigation_queue_clear(void)
-{
-    if (!s_nav_queue) {
-        s_nav_queue_count = 0;
-        s_nav_queue_capacity = 0;
-        return;
-    }
-    for (size_t i = 0; i < s_nav_queue_count; ++i) {
-        yui_navigation_queue_reset_request(&s_nav_queue[i]);
-    }
-    s_nav_queue_count = 0;
-}
-
-static esp_err_t yui_navigation_queue_push(yui_nav_request_type_t type, const char *arg)
-{
-    if (s_nav_queue_count == s_nav_queue_capacity) {
-        size_t new_capacity = s_nav_queue_capacity == 0 ? 4U : s_nav_queue_capacity * 2U;
-        yui_nav_request_t *resized = (yui_nav_request_t *)realloc(s_nav_queue, new_capacity * sizeof(yui_nav_request_t));
-        if (!resized) {
-            return ESP_ERR_NO_MEM;
-        }
-        memset(resized + s_nav_queue_capacity, 0, (new_capacity - s_nav_queue_capacity) * sizeof(yui_nav_request_t));
-        s_nav_queue = resized;
-        s_nav_queue_capacity = new_capacity;
-    }
-    char *copy = NULL;
-    if (arg) {
-        copy = yui_strdup_local(arg);
-        if (!copy) {
-            return ESP_ERR_NO_MEM;
-        }
-    }
-    s_nav_queue[s_nav_queue_count].type = type;
-    s_nav_queue[s_nav_queue_count].arg = copy;
-    s_nav_queue_count++;
-    return ESP_OK;
-}
-
-static bool yui_navigation_queue_pop(yui_nav_request_t *out)
-{
-    if (s_nav_queue_count == 0U) {
-        return false;
-    }
-    if (out) {
-        *out = s_nav_queue[0];
-    } else {
-        yui_navigation_queue_reset_request(&s_nav_queue[0]);
-    }
-    if (s_nav_queue_count > 1U) {
-        memmove(s_nav_queue, s_nav_queue + 1, (s_nav_queue_count - 1U) * sizeof(yui_nav_request_t));
-    }
-    s_nav_queue_count--;
-    return true;
-}
-
-static esp_err_t yui_navigation_execute_request(yui_nav_request_type_t type, const char *arg)
-{
+    (void)user_ctx;
     switch (type) {
         case YUI_NAV_REQUEST_GOTO:
             if (!arg || arg[0] == '\0') {
@@ -548,36 +530,6 @@ static esp_err_t yui_navigation_execute_request(yui_nav_request_type_t type, con
         default:
             return ESP_ERR_INVALID_ARG;
     }
-}
-
-static void yui_navigation_process_queue(void)
-{
-    if (s_navigation_rendering) {
-        return;
-    }
-    while (s_nav_queue_count > 0U) {
-        yui_nav_request_t request = {0};
-        if (!yui_navigation_queue_pop(&request)) {
-            break;
-        }
-        esp_err_t err = yui_navigation_execute_request(request.type, request.arg);
-        yui_navigation_queue_reset_request(&request);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Queued navigation request failed (%s)", esp_err_to_name(err));
-            break;
-        }
-        if (s_navigation_rendering) {
-            break;
-        }
-    }
-}
-
-static esp_err_t yui_navigation_submit_request(yui_nav_request_type_t type, const char *arg)
-{
-    if (s_navigation_rendering || s_nav_queue_count > 0U) {
-        return yui_navigation_queue_push(type, arg);
-    }
-    return yui_navigation_execute_request(type, arg);
 }
 
 static void yui_screen_instance_destroy(yui_screen_instance_t *instance)
@@ -597,7 +549,7 @@ static void yui_screen_instance_destroy(yui_screen_instance_t *instance)
 
 static void yui_navigation_clear_stack(void)
 {
-    yui_navigation_queue_clear();
+    yui_nav_queue_reset();
     yui_modal_clear_stack();
     if (!s_screen_stack) {
         s_screen_count = 0;
@@ -620,7 +572,7 @@ static esp_err_t yui_navigation_ensure_capacity(size_t desired)
     }
     yui_screen_instance_t *resized = (yui_screen_instance_t *)realloc(s_screen_stack, new_capacity * sizeof(yui_screen_instance_t));
     if (!resized) {
-        ESP_LOGE(TAG, "Failed to grow navigation stack");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Failed to grow navigation stack");
         return ESP_ERR_NO_MEM;
     }
     for (size_t i = s_screen_capacity; i < new_capacity; ++i) {
@@ -639,6 +591,196 @@ static const char *yui_navigation_resolve_name(const char *name)
     return ui_schemas_get_default_name();
 }
 
+static lv_flex_align_t yui_align_to_lv(yui_component_align_t align)
+{
+    switch (align) {
+        case YUI_COMPONENT_ALIGN_CENTER:
+            return LV_FLEX_ALIGN_CENTER;
+        case YUI_COMPONENT_ALIGN_END:
+            return LV_FLEX_ALIGN_END;
+        case YUI_COMPONENT_ALIGN_STRETCH:
+#ifdef LV_FLEX_ALIGN_STRETCH
+            return LV_FLEX_ALIGN_STRETCH;
+#else
+            return LV_FLEX_ALIGN_START;
+#endif
+        case YUI_COMPONENT_ALIGN_START:
+        default:
+            return LV_FLEX_ALIGN_START;
+    }
+}
+
+static lv_flex_flow_t yui_flow_to_lv(yui_component_flow_t flow)
+{
+    return flow == YUI_COMPONENT_FLOW_ROW ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN;
+}
+
+static void yui_component_apply_layout(lv_obj_t *obj, const yui_component_layout_t *layout)
+{
+    if (!obj) {
+        return;
+    }
+    uint8_t padding = layout ? layout->padding : 16;
+    uint8_t gap = layout ? layout->gap : 12;
+    lv_obj_set_style_pad_all(obj, padding, 0);
+    lv_obj_set_style_pad_row(obj, gap, 0);
+    lv_obj_set_style_pad_column(obj, gap, 0);
+    lv_obj_set_style_radius(obj, 14, 0);
+    lv_obj_set_style_border_width(obj, 0, 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    const char *bg = layout ? layout->background_color : NULL;
+    lv_color_t color = yui_color_from_string(bg, lv_color_hex(0x1F1F2B));
+    lv_obj_set_style_bg_color(obj, color, 0);
+    lv_obj_set_flex_flow(obj, yui_flow_to_lv(layout ? layout->flow : YUI_COMPONENT_FLOW_COLUMN));
+    lv_flex_align_t main_align = yui_align_to_lv(layout ? layout->main_align : YUI_COMPONENT_ALIGN_START);
+    lv_flex_align_t cross_align = yui_align_to_lv(layout ? layout->cross_align : YUI_COMPONENT_ALIGN_START);
+    lv_obj_set_flex_align(obj, main_align, cross_align, cross_align);
+}
+
+static const yui_component_t *yui_find_component(const char *name)
+{
+    if (!name || name[0] == '\0') {
+        return NULL;
+    }
+    for (size_t i = s_screen_count; i > 0; --i) {
+        const yui_component_t *component = yui_schema_get_component(&s_screen_stack[i - 1U].schema, name);
+        if (component) {
+            return component;
+        }
+    }
+    return NULL;
+}
+
+static esp_err_t yui_render_component(const yui_component_t *component, lv_obj_t *parent)
+{
+    if (!component || !parent) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    for (size_t i = 0; i < component->widget_count; ++i) {
+        yui_render_widget(&component->widgets[i], NULL, NULL, parent);
+    }
+    return ESP_OK;
+}
+
+static lv_obj_t *yui_modal_create_overlay(void)
+{
+    lv_obj_t *screen = lv_scr_act();
+    if (!screen) {
+        return NULL;
+    }
+    lv_obj_t *overlay = lv_obj_create(screen);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_50, 0);
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
+    return overlay;
+}
+
+static void yui_modal_emit_event(const char *event, const char *component_name)
+{
+    if (!event) {
+        return;
+    }
+    const char *args[1] = {component_name ? component_name : ""};
+    size_t arg_count = (component_name && component_name[0] != '\0') ? 1U : 0U;
+    (void)yamui_runtime_emit_event(event, arg_count > 0U ? args : NULL, arg_count);
+}
+
+static void yui_modal_instance_destroy(yui_modal_instance_t *instance, bool emit_event)
+{
+    if (!instance) {
+        return;
+    }
+    const char *component_name = (instance->component && instance->component->name) ? instance->component->name : NULL;
+    if (instance->overlay && lv_obj_is_valid(instance->overlay)) {
+        lv_obj_del(instance->overlay);
+    }
+    instance->overlay = NULL;
+    instance->container = NULL;
+    instance->component = NULL;
+    if (emit_event) {
+        yui_modal_emit_event("modal.closed", component_name);
+    }
+}
+
+static esp_err_t yui_modal_ensure_capacity(size_t desired)
+{
+    if (desired <= s_modal_capacity) {
+        return ESP_OK;
+    }
+    size_t new_capacity = s_modal_capacity == 0 ? 2 : s_modal_capacity * 2;
+    while (new_capacity < desired) {
+        new_capacity *= 2;
+    }
+    yui_modal_instance_t *resized = (yui_modal_instance_t *)realloc(s_modal_stack, new_capacity * sizeof(yui_modal_instance_t));
+    if (!resized) {
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_MODAL, "Failed to grow modal stack");
+        return ESP_ERR_NO_MEM;
+    }
+    for (size_t i = s_modal_capacity; i < new_capacity; ++i) {
+        memset(&resized[i], 0, sizeof(yui_modal_instance_t));
+    }
+    s_modal_stack = resized;
+    s_modal_capacity = new_capacity;
+    return ESP_OK;
+}
+
+static void yui_modal_clear_stack(void)
+{
+    if (!s_modal_stack) {
+        s_modal_count = 0;
+        return;
+    }
+    for (size_t i = 0; i < s_modal_count; ++i) {
+        yui_modal_instance_destroy(&s_modal_stack[i], true);
+    }
+    s_modal_count = 0;
+}
+
+static esp_err_t yui_modal_render_component(yui_modal_instance_t *instance, const yui_component_t *component)
+{
+    if (!instance || !component) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    lv_obj_t *overlay = yui_modal_create_overlay();
+    if (!overlay) {
+        return ESP_ERR_NO_MEM;
+    }
+    lv_obj_t *container = lv_obj_create(overlay);
+    yui_component_apply_layout(container, &component->layout);
+    lv_obj_set_width(container, LV_PCT(80));
+    lv_obj_center(container);
+    esp_err_t err = yui_render_component(component, container);
+    if (err != ESP_OK) {
+        lv_obj_del(overlay);
+        return err;
+    }
+    instance->overlay = overlay;
+    instance->container = container;
+    instance->component = component;
+    return ESP_OK;
+}
+
+static esp_err_t yui_modal_push_component(const yui_component_t *component)
+{
+    if (!component) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = yui_modal_ensure_capacity(s_modal_count + 1U);
+    if (err != ESP_OK) {
+        return err;
+    }
+    yui_modal_instance_t instance = {0};
+    err = yui_modal_render_component(&instance, component);
+    if (err != ESP_OK) {
+        return err;
+    }
+    s_modal_stack[s_modal_count++] = instance;
+    yui_modal_emit_event("modal.opened", component->name);
+    return ESP_OK;
+}
+
 static esp_err_t yui_screen_instance_load(const char *name, yui_screen_instance_t *out)
 {
     if (!out) {
@@ -647,221 +789,37 @@ static esp_err_t yui_screen_instance_load(const char *name, yui_screen_instance_
     memset(out, 0, sizeof(*out));
     const char *resolved = yui_navigation_resolve_name(name);
     if (!resolved) {
-        ESP_LOGE(TAG, "No schema name resolved");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "No schema name resolved");
+        yamui_telemetry_error("nav", "no_schema");
         return ESP_ERR_INVALID_ARG;
     }
 
     size_t blob_size = 0;
     const uint8_t *blob = ui_schemas_get_named(resolved, &blob_size);
     if (!blob || blob_size == 0U) {
-        ESP_LOGE(TAG, "Schema '%s' not found", resolved);
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Schema '%s' not found", resolved);
+        yamui_telemetry_error("nav", "schema_not_found");
         return ESP_ERR_NOT_FOUND;
-
-        static lv_flex_align_t yui_align_to_lv(yui_component_align_t align)
-        {
-            switch (align) {
-                case YUI_COMPONENT_ALIGN_CENTER:
-                    return LV_FLEX_ALIGN_CENTER;
-                case YUI_COMPONENT_ALIGN_END:
-                    return LV_FLEX_ALIGN_END;
-                case YUI_COMPONENT_ALIGN_STRETCH:
-                    return LV_FLEX_ALIGN_STRETCH;
-                case YUI_COMPONENT_ALIGN_START:
-                default:
-                    return LV_FLEX_ALIGN_START;
-            }
-        }
-
-        static lv_flex_flow_t yui_flow_to_lv(yui_component_flow_t flow)
-        {
-            return flow == YUI_COMPONENT_FLOW_ROW ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN;
-        }
-
-        static void yui_component_apply_layout(lv_obj_t *obj, const yui_component_layout_t *layout)
-        {
-            if (!obj) {
-                return;
-            }
-            uint8_t padding = layout ? layout->padding : 16;
-            uint8_t gap = layout ? layout->gap : 12;
-            lv_obj_set_style_pad_all(obj, padding, 0);
-            lv_obj_set_style_pad_row(obj, gap, 0);
-            lv_obj_set_style_pad_column(obj, gap, 0);
-            lv_obj_set_style_radius(obj, 14, 0);
-            lv_obj_set_style_border_width(obj, 0, 0);
-            lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
-            const char *bg = layout ? layout->background_color : NULL;
-            lv_color_t color = yui_color_from_string(bg, lv_color_hex(0x1F1F2B));
-            lv_obj_set_style_bg_color(obj, color, 0);
-            lv_obj_set_flex_flow(obj, yui_flow_to_lv(layout ? layout->flow : YUI_COMPONENT_FLOW_COLUMN));
-            lv_flex_align_t main_align = yui_align_to_lv(layout ? layout->main_align : YUI_COMPONENT_ALIGN_START);
-            lv_flex_align_t cross_align = yui_align_to_lv(layout ? layout->cross_align : YUI_COMPONENT_ALIGN_START);
-            lv_obj_set_flex_align(obj, main_align, cross_align, cross_align);
-        }
-
-        static const yui_component_t *yui_find_component(const char *name)
-        {
-            if (!name || name[0] == '\0') {
-                return NULL;
-            }
-            for (size_t i = s_screen_count; i > 0; --i) {
-                const yui_component_t *component = yui_schema_get_component(&s_screen_stack[i - 1U].schema, name);
-                if (component) {
-                    return component;
-                }
-            }
-            return NULL;
-        }
-
-        static esp_err_t yui_render_component(const yui_component_t *component, lv_obj_t *parent)
-        {
-            if (!component || !parent) {
-                return ESP_ERR_INVALID_ARG;
-            }
-            for (size_t i = 0; i < component->widget_count; ++i) {
-                yui_render_widget(&component->widgets[i], NULL, NULL, parent);
-            }
-            return ESP_OK;
-        }
-
-        static lv_obj_t *yui_modal_create_overlay(void)
-        {
-            lv_obj_t *screen = lv_scr_act();
-            if (!screen) {
-                return NULL;
-            }
-            lv_obj_t *overlay = lv_obj_create(screen);
-            lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-            lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
-            lv_obj_set_style_bg_opa(overlay, LV_OPA_50, 0);
-            lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
-            return overlay;
-        }
-
-        static void yui_modal_emit_event(const char *event, const char *component_name)
-        {
-            if (!event) {
-                return;
-            }
-            const char *args[1] = {component_name ? component_name : ""};
-            size_t arg_count = (component_name && component_name[0] != '\0') ? 1U : 0U;
-            (void)yamui_runtime_emit_event(event, arg_count > 0U ? args : NULL, arg_count);
-        }
-
-        static void yui_modal_instance_destroy(yui_modal_instance_t *instance, bool emit_event)
-        {
-            if (!instance) {
-                return;
-            }
-            const char *component_name = (instance->component && instance->component->name) ? instance->component->name : NULL;
-            if (instance->overlay && lv_obj_is_valid(instance->overlay)) {
-                lv_obj_del(instance->overlay);
-            }
-            instance->overlay = NULL;
-            instance->container = NULL;
-            instance->component = NULL;
-            if (emit_event) {
-                yui_modal_emit_event("modal.closed", component_name);
-            }
-        }
-
-        static esp_err_t yui_modal_ensure_capacity(size_t desired)
-        {
-            if (desired <= s_modal_capacity) {
-                return ESP_OK;
-            }
-            size_t new_capacity = s_modal_capacity == 0 ? 2 : s_modal_capacity * 2;
-            while (new_capacity < desired) {
-                new_capacity *= 2;
-            }
-            yui_modal_instance_t *resized = (yui_modal_instance_t *)realloc(s_modal_stack, new_capacity * sizeof(yui_modal_instance_t));
-            if (!resized) {
-                ESP_LOGE(TAG, "Failed to grow modal stack");
-                return ESP_ERR_NO_MEM;
-            }
-            for (size_t i = s_modal_capacity; i < new_capacity; ++i) {
-                memset(&resized[i], 0, sizeof(yui_modal_instance_t));
-            }
-            s_modal_stack = resized;
-            s_modal_capacity = new_capacity;
-            return ESP_OK;
-        }
-
-        static void yui_modal_clear_stack(void)
-        {
-            if (!s_modal_stack) {
-                s_modal_count = 0;
-                return;
-            }
-            for (size_t i = 0; i < s_modal_count; ++i) {
-                yui_modal_instance_destroy(&s_modal_stack[i], true);
-            }
-            s_modal_count = 0;
-        }
-
-        static esp_err_t yui_modal_render_component(yui_modal_instance_t *instance, const yui_component_t *component)
-        {
-            if (!instance || !component) {
-                return ESP_ERR_INVALID_ARG;
-            }
-            lv_obj_t *overlay = yui_modal_create_overlay();
-            if (!overlay) {
-                return ESP_ERR_NO_MEM;
-            }
-            lv_obj_t *container = lv_obj_create(overlay);
-            yui_component_apply_layout(container, &component->layout);
-            lv_obj_set_width(container, LV_PCT(80));
-            lv_obj_center(container);
-            esp_err_t err = yui_render_component(component, container);
-            if (err != ESP_OK) {
-                lv_obj_del(overlay);
-                return err;
-            }
-            instance->overlay = overlay;
-            instance->container = container;
-            instance->component = component;
-            return ESP_OK;
-        }
-
-        static esp_err_t yui_modal_push_component(const yui_component_t *component)
-        {
-            if (!component) {
-                return ESP_ERR_INVALID_ARG;
-            }
-            esp_err_t err = yui_modal_ensure_capacity(s_modal_count + 1U);
-            if (err != ESP_OK) {
-                return err;
-            }
-            yui_modal_instance_t instance = {0};
-            err = yui_modal_render_component(&instance, component);
-            if (err != ESP_OK) {
-                return err;
-            }
-            s_modal_stack[s_modal_count++] = instance;
-            yui_modal_emit_event("modal.opened", component->name);
-            return ESP_OK;
-        }
     }
 
     yml_node_t *root = NULL;
     esp_err_t err = yaml_core_parse_buffer((const char *)blob, blob_size, &root);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to parse schema '%s' (%s)", resolved, esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Failed to parse schema '%s' (%s)", resolved, esp_err_to_name(err));
         return err;
     }
 
     yui_schema_t schema = {0};
     err = yui_schema_from_tree(root, &schema);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Schema '%s' invalid (%s)", resolved, esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Schema '%s' invalid (%s)", resolved, esp_err_to_name(err));
         yml_node_free(root);
         return err;
     }
 
     out->name = yui_strdup_local(resolved);
     if (!out->name) {
-        ESP_LOGE(TAG, "Failed to track schema name");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Failed to track schema name");
         yui_schema_free(&schema);
         yml_node_free(root);
         return ESP_ERR_NO_MEM;
@@ -876,15 +834,22 @@ static esp_err_t yui_navigation_render_current(void)
     if (s_screen_count == 0U) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (s_navigation_rendering) {
+    int64_t render_start = esp_timer_get_time();
+    if (yui_nav_queue_begin_render() != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    s_navigation_rendering = true;
     yui_modal_clear_stack();
     esp_err_t err = yui_render_schema(&s_screen_stack[s_screen_count - 1U].schema);
-    s_navigation_rendering = false;
+    yui_nav_queue_end_render(err == ESP_OK);
     if (err == ESP_OK) {
-        yui_navigation_process_queue();
+        const char *screen_name = s_screen_stack[s_screen_count - 1U].name ? s_screen_stack[s_screen_count - 1U].name : "<screen>";
+        yamui_telemetry_screen_load(screen_name);
+        double elapsed_ms = (double)(esp_timer_get_time() - render_start) / 1000.0;
+        yamui_telemetry_perf("render_screen", screen_name, elapsed_ms);
+        yamui_log(YAMUI_LOG_LEVEL_INFO, YAMUI_LOG_CAT_NAV, "Rendered screen '%s' in %.2f ms", screen_name, elapsed_ms);
+    } else {
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "Render failed (%s)", esp_err_to_name(err));
+        yamui_telemetry_error("nav", "render_failed");
     }
     return err;
 }
@@ -946,7 +911,7 @@ static esp_err_t yui_navigation_push_screen(const char *screen)
 static esp_err_t yui_navigation_pop_screen_internal(void)
 {
     if (s_screen_count <= 1U) {
-        ESP_LOGW(TAG, "Cannot pop root screen");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "Cannot pop root screen");
         return ESP_ERR_INVALID_STATE;
     }
     yui_screen_instance_t old_instance = s_screen_stack[--s_screen_count];
@@ -968,24 +933,25 @@ static esp_err_t yui_navigation_reset(const char *screen)
 
 static esp_err_t yui_runtime_goto_screen(const char *screen)
 {
-    return yui_navigation_submit_request(YUI_NAV_REQUEST_GOTO, screen);
+    return yui_nav_queue_submit(YUI_NAV_REQUEST_GOTO, screen);
 }
 
 static esp_err_t yui_runtime_push_screen(const char *screen)
 {
-    return yui_navigation_submit_request(YUI_NAV_REQUEST_PUSH, screen);
+    return yui_nav_queue_submit(YUI_NAV_REQUEST_PUSH, screen);
 }
 
 static esp_err_t yui_runtime_pop_screen(void)
 {
-    return yui_navigation_submit_request(YUI_NAV_REQUEST_POP, NULL);
+    return yui_nav_queue_submit(YUI_NAV_REQUEST_POP, NULL);
 }
 
 static esp_err_t yui_runtime_show_modal(const char *component)
 {
     const yui_component_t *definition = yui_find_component(component);
     if (!definition) {
-        ESP_LOGW(TAG, "Modal component '%s' not found", component ? component : "<null>");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_MODAL, "Modal component '%s' not found", component ? component : "<null>");
+        yamui_telemetry_error("modal", "component_not_found");
         return ESP_ERR_NOT_FOUND;
     }
     return yui_modal_push_component(definition);
@@ -994,7 +960,7 @@ static esp_err_t yui_runtime_show_modal(const char *component)
 static esp_err_t yui_runtime_close_modal(void)
 {
     if (s_modal_count == 0U) {
-        ESP_LOGW(TAG, "No modal to close");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_MODAL, "No modal to close");
         return ESP_ERR_INVALID_STATE;
     }
     yui_modal_instance_destroy(&s_modal_stack[--s_modal_count], true);
@@ -1008,7 +974,8 @@ static esp_err_t yui_runtime_call_native(const char *function, const char **args
     }
     esp_err_t err = yamui_runtime_call_function(function, args, arg_count);
     if (err == ESP_ERR_NOT_FOUND) {
-        ESP_LOGW(TAG, "Native function '%s' not registered", function);
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NATIVE, "Native function '%s' not registered", function);
+        yamui_telemetry_error("native", "not_registered");
     }
     return err;
 }
@@ -1261,13 +1228,14 @@ static esp_err_t yui_render_schema(const yui_schema_t *schema)
     size_t sensor_count = 0;
     const sensor_record_t *sensors = sensor_manager_get_snapshot(&sensor_count);
     if (!sensors || sensor_count == 0U) {
-        ESP_LOGW(TAG, "No sensors available for YAML UI");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "No sensors available for YAML UI");
+        yamui_telemetry_error("sensor", "none_available");
         return ESP_ERR_NOT_FOUND;
     }
 
     esp_err_t sensor_err = sensor_manager_update();
     if (sensor_err != ESP_OK) {
-        ESP_LOGW(TAG, "Sensor update failed (%s)", esp_err_to_name(sensor_err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Sensor update failed (%s)", esp_err_to_name(sensor_err));
     }
 
     lv_obj_t *screen = lv_scr_act();
@@ -1298,7 +1266,7 @@ static esp_err_t yui_render_schema(const yui_schema_t *schema)
         const char *type_name = sensors[i].type[0] != '\0' ? sensors[i].type : "unknown";
         const yui_template_t *tpl = yui_schema_get_template(schema, type_name);
         if (!tpl) {
-            ESP_LOGW(TAG, "No template defined for sensor type '%s'", type_name);
+            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "No template defined for sensor type '%s'", type_name);
             continue;
         }
         yui_render_card(tpl, schema, &sensors[i], grid);
@@ -1314,7 +1282,7 @@ static void yui_native_fn_goto(int argc, const char **argv)
     }
     esp_err_t err = yui_runtime_goto_screen(argv[0]);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ui_goto failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "ui_goto failed (%s)", esp_err_to_name(err));
     }
 }
 
@@ -1325,7 +1293,7 @@ static void yui_native_fn_push(int argc, const char **argv)
     }
     esp_err_t err = yui_runtime_push_screen(argv[0]);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ui_push failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "ui_push failed (%s)", esp_err_to_name(err));
     }
 }
 
@@ -1335,7 +1303,7 @@ static void yui_native_fn_pop(int argc, const char **argv)
     (void)argv;
     esp_err_t err = yui_runtime_pop_screen();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ui_pop failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "ui_pop failed (%s)", esp_err_to_name(err));
     }
 }
 
@@ -1346,7 +1314,7 @@ static void yui_native_fn_show_modal(int argc, const char **argv)
     }
     esp_err_t err = yui_runtime_show_modal(argv[0]);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ui_show_modal failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_MODAL, "ui_show_modal failed (%s)", esp_err_to_name(err));
     }
 }
 
@@ -1356,7 +1324,7 @@ static void yui_native_fn_close_modal(int argc, const char **argv)
     (void)argv;
     esp_err_t err = yui_runtime_close_modal();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ui_close_modal failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_MODAL, "ui_close_modal failed (%s)", esp_err_to_name(err));
     }
 }
 
@@ -1366,11 +1334,11 @@ static void yui_native_fn_refresh(int argc, const char **argv)
     (void)argv;
     esp_err_t err = sensor_manager_update();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Sensor refresh failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Sensor refresh failed (%s)", esp_err_to_name(err));
     }
     err = yui_navigation_render_current();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Unable to rerender after refresh (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "Unable to rerender after refresh (%s)", esp_err_to_name(err));
     }
 }
 
@@ -1381,7 +1349,7 @@ static void yui_native_fn_reset_display(int argc, const char **argv)
     kc_touch_display_reset_ui_state();
     esp_err_t err = yui_navigation_render_current();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Display reset render failed (%s)", esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NAV, "Display reset render failed (%s)", esp_err_to_name(err));
     }
 }
 
@@ -1402,7 +1370,7 @@ static void yui_register_builtin_natives(void)
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); ++i) {
         esp_err_t err = yamui_runtime_register_function(entries[i].name, entries[i].fn);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to register native '%s' (%s)", entries[i].name, esp_err_to_name(err));
+            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_NATIVE, "Failed to register native '%s' (%s)", entries[i].name, esp_err_to_name(err));
         }
     }
 }
@@ -1411,18 +1379,20 @@ esp_err_t lvgl_yaml_gui_load_default(void)
 {
     esp_err_t init_err = yamui_runtime_init();
     if (init_err != ESP_OK) {
-        ESP_LOGW(TAG, "Runtime init failed (%s)", esp_err_to_name(init_err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_RUNTIME, "Runtime init failed (%s)", esp_err_to_name(init_err));
     }
     yui_register_builtin_natives();
+    yui_nav_queue_init(yui_navigation_execute_request, NULL);
     yui_events_set_runtime(&s_runtime_vtable);
     const char *default_screen = ui_schemas_get_default_name();
     if (!default_screen) {
-        ESP_LOGE(TAG, "No default schema configured");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "No default schema configured");
+        yamui_telemetry_error("nav", "no_default_schema");
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t err = yui_navigation_reset(default_screen);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to load default schema '%s' (%s)", default_screen, esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Failed to load default schema '%s' (%s)", default_screen, esp_err_to_name(err));
     }
     return err;
 }

@@ -8,11 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_log.h"
+#include "yamui_logging.h"
 
 #define YUI_EXPR_MAX_STACK_DEPTH 32
 
-static const char *TAG = "yamui_expr";
 
 static char *yui_expr_strndup(const char *src, size_t len)
 {
@@ -815,7 +814,8 @@ esp_err_t yui_expr_eval(const char *expression, yui_expr_symbol_resolver_t resol
     yui_expr_parser_advance(&parser);
     yui_expr_value_t value = yui_expr_parse_expression(&parser);
     if (parser.status != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to evaluate expression '%s'", expression);
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_EXPR, "Failed to evaluate expression '%s'", expression);
+        yamui_telemetry_error("expr", "eval_failed");
         yui_expr_value_reset(&value);
         yui_expr_token_reset(&parser.current);
         return parser.status;

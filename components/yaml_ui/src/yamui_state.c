@@ -5,7 +5,7 @@
 #include <string.h>
 #include <strings.h>
 
-#include "esp_log.h"
+#include "yamui_logging.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -38,8 +38,6 @@ static size_t s_watch_count;
 static size_t s_watch_capacity;
 static uint32_t s_watch_next_id = 1;
 
-static const char *TAG = "yamui_state";
-
 static inline const char *yui_empty_if_null(const char *value)
 {
     return value ? value : "";
@@ -64,7 +62,7 @@ static esp_err_t yui_state_ensure_mutex(void)
     }
     s_lock = xSemaphoreCreateRecursiveMutex();
     if (!s_lock) {
-        ESP_LOGE(TAG, "Failed to allocate state lock");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_STATE, "Failed to allocate state lock");
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -236,7 +234,7 @@ static esp_err_t yui_state_set_internal(const char *key, const char *value, bool
         if (notify_count > 0U) {
             notifications = (yui_state_notification_t *)malloc(notify_count * sizeof(yui_state_notification_t));
             if (!notifications) {
-                ESP_LOGW(TAG, "State updated but notifications dropped (OOM)");
+                yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_STATE, "State updated but notifications dropped (OOM)");
                 notify_count = 0;
             } else {
                 size_t cursor = 0;
@@ -253,6 +251,11 @@ static esp_err_t yui_state_set_internal(const char *key, const char *value, bool
 
     const char *final_value = s_entries[index].value;
     yui_state_unlock();
+
+    if (notify && updated) {
+        yamui_telemetry_state_change(key, final_value);
+        yamui_log(YAMUI_LOG_LEVEL_DEBUG, YAMUI_LOG_CAT_STATE, "%s = %s", key, final_value ? final_value : "");
+    }
 
     for (size_t i = 0; i < notify_count; ++i) {
         if (notifications[i].cb) {
@@ -337,7 +340,7 @@ esp_err_t yui_state_seed_from_yaml(const yml_node_t *state_node)
         return ESP_OK;
     }
     if (yml_node_get_type(state_node) != YML_NODE_MAPPING) {
-        ESP_LOGE(TAG, "state block must be a mapping");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_STATE, "state block must be a mapping");
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t err = yui_state_init();

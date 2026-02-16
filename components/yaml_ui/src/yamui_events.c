@@ -6,14 +6,13 @@
 #include <string.h>
 #include <strings.h>
 
-#include "esp_log.h"
 #include "yamui_state.h"
+#include "yamui_logging.h"
 
 #define YUI_ACTION_MAX_ARGS 3
 #define YUI_ACTION_EVAL_BUFFER 128
 #define YUI_ACTION_INVALID ((yui_action_type_t)-1)
 
-static const char *TAG = "yamui_events";
 static yui_action_runtime_t s_runtime = {0};
 
 void yui_events_set_runtime(const yui_action_runtime_t *runtime)
@@ -104,6 +103,30 @@ static yui_action_type_t yui_action_type_from_name(const char *name)
     return YUI_ACTION_INVALID;
 }
 
+static const char *yui_action_type_name(yui_action_type_t type)
+{
+    switch (type) {
+        case YUI_ACTION_SET:
+            return "set";
+        case YUI_ACTION_GOTO:
+            return "goto";
+        case YUI_ACTION_PUSH:
+            return "push";
+        case YUI_ACTION_POP:
+            return "pop";
+        case YUI_ACTION_MODAL:
+            return "modal";
+        case YUI_ACTION_CLOSE_MODAL:
+            return "close_modal";
+        case YUI_ACTION_CALL:
+            return "call";
+        case YUI_ACTION_EMIT:
+            return "emit";
+        default:
+            return NULL;
+    }
+}
+
 static void yui_free_tmp_args(char **args, size_t count)
 {
     if (!args) {
@@ -159,7 +182,7 @@ static esp_err_t yui_collect_args(char *text, char **out_args, size_t max_args, 
                             }
                             (*out_count)++;
                         } else if (!warned_overflow) {
-                            ESP_LOGW(TAG, "Dropping extra action argument '%s'", trimmed);
+                            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "Dropping extra action argument '%s'", trimmed);
                             warned_overflow = true;
                         }
                     }
@@ -179,7 +202,7 @@ static esp_err_t yui_collect_args(char *text, char **out_args, size_t max_args, 
                     }
                     (*out_count)++;
                 } else if (!warned_overflow) {
-                    ESP_LOGW(TAG, "Dropping extra action argument '%s'", trimmed);
+                    yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "Dropping extra action argument '%s'", trimmed);
                     warned_overflow = true;
                 }
             }
@@ -220,7 +243,7 @@ static esp_err_t yui_action_parse_text(const char *text, yui_action_t *out)
 
     yui_action_type_t type = yui_action_type_from_name(trimmed);
     if (type == YUI_ACTION_INVALID) {
-        ESP_LOGW(TAG, "Unsupported action '%s'", trimmed);
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "Unsupported action '%s'", trimmed);
         free(scratch);
         return ESP_ERR_INVALID_ARG;
     }
@@ -293,7 +316,7 @@ static const char *yui_eval_arg(const char *arg, const yui_action_eval_ctx_t *ct
 static esp_err_t yui_execute_set(const yui_action_t *action, const yui_action_eval_ctx_t *ctx)
 {
     if (!action->arg0) {
-        ESP_LOGW(TAG, "set action missing key argument");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "set action missing key argument");
         return ESP_ERR_INVALID_ARG;
     }
     char key_buffer[YUI_ACTION_EVAL_BUFFER];
@@ -301,13 +324,17 @@ static esp_err_t yui_execute_set(const yui_action_t *action, const yui_action_ev
     const char *key = yui_eval_arg(action->arg0, ctx, key_buffer, sizeof(key_buffer));
     const char *value = action->arg1 ? yui_eval_arg(action->arg1, ctx, value_buffer, sizeof(value_buffer)) : "";
     if (!key || key[0] == '\0') {
-        ESP_LOGW(TAG, "set action resolved to empty key");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "set action resolved to empty key");
         return ESP_ERR_INVALID_ARG;
     }
     if (!value) {
         value = "";
     }
-    return yui_state_set(key, value);
+    esp_err_t err = yui_state_set(key, value);
+    if (err == ESP_OK) {
+        yamui_telemetry_action("set", key, value);
+    }
+    return err;
 }
 
 static esp_err_t yui_execute_goto(const yui_action_t *action, const yui_action_eval_ctx_t *ctx)
@@ -317,6 +344,7 @@ static esp_err_t yui_execute_goto(const yui_action_t *action, const yui_action_e
     }
     char buffer[YUI_ACTION_EVAL_BUFFER];
     const char *target = yui_eval_arg(action->arg0, ctx, buffer, sizeof(buffer));
+    yamui_telemetry_action("goto", target, NULL);
     return s_runtime.goto_screen(target);
 }
 
@@ -327,6 +355,7 @@ static esp_err_t yui_execute_push(const yui_action_t *action, const yui_action_e
     }
     char buffer[YUI_ACTION_EVAL_BUFFER];
     const char *target = yui_eval_arg(action->arg0, ctx, buffer, sizeof(buffer));
+    yamui_telemetry_action("push", target, NULL);
     return s_runtime.push_screen(target);
 }
 
@@ -335,6 +364,7 @@ static esp_err_t yui_execute_pop(void)
     if (!s_runtime.pop_screen) {
         return ESP_ERR_NOT_SUPPORTED;
     }
+    yamui_telemetry_action("pop", NULL, NULL);
     return s_runtime.pop_screen();
 }
 
@@ -346,9 +376,10 @@ static esp_err_t yui_execute_modal(const yui_action_t *action, const yui_action_
     char buffer[YUI_ACTION_EVAL_BUFFER];
     const char *component = yui_eval_arg(action->arg0, ctx, buffer, sizeof(buffer));
     if (!component || component[0] == '\0') {
-        ESP_LOGW(TAG, "modal action missing component argument");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "modal action missing component argument");
         return ESP_ERR_INVALID_ARG;
     }
+    yamui_telemetry_action("modal", component, NULL);
     return s_runtime.show_modal(component);
 }
 
@@ -357,6 +388,7 @@ static esp_err_t yui_execute_close_modal(void)
     if (!s_runtime.close_modal) {
         return ESP_ERR_NOT_SUPPORTED;
     }
+    yamui_telemetry_action("close_modal", NULL, NULL);
     return s_runtime.close_modal();
 }
 
@@ -366,13 +398,13 @@ static esp_err_t yui_execute_call(const yui_action_t *action, const yui_action_e
         return ESP_ERR_NOT_SUPPORTED;
     }
     if (!action->arg0) {
-        ESP_LOGW(TAG, "call action missing function name");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "call action missing function name");
         return ESP_ERR_INVALID_ARG;
     }
     char fn_buffer[YUI_ACTION_EVAL_BUFFER];
     const char *function = yui_eval_arg(action->arg0, ctx, fn_buffer, sizeof(fn_buffer));
     if (!function || function[0] == '\0') {
-        ESP_LOGW(TAG, "call action resolved to empty function name");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "call action resolved to empty function name");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -388,7 +420,9 @@ static esp_err_t yui_execute_call(const yui_action_t *action, const yui_action_e
         arg_count++;
     }
 
-    return s_runtime.call_native(function, args, arg_count);
+    esp_err_t err = s_runtime.call_native(function, args, arg_count);
+    yamui_telemetry_action("call", function, arg_count > 0U ? args[0] : NULL);
+    return err;
 }
 
 static esp_err_t yui_execute_emit(const yui_action_t *action, const yui_action_eval_ctx_t *ctx)
@@ -397,13 +431,13 @@ static esp_err_t yui_execute_emit(const yui_action_t *action, const yui_action_e
         return ESP_ERR_NOT_SUPPORTED;
     }
     if (!action->arg0) {
-        ESP_LOGW(TAG, "emit action missing event name");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "emit action missing event name");
         return ESP_ERR_INVALID_ARG;
     }
     char event_buffer[YUI_ACTION_EVAL_BUFFER];
     const char *event_name = yui_eval_arg(action->arg0, ctx, event_buffer, sizeof(event_buffer));
     if (!event_name || event_name[0] == '\0') {
-        ESP_LOGW(TAG, "emit action resolved to empty event name");
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "emit action resolved to empty event name");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -419,18 +453,24 @@ static esp_err_t yui_execute_emit(const yui_action_t *action, const yui_action_e
         arg_count++;
     }
 
-    return s_runtime.emit_event(event_name, args, arg_count);
+    esp_err_t err = s_runtime.emit_event(event_name, args, arg_count);
+    yamui_telemetry_action("emit", event_name, arg_count > 0U ? args[0] : NULL);
+    return err;
 }
 
 static esp_err_t yui_execute_unimplemented(const yui_action_t *action, const char *label)
 {
     (void)action;
-    ESP_LOGW(TAG, "%s action not implemented yet", label);
+    yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "%s action not implemented yet", label);
     return ESP_ERR_NOT_SUPPORTED;
 }
 
 static esp_err_t yui_execute_action(const yui_action_t *action, const yui_action_eval_ctx_t *ctx)
 {
+    const char *name = yui_action_type_name(action->type);
+    if (name) {
+        yamui_log(YAMUI_LOG_LEVEL_DEBUG, YAMUI_LOG_CAT_ACTION, "Executing action %s", name);
+    }
     switch (action->type) {
         case YUI_ACTION_SET:
             return yui_execute_set(action, ctx);
@@ -494,7 +534,7 @@ esp_err_t yui_action_list_from_node(const yml_node_t *node, yui_action_list_t *o
         size_t idx = 0;
         for (const yml_node_t *child = yml_node_child_at(node, 0); child; child = yml_node_next(child)) {
             if (yml_node_get_type(child) != YML_NODE_SCALAR) {
-                ESP_LOGW(TAG, "Action entries must be scalars");
+                yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_EVENT, "Action entries must be scalars");
                 yui_action_list_free(out);
                 return ESP_ERR_INVALID_ARG;
             }
@@ -514,7 +554,7 @@ esp_err_t yui_action_list_from_node(const yml_node_t *node, yui_action_list_t *o
         return ESP_OK;
     }
 
-    ESP_LOGW(TAG, "Unsupported event node type %d", (int)type);
+    yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_EVENT, "Unsupported event node type %d", (int)type);
     return ESP_ERR_INVALID_ARG;
 }
 

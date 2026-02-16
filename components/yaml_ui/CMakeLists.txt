@@ -5,6 +5,7 @@ idf_component_register(
         "src/yamui_events.c"
         "src/yamui_expr.c"
         "src/yamui_runtime.c"
+        "src/yamui_logging.c"
     INCLUDE_DIRS "include"
     REQUIRES yaml_core freertos
 )

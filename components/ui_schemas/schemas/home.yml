@@ -5,6 +5,8 @@ layout:
   v_spacing: 18
   padding: 20
   background_color: "#090912"
+state:
+  dev.test_counter: "0"
 styles:
   card_default:
     bg_color: "#151523"
@@ -18,101 +20,118 @@ styles:
     accent_color: "#FF6F91"
     radius: 18
     padding: 16
+components:
+  DevDiagnosticsModal:
+    layout:
+      padding: 16
+    widgets:
+      - type: label
+        text: "Diagnostics modal"
+      - type: label
+        text: "Counter {{dev.test_counter}}"
 sensor_templates:
   ph:
-    title: "{{name}}"
+    title: "{{sensor.name}}"
     subtitle: "pH Monitoring"
     style: card_default
     widgets:
       - type: label
         variant: value
-        text: "{{value}} {{unit}}"
+        text: "{{sensor.value}} {{sensor.unit}}"
+        on_load:
+          - set(dev.test_counter, "{{dev.test_counter | int + 1}}")
+          - modal(DevDiagnosticsModal)
+          - close_modal()
       - type: label
         variant: status
-        text: "Target {{min}}-{{max}}"
+        text: "Target {{sensor.min}}-{{sensor.max}}"
       - type: label
         variant: meta
-        text: "FW {{firmware}} • {{address}}"
+        text: "FW {{sensor.firmware}} • {{sensor.address}}"
   ec:
-    title: "{{name}}"
+    title: "{{sensor.name}}"
     subtitle: "Electrical Conductivity"
     style: card_default
     widgets:
       - type: label
         variant: value
-        text: "{{value}} {{unit}}"
+        text: "{{sensor.value}} {{sensor.unit}}"
       - type: label
         variant: status
-        text: "Range {{min}}-{{max}}"
+        text: "Range {{sensor.min}}-{{sensor.max}}"
       - type: label
         variant: meta
-        text: "{{type}} • {{firmware}}"
+        text: "{{sensor.type}} • {{sensor.firmware}}"
   rtd:
-    title: "{{name}}"
+    title: "{{sensor.name}}"
     subtitle: "Temperature"
     style: card_default
     widgets:
       - type: label
         variant: value
-        text: "{{value}} {{unit}}"
+        text: "{{sensor.value}} {{sensor.unit}}"
       - type: label
         variant: status
-        text: "Safe {{min}}-{{max}}"
+        text: "Safe {{sensor.min}}-{{sensor.max}}"
   do:
-    title: "{{name}}"
+    title: "{{sensor.name}}"
     subtitle: "Dissolved Oxygen"
     style: card_default
     widgets:
       - type: label
         variant: value
-        text: "{{value}} {{unit}}"
+        text: "{{sensor.value}} {{sensor.unit}}"
       - type: label
         variant: status
-        text: "{{firmware}} • {{address}}"
+        text: "{{sensor.firmware}} • {{sensor.address}}"
   orp:
-    title: "{{name}}"
+    title: "{{sensor.name}}"
     subtitle: "Oxidation-Reduction"
     style: card_warning
     widgets:
       - type: label
         variant: value
-        text: "{{value}} {{unit}}"
+        text: "{{sensor.value}} {{sensor.unit}}"
       - type: label
         variant: status
-        text: "Window {{min}}-{{max}}"
+        text: "Window {{sensor.min}}-{{sensor.max}}"
   co2:
-    title: "{{name}}"
+    title: "{{sensor.name}}"
     subtitle: "CO₂ Concentration"
     style: card_default
     widgets:
       - type: label
         variant: value
-        text: "{{value}} {{unit}}"
+        text: "{{sensor.value}} {{sensor.unit}}"
       - type: label
         variant: status
-        text: "{{firmware}}"
+        text: "{{sensor.firmware}}"
   o2:
-    title: "{{name}}"
+    title: "{{sensor.name}}"
     subtitle: "Oxygen"
     style: card_default
     widgets:
       - type: label
         variant: value
-        text: "{{value}} {{unit}}"
+        text: "{{sensor.value}} {{sensor.unit}}"
       - type: label
         variant: status
-        text: "Calibration {{firmware}}"
+        text: "Calibration {{sensor.firmware}}"
   default:
-    title: "{{name}}"
-    subtitle: "{{type}} sensor"
+    title: "{{sensor.name}}"
+    subtitle: "{{sensor.type}} sensor"
     style: card_default
     widgets:
       - type: label
         variant: value
-        text: "{{value}} {{unit}}"
+        text: "{{sensor.value}} {{sensor.unit}}"
+        on_load:
+          - set(dev.test_counter, "{{dev.test_counter | int + 1}}")
+          - modal(DevDiagnosticsModal)
+          - close_modal()
       - type: label
         variant: status
-        text: "{{min}}-{{max}}"
+        text: "{{sensor.min}}-{{sensor.max}}"
       - type: label
         variant: meta
-        text: "{{address}}"
+        text: "{{sensor.address}}"

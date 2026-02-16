@@ -1,6 +1,7 @@
 #include "ui_schemas.h"
 
 #include <ctype.h>
+#include <stdbool.h>
 #include <string.h>
 
 extern const uint8_t _binary_home_yml_start[];

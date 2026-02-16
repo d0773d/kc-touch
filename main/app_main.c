@@ -32,6 +32,7 @@
 #include "wifi_copro_power.h"
 #include "wifi_copro_transport.h"
 #include "lvgl.h"
+#include "yamui_logging.h"
 
 static char prov_qr_payload[256];
 
@@ -52,6 +53,28 @@ static bool s_restore_sta_cfg;
 
 static void schedule_sta_connect(uint32_t delay_ms);
 static void sta_connect_timer_cb(TimerHandle_t xTimer);
+
+static void diag_telemetry_sink(const yamui_telemetry_event_t *event, void *user_ctx)
+{
+    (void)user_ctx;
+    if (!event) {
+        return;
+    }
+
+    const char *subject = event->subject ? event->subject : "-";
+    const char *detail = event->detail ? event->detail : "-";
+    const char *arg0 = event->arg0 ? event->arg0 : "-";
+    const char *arg1 = event->arg1 ? event->arg1 : "-";
+
+    ESP_LOGI("diag.telemetry",
+             "type=%d subject=%s detail=%s arg0=%s arg1=%s value=%.3f",
+             event->type,
+             subject,
+             detail,
+             arg0,
+             arg1,
+             event->value);
+}
 
 /* Handler for provisioning events */
 static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
@@ -362,6 +385,9 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 
 void app_main(void)
 {
+    yamui_set_log_level(YAMUI_LOG_LEVEL_DEBUG);
+    yamui_set_telemetry_callback(diag_telemetry_sink, NULL);
+
     /* Initialize NVS partition */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

@@ -2,6 +2,7 @@
 #include "yamui_state.h"
 #include "yamui_events.h"
 #include "yamui_expr.h"
+#include "yamui_logging.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -9,9 +10,6 @@
 #include <string.h>
 #include <strings.h>
 
-#include "esp_log.h"
-
-static const char *TAG = "yaml_ui";
 
 typedef struct {
     const char *yaml_key;
@@ -21,6 +19,14 @@ typedef struct {
 typedef struct {
     yui_widget_t *widget;
 } yui_binding_ctx_t;
+
+static char *yui_strdup(const char *src);
+static bool yui_is_valid_state_token(const char *token);
+static esp_err_t yui_widget_add_state_binding(yui_widget_t *widget, char *token);
+static void yui_free_widgets(yui_widget_t *widgets, size_t count);
+static void yui_free_components(yui_component_t *components, size_t count);
+static void yui_component_layout_defaults(yui_component_layout_t *layout);
+static esp_err_t yui_parse_component_layout(const yml_node_t *node, yui_component_layout_t *layout);
 
 static void yui_binding_collect_cb(const char *identifier, void *user_ctx)
 {
@@ -33,12 +39,12 @@ static void yui_binding_collect_cb(const char *identifier, void *user_ctx)
     }
     char *copy = yui_strdup(identifier);
     if (!copy) {
-        ESP_LOGW(TAG, "Failed to allocate binding for '%s'", identifier);
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_PARSER, "Failed to allocate binding for '%s'", identifier);
         return;
     }
     esp_err_t err = yui_widget_add_state_binding(ctx->widget, copy);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to track binding '%s' (%s)", identifier, esp_err_to_name(err));
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_PARSER, "Failed to track binding '%s' (%s)", identifier, esp_err_to_name(err));
     }
 }
 
@@ -151,25 +157,6 @@ static esp_err_t yui_collect_bindings_from_text(yui_widget_t *widget, const char
         .widget = widget,
     };
 
-    auto void collect_identifier(const char *identifier, void *user_ctx) {
-        struct binding_ctx *binding = (struct binding_ctx *)user_ctx;
-        if (!binding || !binding->widget || !identifier) {
-            return;
-        }
-        if (!yui_is_valid_state_token(identifier)) {
-            return;
-        }
-        char *copy = yui_strdup(identifier);
-        if (!copy) {
-            ESP_LOGW(TAG, "Failed to allocate binding for '%s'", identifier);
-            return;
-        }
-        esp_err_t err = yui_widget_add_state_binding(binding->widget, copy);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to track binding '%s' (%s)", identifier, esp_err_to_name(err));
-        }
-    };
-
     const char *cursor = text;
     while (true) {
         const char *open = strstr(cursor, "{{");
@@ -257,7 +244,7 @@ static bool yui_widget_type_from_string(const char *type, yui_widget_type_t *out
         *out = YUI_WIDGET_SPACER;
         return true;
     }
-    ESP_LOGW(TAG, "Unsupported widget type '%s'", type);
+    yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_PARSER, "Unsupported widget type '%s'", type);
     return false;
 }
 
@@ -270,12 +257,12 @@ static esp_err_t yui_parse_widget_sequence(const yml_node_t *widgets_node, yui_w
     *out_count = 0;
     const char *label = owner_name ? owner_name : "<anonymous>";
     if (!widgets_node || yml_node_get_type(widgets_node) != YML_NODE_SEQUENCE) {
-        ESP_LOGE(TAG, "Block '%s' is missing a widgets sequence", label);
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Block '%s' is missing a widgets sequence", label);
         return ESP_ERR_INVALID_ARG;
     }
     size_t count = yml_node_child_count(widgets_node);
     if (count == 0) {
-        ESP_LOGE(TAG, "Block '%s' has an empty widget list", label);
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Block '%s' has an empty widget list", label);
         return ESP_ERR_INVALID_ARG;
     }
     yui_widget_t *widgets = (yui_widget_t *)calloc(count, sizeof(yui_widget_t));
@@ -286,7 +273,7 @@ static esp_err_t yui_parse_widget_sequence(const yml_node_t *widgets_node, yui_w
     size_t idx = 0;
     for (const yml_node_t *child = yml_node_child_at(widgets_node, 0); child; child = yml_node_next(child)) {
         if (yml_node_get_type(child) != YML_NODE_MAPPING) {
-            ESP_LOGE(TAG, "Widget entry %u in '%s' must be a mapping", (unsigned)idx, label);
+            yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Widget entry %u in '%s' must be a mapping", (unsigned)idx, label);
             yui_free_widgets(widgets, count);
             return ESP_ERR_INVALID_ARG;
         }
@@ -300,7 +287,7 @@ static esp_err_t yui_parse_widget_sequence(const yml_node_t *widgets_node, yui_w
         free(type_str);
         widget->text = yui_read_string(child, "text");
         if (widget->type == YUI_WIDGET_LABEL && !widget->text) {
-            ESP_LOGE(TAG, "Label widget entry %u in '%s' missing text", (unsigned)(idx - 1), label);
+            yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Label widget entry %u in '%s' missing text", (unsigned)(idx - 1), label);
             yui_free_widgets(widgets, count);
             return ESP_ERR_INVALID_ARG;
         }
@@ -355,12 +342,12 @@ static esp_err_t yui_parse_widgets(const yml_node_t *widgets_node, yui_template_
 static esp_err_t yui_parse_templates(const yml_node_t *templates_node, yui_schema_t *schema)
 {
     if (!templates_node || yml_node_get_type(templates_node) != YML_NODE_MAPPING) {
-        ESP_LOGE(TAG, "sensor_templates must be a mapping");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "sensor_templates must be a mapping");
         return ESP_ERR_INVALID_ARG;
     }
     size_t count = yml_node_child_count(templates_node);
     if (count == 0) {
-        ESP_LOGE(TAG, "sensor_templates block is empty");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "sensor_templates block is empty");
         return ESP_ERR_INVALID_ARG;
     }
     schema->templates = (yui_template_t *)calloc(count, sizeof(yui_template_t));
@@ -394,7 +381,7 @@ static esp_err_t yui_parse_components(const yml_node_t *components_node, yui_sch
         return ESP_OK;
     }
     if (yml_node_get_type(components_node) != YML_NODE_MAPPING) {
-        ESP_LOGE(TAG, "components block must be a mapping");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "components block must be a mapping");
         return ESP_ERR_INVALID_ARG;
     }
     size_t count = yml_node_child_count(components_node);
@@ -411,7 +398,7 @@ static esp_err_t yui_parse_components(const yml_node_t *components_node, yui_sch
     size_t idx = 0;
     for (const yml_node_t *child = yml_node_child_at(components_node, 0); child; child = yml_node_next(child)) {
         if (yml_node_get_type(child) != YML_NODE_MAPPING) {
-            ESP_LOGE(TAG, "Component '%s' must be a mapping", yml_node_get_key(child));
+            yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Component '%s' must be a mapping", yml_node_get_key(child));
             err = ESP_ERR_INVALID_ARG;
             break;
         }
@@ -449,7 +436,7 @@ static esp_err_t yui_parse_styles(const yml_node_t *styles_node, yui_schema_t *s
         return ESP_OK;
     }
     if (yml_node_get_type(styles_node) != YML_NODE_MAPPING) {
-        ESP_LOGE(TAG, "styles block must be a mapping");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "styles block must be a mapping");
         return ESP_ERR_INVALID_ARG;
     }
     size_t count = yml_node_child_count(styles_node);
@@ -465,7 +452,7 @@ static esp_err_t yui_parse_styles(const yml_node_t *styles_node, yui_schema_t *s
     size_t idx = 0;
     for (const yml_node_t *child = yml_node_child_at(styles_node, 0); child; child = yml_node_next(child)) {
         if (yml_node_get_type(child) != YML_NODE_MAPPING) {
-            ESP_LOGE(TAG, "Style '%s' must be a mapping", yml_node_get_key(child));
+            yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "Style '%s' must be a mapping", yml_node_get_key(child));
             return ESP_ERR_INVALID_ARG;
         }
         yui_style_t *style = &schema->styles[idx++];
@@ -497,7 +484,7 @@ static esp_err_t yui_parse_layout(const yml_node_t *layout_node, yui_layout_t *l
         return ESP_OK;
     }
     if (yml_node_get_type(layout_node) != YML_NODE_MAPPING) {
-        ESP_LOGE(TAG, "layout block must be a mapping");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "layout block must be a mapping");
         return ESP_ERR_INVALID_ARG;
     }
     layout->columns = yui_read_u8(layout_node, "columns", layout->columns);
@@ -551,7 +538,7 @@ static esp_err_t yui_parse_component_layout(const yml_node_t *node, yui_componen
         return ESP_OK;
     }
     if (yml_node_get_type(node) != YML_NODE_MAPPING) {
-        ESP_LOGE(TAG, "component layout must be a mapping");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "component layout must be a mapping");
         return ESP_ERR_INVALID_ARG;
     }
     char *type = yui_read_string(node, "type");
@@ -692,7 +679,7 @@ esp_err_t yui_schema_from_tree(const yml_node_t *root, yui_schema_t *out_schema)
 
     const yml_node_t *templates_node = yml_node_get_child(root, "sensor_templates");
     if (!templates_node) {
-        ESP_LOGE(TAG, "YAML schema missing sensor_templates block");
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "YAML schema missing sensor_templates block");
         yui_schema_free(out_schema);
         return ESP_ERR_INVALID_ARG;
     }
