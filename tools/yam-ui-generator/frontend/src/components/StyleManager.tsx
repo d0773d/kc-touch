@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useProject, type EditorTarget } from "../context/ProjectContext";
 import {
   ProjectModel,
@@ -10,11 +10,12 @@ import {
   WidgetPath,
 } from "../types/yamui";
 import { lintStyles, previewStyle } from "../utils/api";
-import StylePreviewCard from "./StylePreviewCard";
+import StylePreviewCard, { buildStylePreviewKnobs } from "./StylePreviewCard";
 
 const CATEGORY_OPTIONS: StyleCategory[] = ["color", "surface", "text", "spacing", "shadow"];
 const STYLE_FILTER_CATEGORIES: Array<StyleCategory | "all"> = ["all", ...CATEGORY_OPTIONS];
 const MAX_USAGE_PREVIEW = 6;
+const PREVIEW_DEBOUNCE_MS = 250;
 
 interface FormState {
   name: string;
@@ -146,12 +147,13 @@ export default function StyleManager(): JSX.Element {
   const [filterQuery, setFilterQuery] = useState("");
   const [filterCategory, setFilterCategory] = useState<StyleCategory | "all">("all");
   const [usageCursor, setUsageCursor] = useState<Record<string, number>>({});
+  const previewCacheRef = useRef<Map<string, StylePreview>>(new Map());
 
   const normalizedQuery = filterQuery.trim().toLowerCase();
   const styleEntries = useMemo(() => {
-    const entries = Object.values(project.styles);
+    const entries = Object.entries(project.styles).map(([key, token]) => ({ key, token }));
     return entries
-      .filter((token) => {
+      .filter(({ token }) => {
         const matchesCategory = filterCategory === "all" || token.category === filterCategory;
         if (!matchesCategory) {
           return false;
@@ -164,7 +166,7 @@ export default function StyleManager(): JSX.Element {
         const inTags = token.tags?.some((tag) => tag.toLowerCase().includes(normalizedQuery));
         return Boolean(inName || inDescription || inTags);
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => a.token.name.localeCompare(b.token.name));
   }, [project.styles, filterCategory, normalizedQuery]);
   const selectedStyle = styleEditorSelection;
   const selectedToken = selectedStyle ? project.styles[selectedStyle] : undefined;
@@ -215,6 +217,7 @@ export default function StyleManager(): JSX.Element {
   }, [formState, selectedToken]);
   const previewToken = liveFormToken ?? selectedToken;
   const knobEditingDisabledReason = liveFormToken ? undefined : "Fix Value JSON to use quick knobs.";
+  const usageKnobSummaries = useMemo(() => buildStylePreviewKnobs(previewToken ?? selectedToken), [previewToken, selectedToken]);
 
   useEffect(() => {
     setUsageCursor((prev) => {
@@ -284,7 +287,7 @@ export default function StyleManager(): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    if (!selectedToken) {
+    if (!previewToken) {
       setAutoPreview(null);
       setAutoPreviewError(null);
       setAutoPreviewBusy(false);
@@ -292,29 +295,50 @@ export default function StyleManager(): JSX.Element {
         cancelled = true;
       };
     }
+    const cacheKey = JSON.stringify(previewToken);
+    const cachedPreview = previewCacheRef.current.get(cacheKey);
+    if (cachedPreview) {
+      setAutoPreview(cachedPreview);
+      setAutoPreviewError(null);
+      setAutoPreviewBusy(false);
+      return () => {
+        cancelled = true;
+      };
+    }
     setAutoPreviewBusy(true);
-    previewStyle(selectedToken)
-      .then((result) => {
-        if (!cancelled) {
+    const timeoutId = window.setTimeout(() => {
+      previewStyle(previewToken)
+        .then((result) => {
+          if (cancelled) {
+            return;
+          }
+          previewCacheRef.current.set(cacheKey, result);
+          if (previewCacheRef.current.size > 20) {
+            const oldest = previewCacheRef.current.keys().next().value;
+            if (oldest) {
+              previewCacheRef.current.delete(oldest);
+            }
+          }
           setAutoPreview(result);
           setAutoPreviewError(null);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setAutoPreview(null);
-          setAutoPreviewError(error instanceof Error ? error.message : "Unable to preview style");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setAutoPreviewBusy(false);
-        }
-      });
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setAutoPreview(null);
+            setAutoPreviewError(error instanceof Error ? error.message : "Unable to preview style");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setAutoPreviewBusy(false);
+          }
+        });
+    }, PREVIEW_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
     };
-  }, [selectedToken]);
+  }, [previewToken]);
 
   const updateForm = (field: keyof FormState, value: string) => {
     setFormState((prev) => ({ ...prev, [field]: value }));
@@ -562,10 +586,10 @@ export default function StyleManager(): JSX.Element {
         <p className="style-manager__empty">No styles match the current search or category filter.</p>
       ) : (
         <div className="style-list">
-          {styleEntries.map((token) => {
+          {styleEntries.map(({ key, token }) => {
             const background = getColorValue(token, "backgroundColor", "#e2e8f0");
             const foreground = getColorValue(token, "color", "#0f172a");
-            const lintForToken = styleLintMap[token.name] ?? [];
+            const lintForToken = styleLintMap[key] ?? [];
             const lintSeverity = lintForToken.some((issue) => issue.severity === "error")
               ? "error"
               : lintForToken.length > 0
@@ -574,9 +598,9 @@ export default function StyleManager(): JSX.Element {
             return (
               <button
                 type="button"
-                key={token.name}
-                className={`style-card ${selectedStyle === token.name ? "active" : ""}`}
-                onClick={() => setStyleEditorSelection(token.name)}
+                key={key}
+                className={`style-card ${selectedStyle === key ? "active" : ""}`}
+                onClick={() => setStyleEditorSelection(key)}
               >
                 <div className="style-card__meta">
                   <strong>{token.name}</strong>
@@ -605,7 +629,7 @@ export default function StyleManager(): JSX.Element {
       )}
 
       {selectedToken ? (
-        <div className="style-editor">
+        <div className="style-editor" id="style-editor-panel">
           <StylePreviewCard
             label="Style Preview"
             token={previewToken ?? undefined}
@@ -647,6 +671,30 @@ export default function StyleManager(): JSX.Element {
                       <span className="style-usage-item__owner">{owner}</span>
                       <span className="style-usage-item__widget">{widget}</span>
                     </div>
+                    {autoPreview && (
+                      <div className="style-usage-item__preview" style={{ background: autoPreview.backgroundColor, color: autoPreview.color }}>
+                        <div className="style-usage-item__preview-top">
+                          <span className="style-usage-item__preview-category">{autoPreview.category}</span>
+                          {autoPreview.description && <span className="style-usage-item__preview-description">{autoPreview.description}</span>}
+                        </div>
+                        <span className="style-usage-item__preview-meta">BG {autoPreview.backgroundColor} • FG {autoPreview.color}</span>
+                      </div>
+                    )}
+                    {usageKnobSummaries.length > 0 && (
+                      <div className="style-usage-item__knobs">
+                        {usageKnobSummaries.map((knob) => (
+                          <div key={knob.id} className="style-usage-item__knob">
+                            <span className="style-usage-item__knob-label">{knob.label}</span>
+                            <span className="style-usage-item__knob-value">{knob.summary ?? "No values set"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {lintSummaryLabel && (
+                      <div className="style-usage-item__lint">
+                        <span className={`style-usage-item__lint-pill ${lintSeverityClass}`}>{lintSummaryLabel}</span>
+                      </div>
+                    )}
                     <div className="style-usage-item__path">Path: {pathLabel}</div>
                     <span className="style-usage-item__cta">Jump</span>
                   </button>
@@ -656,27 +704,6 @@ export default function StyleManager(): JSX.Element {
               <span className="field-hint">{usageOverflow} more matches not shown. Use “Focus next match” to cycle all.</span>
             )}
           </div>
-                      {autoPreview && (
-                        <div
-                          className="style-usage-item__preview"
-                          style={{ background: autoPreview.backgroundColor, color: autoPreview.color }}
-                        >
-                          <div className="style-usage-item__preview-top">
-                            <span className="style-usage-item__preview-category">{autoPreview.category}</span>
-                            {autoPreview.description && (
-                              <span className="style-usage-item__preview-description">{autoPreview.description}</span>
-                            )}
-                          </div>
-                          <span className="style-usage-item__preview-meta">
-                            BG {autoPreview.backgroundColor} • FG {autoPreview.color}
-                          </span>
-                        </div>
-                      )}
-                      {lintSummaryLabel && (
-                        <div className="style-usage-item__lint">
-                          <span className={`style-usage-item__lint-pill ${lintSeverityClass}`}>{lintSummaryLabel}</span>
-                        </div>
-                      )}
           <div className="style-lint style-lint--auto">
             <p className="style-lint__title">Auto lint</p>
             {lintScanBusy ? (

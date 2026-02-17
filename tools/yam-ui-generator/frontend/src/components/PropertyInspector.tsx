@@ -195,6 +195,13 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     }
   }, [recentStyles]);
 
+  useEffect(() => {
+    setRecentStyles((prev) => {
+      const filtered = prev.filter((styleKey) => Boolean(project.styles?.[styleKey]));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [project.styles]);
+
   const selectedWidget = useMemo(() => {
     if (!selectedPath) {
       return undefined;
@@ -253,14 +260,23 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   }, [selectedStyleToken]);
 
   const handleFocusStyle = () => {
-    if (!selectedStyleToken) {
+    const styleKey = formState.style.trim();
+    if (!styleKey || !project.styles?.[styleKey]) {
       return;
     }
-    setStyleEditorSelection(selectedStyleToken.name);
-    const target = document.getElementById("style-manager");
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    setStyleEditorSelection(styleKey);
+    const scrollIntoViewWithRetry = (elementId: string, attempt = 0) => {
+      const node = document.getElementById(elementId);
+      if (node) {
+        node.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (attempt < 5) {
+        window.setTimeout(() => scrollIntoViewWithRetry(elementId, attempt + 1), 80);
+      }
+    };
+    scrollIntoViewWithRetry("style-manager");
+    window.setTimeout(() => scrollIntoViewWithRetry("style-editor-panel"), 120);
   };
 
   const styleOptions = useMemo(() => Object.keys(project.styles ?? {}), [project.styles]);
@@ -520,11 +536,11 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   }, [loadAssetCatalog, trackAssetEvent]);
 
   const filteredStyles = useMemo(() => {
-    const entries = Object.values(project.styles ?? {});
+    const entries = Object.entries(project.styles ?? {});
     const pool = styleCategoryFilter === "all"
       ? entries
-      : entries.filter((token) => token.category === styleCategoryFilter);
-    return pool.slice(0, 6);
+      : entries.filter(([, token]) => token.category === styleCategoryFilter);
+    return pool.slice(0, 6).map(([key, token]) => ({ key, token }));
   }, [project.styles, styleCategoryFilter]);
 
   const handleStyleQuickPick = useCallback(
@@ -535,12 +551,13 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   );
 
   const handleShuffleStyle = () => {
-    const pool = filteredStyles.length ? filteredStyles : Object.values(project.styles ?? {});
+    const fallbackPool = Object.entries(project.styles ?? {}).map(([key, token]) => ({ key, token }));
+    const pool = filteredStyles.length ? filteredStyles : fallbackPool;
     if (!pool.length) {
       return;
     }
     const random = pool[Math.floor(Math.random() * pool.length)];
-    applyStyleValue(random.name);
+    applyStyleValue(random.key);
   };
 
   useEffect(() => {
@@ -833,11 +850,14 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
               </div>
               <div className="style-chip-row" aria-label="Recent styles">
                 {recentStyles.length ? (
-                  recentStyles.map((name) => (
-                    <button type="button" key={name} className="style-chip" onClick={() => handleStyleQuickPick(name)}>
-                      {name}
-                    </button>
-                  ))
+                  recentStyles.map((styleKey) => {
+                    const label = project.styles?.[styleKey]?.name ?? styleKey;
+                    return (
+                      <button type="button" key={styleKey} className="style-chip" onClick={() => handleStyleQuickPick(styleKey)}>
+                        {label}
+                      </button>
+                    );
+                  })
                 ) : (
                   <span className="field-hint">No recent styles yet.</span>
                 )}
@@ -851,8 +871,8 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
               </div>
               <div className="style-chip-row" aria-label="Suggested styles">
                 {filteredStyles.length ? (
-                  filteredStyles.map((token) => (
-                    <button type="button" key={token.name} className="style-chip" onClick={() => handleStyleQuickPick(token.name)}>
+                  filteredStyles.map(({ key, token }) => (
+                    <button type="button" key={key} className="style-chip" onClick={() => handleStyleQuickPick(key)}>
                       {token.name}
                     </button>
                   ))
