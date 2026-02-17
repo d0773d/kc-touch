@@ -1,0 +1,48 @@
+[project]
+name = "yam-ui-generator-backend"
+version = "0.1.0"
+description = "Schema-aware project services for the Yam UI Generator."
+authors = [{ name = "YamUI" }]
+license = { text = "Proprietary" }
+requires-python = ">=3.11"
+packages = [{ include = "yam_ui_generator" }]
+[tool.poetry]
+name = "yam-ui-generator-backend"
+version = "0.1.0"
+description = "Schema-aware project services for the Yam UI Generator."
+authors = ["YamUI"]
+license = "Proprietary"
+readme = "README.md"
+packages = [{ include = "yam_ui_generator" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+fastapi = "^0.109.0"
+uvicorn = { version = "^0.25.0", extras = ["standard"] }
+pydantic = "^2.6.1"
+pyyaml = "^6.0.1"
+jsonschema = "^4.21.1"
+typing-extensions = "^4.9.0"
+python-multipart = "^0.0.22"
+pillow = "^12.1.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+httpx = "^0.26.0"
+ruff = "^0.2.2"
+mypy = "^1.8.0"
+
+[build-system]
+requires = ["poetry-core>=1.5.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 110
+select = ["E", "F", "B", "I", "UP", "ASYNC"]
+ignore = ["E203", "E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+packages = ["yam_ui_generator"]
