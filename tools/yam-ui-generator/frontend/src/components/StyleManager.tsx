@@ -17,6 +17,8 @@ const CATEGORY_OPTIONS: StyleCategory[] = ["color", "surface", "text", "spacing"
 const STYLE_FILTER_CATEGORIES: Array<StyleCategory | "all"> = ["all", ...CATEGORY_OPTIONS];
 const MAX_USAGE_PREVIEW = 6;
 const PREVIEW_DEBOUNCE_MS = 250;
+const USAGE_FILTER_LOCK_KEY = "styleManager.usageFiltersLocked";
+const USAGE_EXPANSION_KEY = "styleManager.usageListExpanded";
 
 interface FormState {
   name: string;
@@ -86,6 +88,16 @@ interface StyleUsage {
 
 type UsageFocusOrigin = "list_click" | "cycle" | "cycle_prev" | "lint_jump";
 
+interface UsageFilterChip {
+  key: string;
+  label: string;
+  testId: string;
+  ariaLabel: string;
+  clear: () => void;
+}
+
+type UsageSortMode = "document" | "owner" | "widget";
+type FormErrors = Partial<Record<keyof FormState, string>>;
 
 interface LintDrawerEntry {
   name: string;
@@ -160,6 +172,9 @@ export default function StyleManager(): JSX.Element {
   const [usageOwnerFilter, setUsageOwnerFilter] = useState<"all" | "screen" | "component">("all");
   const [usageWidgetFilter, setUsageWidgetFilter] = useState<string>("all");
   const [usageSearchQuery, setUsageSearchQuery] = useState("");
+  const [usageSortMode, setUsageSortMode] = useState<UsageSortMode>("document");
+  const [usageListExpanded, setUsageListExpanded] = useState(false);
+  const [usageFiltersLocked, setUsageFiltersLocked] = useState(false);
   const [showUnusedOnly, setShowUnusedOnly] = useState(false);
   const [valueCopyState, setValueCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [valueFormatState, setValueFormatState] = useState<"idle" | "formatted" | "error">("idle");
@@ -200,8 +215,8 @@ export default function StyleManager(): JSX.Element {
         const inTags = token.tags?.some((tag) => tag.toLowerCase().includes(normalizedQuery));
         return Boolean(inName || inDescription || inTags);
       })
-        .sort((a, b) => a.token.name.localeCompare(b.token.name));
-      }, [project.styles, filterCategory, lintFilter, normalizedQuery, showUnusedOnly, styleLintMap, styleUsageMap]);
+      .sort((a, b) => a.token.name.localeCompare(b.token.name));
+  }, [project.styles, filterCategory, lintFilter, normalizedQuery, showUnusedOnly, styleLintMap, styleUsageMap]);
   const visibleLintStats = useMemo(() => {
     return styleEntries.reduce(
       (acc, { token }) => {
@@ -253,8 +268,36 @@ export default function StyleManager(): JSX.Element {
         return haystack.includes(normalizedUsageSearch);
       });
   }, [normalizedUsageSearch, selectedStyleUsage, usageOwnerFilter, usageWidgetFilter]);
-  const usagePreview = filteredStyleUsageEntries.slice(0, MAX_USAGE_PREVIEW);
-  const usageOverflow = Math.max(0, filteredStyleUsageEntries.length - usagePreview.length);
+  const sortedStyleUsageEntries = useMemo(() => {
+    if (usageSortMode === "document") {
+      return filteredStyleUsageEntries;
+    }
+    const next = [...filteredStyleUsageEntries];
+    if (usageSortMode === "owner") {
+      next.sort((a, b) => a.descriptor.owner.localeCompare(b.descriptor.owner));
+    } else if (usageSortMode === "widget") {
+      next.sort((a, b) => {
+        const widgetCompare = a.usage.widget.type.localeCompare(b.usage.widget.type);
+        if (widgetCompare !== 0) {
+          return widgetCompare;
+        }
+        return a.descriptor.owner.localeCompare(b.descriptor.owner);
+      });
+    }
+    return next;
+  }, [filteredStyleUsageEntries, usageSortMode]);
+  const usageEntryBuckets = useMemo(() => {
+    if (usageListExpanded) {
+      return { visible: sortedStyleUsageEntries, hidden: [] as typeof sortedStyleUsageEntries };
+    }
+    return {
+      visible: sortedStyleUsageEntries.slice(0, MAX_USAGE_PREVIEW),
+      hidden: sortedStyleUsageEntries.slice(MAX_USAGE_PREVIEW),
+    };
+  }, [sortedStyleUsageEntries, usageListExpanded]);
+  const visibleUsageEntries = usageEntryBuckets.visible;
+  const hiddenUsageEntries = usageEntryBuckets.hidden;
+  const usageOverflow = hiddenUsageEntries.length;
   const deleteGuardReason = selectedStyleUsage.length
     ? `Used by ${selectedStyleUsage.length} widget${selectedStyleUsage.length === 1 ? "" : "s"}. Remove references before deleting.`
     : null;
@@ -263,7 +306,95 @@ export default function StyleManager(): JSX.Element {
   const totalUsageCount = selectedStyleUsage.length;
   const noUsageMatches = filteredUsageCount === 0;
   const usageFiltersDirty =
-    usageOwnerFilter !== "all" || usageWidgetFilter !== "all" || Boolean(normalizedUsageSearch.length);
+    usageOwnerFilter !== "all" ||
+    usageWidgetFilter !== "all" ||
+    usageSortMode !== "document" ||
+    Boolean(normalizedUsageSearch.length);
+  const trimmedUsageSearch = usageSearchQuery.trim();
+  const usageFilterChips: UsageFilterChip[] = [];
+  if (usageOwnerFilter !== "all") {
+    usageFilterChips.push({
+      key: "owner",
+      label: `Owner: ${usageOwnerFilter === "screen" ? "Screens" : "Components"}`,
+      testId: "usage-filter-pill-owner",
+      ariaLabel: "Clear owner filter",
+      clear: () => setUsageOwnerFilter("all"),
+    });
+  }
+  if (usageWidgetFilter !== "all") {
+    usageFilterChips.push({
+      key: "widget",
+      label: `Widget: ${usageWidgetFilter}`,
+      testId: "usage-filter-pill-widget",
+      ariaLabel: "Clear widget filter",
+      clear: () => setUsageWidgetFilter("all"),
+    });
+  }
+  if (trimmedUsageSearch) {
+    const truncated = trimmedUsageSearch.length > 28 ? `${trimmedUsageSearch.slice(0, 25)}…` : trimmedUsageSearch;
+    usageFilterChips.push({
+      key: "search",
+      label: `Search: ${truncated}`,
+      testId: "usage-filter-pill-search",
+      ariaLabel: "Clear search filter",
+      clear: () => setUsageSearchQuery(""),
+    });
+  }
+  const hiddenUsageSummary = useMemo(() => {
+    if (hiddenUsageEntries.length === 0) {
+      return null;
+    }
+    const ownerTotals = hiddenUsageEntries.reduce(
+      (acc, entry) => {
+        acc[entry.usage.target.type] += 1;
+        return acc;
+      },
+      { screen: 0, component: 0 } as Record<"screen" | "component", number>
+    );
+    const ownerParts: string[] = [];
+    if (ownerTotals.screen > 0) {
+      ownerParts.push(ownerTotals.screen === 1 ? `Screen ${ownerTotals.screen}` : `Screens ${ownerTotals.screen}`);
+    }
+    if (ownerTotals.component > 0) {
+      ownerParts.push(
+        ownerTotals.component === 1 ? `Component ${ownerTotals.component}` : `Components ${ownerTotals.component}`
+      );
+    }
+    const widgetTypeCounts = new Map<string, number>();
+    hiddenUsageEntries.forEach(({ usage }) => {
+      widgetTypeCounts.set(usage.widget.type, (widgetTypeCounts.get(usage.widget.type) ?? 0) + 1);
+    });
+    const widgetEntries = Array.from(widgetTypeCounts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    let widgetSummary = "";
+    if (widgetEntries.length === 1) {
+      widgetSummary = `${widgetEntries[0][0]} only`;
+    } else if (widgetEntries.length > 1 && widgetEntries.length <= 3) {
+      widgetSummary = widgetEntries.map(([type]) => type).join(", ");
+    } else if (widgetEntries.length > 3) {
+      widgetSummary = `${widgetEntries.length} widget types`;
+    }
+    return {
+      owner: ownerParts.join(", "),
+      widget: widgetSummary,
+    };
+  }, [hiddenUsageEntries]);
+  const usageBreakdown = useMemo(() => {
+    const ownerCounts = { screen: 0, component: 0 };
+    const widgetTypeCounts = new Map<string, number>();
+    filteredStyleUsageEntries.forEach(({ usage }) => {
+      if (usage.target.type === "screen") {
+        ownerCounts.screen += 1;
+      } else {
+        ownerCounts.component += 1;
+      }
+      widgetTypeCounts.set(usage.widget.type, (widgetTypeCounts.get(usage.widget.type) ?? 0) + 1);
+    });
+    return {
+      ownerCounts: { ...ownerCounts },
+      widgetTypeCount: widgetTypeCounts.size,
+      widgetTypeLabels: Array.from(widgetTypeCounts.keys()).sort((a, b) => a.localeCompare(b)),
+    };
+  }, [filteredStyleUsageEntries]);
   const usageBannerLeadValue =
     totalUsageCount === 0
       ? "No"
@@ -391,9 +522,49 @@ export default function StyleManager(): JSX.Element {
   }, [styleUsageMap]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return;
+    }
+    try {
+      const storedLock = window.localStorage.getItem(USAGE_FILTER_LOCK_KEY);
+      if (storedLock === "true") {
+        setUsageFiltersLocked(true);
+        const storedExpansion = window.localStorage.getItem(USAGE_EXPANSION_KEY);
+        if (storedExpansion === "true") {
+          setUsageListExpanded(true);
+        }
+      }
+    } catch {
+      // Ignore storage failures
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return;
+    }
+    try {
+      if (usageFiltersLocked) {
+        window.localStorage.setItem(USAGE_FILTER_LOCK_KEY, "true");
+        window.localStorage.setItem(USAGE_EXPANSION_KEY, usageListExpanded ? "true" : "false");
+      } else {
+        window.localStorage.removeItem(USAGE_FILTER_LOCK_KEY);
+        window.localStorage.removeItem(USAGE_EXPANSION_KEY);
+      }
+    } catch {
+      // Ignore storage failures
+    }
+  }, [usageFiltersLocked, usageListExpanded]);
+
+  useEffect(() => {
+    if (usageFiltersLocked) {
+      return;
+    }
     setUsageOwnerFilter("all");
     setUsageWidgetFilter("all");
-  }, [selectedStyle]);
+    setUsageSortMode("document");
+    setUsageListExpanded(false);
+  }, [selectedStyle, usageFiltersLocked]);
 
   useEffect(() => {
     if (usageWidgetFilter === "all") {
@@ -665,6 +836,35 @@ export default function StyleManager(): JSX.Element {
     [focusUsageAtIndex, styleUsageMap]
   );
 
+  useEffect(() => {
+    if (!selectedStyle || selectedStyleUsage.length === 0) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
+          return;
+        }
+      }
+      if (!event.altKey) {
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        handleFocusNextUsage(selectedStyle);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        handleFocusPreviousUsage(selectedStyle);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [handleFocusNextUsage, handleFocusPreviousUsage, selectedStyle, selectedStyleUsage.length]);
+
   const handleDelete = () => {
     if (!selectedStyle) {
       return;
@@ -716,6 +916,8 @@ export default function StyleManager(): JSX.Element {
     setUsageOwnerFilter("all");
     setUsageWidgetFilter("all");
     setUsageSearchQuery("");
+    setUsageSortMode("document");
+    setUsageListExpanded(false);
   };
 
   const handleToggleLintDrawer = () => {
@@ -887,95 +1089,97 @@ export default function StyleManager(): JSX.Element {
 
   return (
     <section className="style-manager" id="style-manager">
-      <div className="style-manager__header">
-        <p className="section-title" style={{ marginBottom: 0 }}>
-          Style Tokens
-        </p>
-        <button type="button" className="button primary" onClick={handleCreateStyle}>
-          New Style
-        </button>
-      </div>
-      <div className="style-manager__filters">
-        <input
-          className="input-field"
-          placeholder="Search styles by name, tag, or description"
-          value={filterQuery}
-          onChange={(event) => setFilterQuery(event.target.value)}
-        />
-        <select
-          className="select-field"
-          value={filterCategory}
-          onChange={(event) => setFilterCategory(event.target.value as StyleCategory | "all")}
-        >
-          {STYLE_FILTER_CATEGORIES.map((category) => (
-            <option value={category} key={category}>
-              {category === "all" ? "All categories" : category}
-            </option>
-          ))}
-        </select>
-        <label className="style-manager__lint-filter">
-          <span>Lint filter</span>
-          <select
-            className="select-field"
-            value={lintFilter}
-            onChange={(event) => setLintFilter(event.target.value as "all" | "issues" | "errors")}
-          >
-            <option value="all">All styles</option>
-            <option value="issues">Only lint issues</option>
-            <option value="errors">Errors only</option>
-          </select>
-        </label>
-        <label className="style-manager__unused-toggle">
-          <input
-            type="checkbox"
-            checked={showUnusedOnly}
-            onChange={(event) => setShowUnusedOnly(event.target.checked)}
-          />
-          <span>Show unused only</span>
-        </label>
-        <button
-          type="button"
-          className="button tertiary style-manager__filters-reset"
-          onClick={handleResetFilters}
-          disabled={filtersAreDefault}
-        >
-          Reset filters
-        </button>
-        <div className="style-manager__results">
-          <span
-            className={`style-manager__results-summary ${filtersAreDefault ? "is-baseline" : "is-filtered"}`}
-            data-testid="style-results-summary"
-          >
-            {totalStyleCount === 0
-              ? "No styles yet"
-              : filtersAreDefault
-                ? `${totalStyleCount} style${totalStyleCount === 1 ? "" : "s"}`
-                : `Showing ${visibleStyleCount} of ${totalStyleCount}`}
-          </span>
-          <button
-            type="button"
-            className={`style-manager__lint-summary-pill ${visibleLintSummaryTone}`}
-            data-testid="style-lint-summary"
-            onClick={handleToggleLintDrawer}
-            aria-expanded={isLintDrawerOpen}
-          >
-            {visibleLintSummaryLabel}
+      <div className="style-manager__sticky">
+        <div className="style-manager__header">
+          <p className="section-title" style={{ marginBottom: 0 }}>
+            Style Tokens
+          </p>
+          <button type="button" className="button primary" onClick={handleCreateStyle}>
+            New Style
           </button>
         </div>
-      </div>
-      <div className="style-manager__lint-status">
-        {lintScanBusy ? (
-          <span>Running background lint…</span>
-        ) : lintScanError ? (
-          <span className="field-hint error-text">Lint unavailable: {lintScanError}</span>
-        ) : lintSummaryLabel ? (
-          <span className={`field-hint lint-hint lint-hint--${lintSeverityClass}`}>
-            <strong>{lintSummaryLabel}</strong>
-            <span>{lintHelpText}</span>
-          </span>
-        ) : (
-          <span className="field-hint">{lintHelpText}</span>
-        )}
+        <div className="style-manager__filters">
+          <input
+            className="input-field"
+            placeholder="Search styles by name, tag, or description"
+            value={filterQuery}
+            onChange={(event) => setFilterQuery(event.target.value)}
+          />
+          <select
+            className="select-field"
+            value={filterCategory}
+            onChange={(event) => setFilterCategory(event.target.value as StyleCategory | "all")}
+          >
+            {STYLE_FILTER_CATEGORIES.map((category) => (
+              <option value={category} key={category}>
+                {category === "all" ? "All categories" : category}
+              </option>
+            ))}
+          </select>
+          <label className="style-manager__lint-filter">
+            <span>Lint filter</span>
+            <select
+              className="select-field"
+              value={lintFilter}
+              onChange={(event) => setLintFilter(event.target.value as "all" | "issues" | "errors")}
+            >
+              <option value="all">All styles</option>
+              <option value="issues">Only lint issues</option>
+              <option value="errors">Errors only</option>
+            </select>
+          </label>
+          <label className="style-manager__unused-toggle">
+            <input
+              type="checkbox"
+              checked={showUnusedOnly}
+              onChange={(event) => setShowUnusedOnly(event.target.checked)}
+            />
+            <span>Show unused only</span>
+          </label>
+          <button
+            type="button"
+            className="button tertiary style-manager__filters-reset"
+            onClick={handleResetFilters}
+            disabled={filtersAreDefault}
+          >
+            Reset filters
+          </button>
+          <div className="style-manager__results">
+            <span
+              className={`style-manager__results-summary ${filtersAreDefault ? "is-baseline" : "is-filtered"}`}
+              data-testid="style-results-summary"
+            >
+              {totalStyleCount === 0
+                ? "No styles yet"
+                : filtersAreDefault
+                  ? `${totalStyleCount} style${totalStyleCount === 1 ? "" : "s"}`
+                  : `Showing ${visibleStyleCount} of ${totalStyleCount}`}
+            </span>
+            <button
+              type="button"
+              className={`style-manager__lint-summary-pill ${visibleLintSummaryTone}`}
+              data-testid="style-lint-summary"
+              onClick={handleToggleLintDrawer}
+              aria-expanded={isLintDrawerOpen}
+            >
+              {visibleLintSummaryLabel}
+            </button>
+          </div>
+        </div>
+        <div className="style-manager__lint-status">
+          {lintScanBusy ? (
+            <span>Running background lint…</span>
+          ) : lintScanError ? (
+            <span className="field-hint error-text">Lint unavailable: {lintScanError}</span>
+          ) : lintSummaryLabel ? (
+            <span className={`field-hint lint-hint lint-hint--${lintSeverityClass}`}>
+              <strong>{lintSummaryLabel}</strong>
+              <span>{lintHelpText}</span>
+            </span>
+          ) : (
+            <span className="field-hint">{lintHelpText}</span>
+          )}
+        </div>
       </div>
       {isLintDrawerOpen && (
         <div className="style-manager__lint-drawer" role="dialog" aria-label="Lint breakdown">
@@ -1135,69 +1339,154 @@ export default function StyleManager(): JSX.Element {
             )}
           </div>
           {selectedStyleUsage.length > 0 && (
-            <div className="style-usage-controls">
-              <div className="style-usage-filter-group">
-                <span className="style-usage-filter-label">Owner scope</span>
-                <div className="style-usage-filter-chips" role="group" aria-label="Owner filter">
-                  {(["all", "screen", "component"] as const).map((option) => {
-                    const label = option === "all" ? "All" : option === "screen" ? "Screens" : "Components";
-                    const isActive = usageOwnerFilter === option;
-                    return (
-                      <button
-                        type="button"
-                        key={option}
-                        className={`style-usage-filter-button${isActive ? " is-active" : ""}`}
-                        data-testid={`usage-owner-filter-${option}`}
-                        aria-pressed={isActive}
-                        onClick={() => setUsageOwnerFilter(option)}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
+            <>
+              <div className="style-usage-controls">
+                <div className="style-usage-filter-group">
+                  <span className="style-usage-filter-label">Owner scope</span>
+                  <div className="style-usage-filter-chips" role="group" aria-label="Owner filter">
+                    {(["all", "screen", "component"] as const).map((option) => {
+                      const label = option === "all" ? "All" : option === "screen" ? "Screens" : "Components";
+                      const isActive = usageOwnerFilter === option;
+                      return (
+                        <button
+                          type="button"
+                          key={option}
+                          className={`style-usage-filter-button${isActive ? " is-active" : ""}`}
+                          data-testid={`usage-owner-filter-${option}`}
+                          aria-pressed={isActive}
+                          onClick={() => setUsageOwnerFilter(option)}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+                <label className="style-usage-filter-group style-usage-widget-filter">
+                  <span className="style-usage-filter-label">Widget type</span>
+                  <select
+                    className="select-field"
+                    value={usageWidgetFilter}
+                    onChange={(event) => setUsageWidgetFilter(event.target.value)}
+                    aria-label="Widget type filter"
+                    disabled={availableUsageWidgetTypes.length === 0}
+                  >
+                    <option value="all">All widgets</option>
+                    {availableUsageWidgetTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="style-usage-filter-group style-usage-sort">
+                  <span className="style-usage-filter-label">Usage sort</span>
+                  <select
+                    className="select-field"
+                    value={usageSortMode}
+                    onChange={(event) => setUsageSortMode(event.target.value as "document" | "owner" | "widget")}
+                    aria-label="Usage sort"
+                    data-testid="usage-sort-select"
+                  >
+                    <option value="document">Document order</option>
+                    <option value="owner">Owner</option>
+                    <option value="widget">Widget type</option>
+                  </select>
+                </label>
+                <div className="style-usage-filter-group style-usage-lock-toggle">
+                  <span className="style-usage-filter-label">Filter persistence</span>
+                  <label className="style-usage-lock-toggle__control">
+                    <input
+                      type="checkbox"
+                      checked={usageFiltersLocked}
+                      onChange={(event) => setUsageFiltersLocked(event.target.checked)}
+                      data-testid="usage-lock-toggle"
+                    />
+                    <span>Lock filters across styles</span>
+                  </label>
+                </div>
+                <label className="style-usage-filter-group style-usage-search">
+                  <span className="style-usage-filter-label">Usage search</span>
+                  <input
+                    className="input-field style-usage-search__input"
+                    value={usageSearchQuery}
+                    onChange={(event) => setUsageSearchQuery(event.target.value)}
+                    placeholder="Filter by owner, widget, or id"
+                    aria-label="Usage search filter"
+                  />
+                </label>
+                {usageFiltersDirty && (
+                  <button type="button" className="button tertiary style-usage-filter-reset" onClick={handleResetUsageFilters}>
+                    Reset usage filters
+                  </button>
+                )}
               </div>
-              <label className="style-usage-filter-group style-usage-widget-filter">
-                <span className="style-usage-filter-label">Widget type</span>
-                <select
-                  className="select-field"
-                  value={usageWidgetFilter}
-                  onChange={(event) => setUsageWidgetFilter(event.target.value)}
-                  aria-label="Widget type filter"
-                  disabled={availableUsageWidgetTypes.length === 0}
-                >
-                  <option value="all">All widgets</option>
-                  {availableUsageWidgetTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="style-usage-filter-group style-usage-search">
-                <span className="style-usage-filter-label">Usage search</span>
-                <input
-                  className="input-field style-usage-search__input"
-                  value={usageSearchQuery}
-                  onChange={(event) => setUsageSearchQuery(event.target.value)}
-                  placeholder="Filter by owner, widget, or id"
-                  aria-label="Usage search filter"
-                />
-              </label>
-              {usageFiltersDirty && (
-                <button type="button" className="button tertiary style-usage-filter-reset" onClick={handleResetUsageFilters}>
-                  Reset usage filters
-                </button>
+              {usageFilterChips.length > 0 && (
+                <div className="style-usage-active-filters" role="status" aria-live="polite">
+                  <span className="style-usage-active-filters__label">Active filters:</span>
+                  <div className="style-usage-active-filters__chips">
+                    {usageFilterChips.map((chip) => (
+                      <div key={chip.key} className="style-usage-filter-pill" data-testid={chip.testId}>
+                        <span>{chip.label}</span>
+                        <button type="button" aria-label={chip.ariaLabel} onClick={chip.clear}>
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
+              <div className="style-usage-stats" role="note">
+                <span className="style-usage-stats__label">In scope</span>
+                <div className="style-usage-stats__pill" data-testid="usage-stats-screen">
+                  Screens <strong>{usageBreakdown.ownerCounts.screen}</strong>
+                </div>
+                <div className="style-usage-stats__pill" data-testid="usage-stats-component">
+                  Components <strong>{usageBreakdown.ownerCounts.component}</strong>
+                </div>
+                <div
+                  className="style-usage-stats__pill"
+                  data-testid="usage-stats-widget-types"
+                  title={
+                    usageBreakdown.widgetTypeLabels.length
+                      ? usageBreakdown.widgetTypeLabels.join(", ")
+                      : "No widget types in scope"
+                  }
+                >
+                  Widget types <strong>{usageBreakdown.widgetTypeCount}</strong>
+                </div>
+                {usageOverflow > 0 && !usageListExpanded && (
+                  <div className="style-usage-stats__pill is-muted" data-testid="usage-stats-hidden">
+                    Hidden matches <strong>{usageOverflow}</strong>{" "}
+                    {hiddenUsageSummary && (
+                      <span className="style-usage-stats__hint">
+                        {[hiddenUsageSummary.owner, hiddenUsageSummary.widget].filter(Boolean).join(" • ")}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+          {selectedStyleUsage.length > 0 && (
+            <div className="style-usage-shortcuts">
+              <span className="shortcut-toast" aria-live="polite">
+                Alt + ↑ / ↓ navigates usages
+              </span>
             </div>
           )}
           <div className="style-usage-list">
             {selectedStyleUsage.length === 0 && <span className="field-hint">No widgets reference this token yet.</span>}
             {selectedStyleUsage.length > 0 && noUsageMatches && (
-              <span className="field-hint">No matches for the current usage filters.</span>
+              <span className="field-hint field-hint--inline-action">
+                <span>No matches for the current usage filters.</span>
+                <button type="button" onClick={handleResetUsageFilters}>
+                  Clear filters
+                </button>
+              </span>
             )}
             {selectedStyle
-              ? usagePreview.map(({ usage, index: usageIndex, descriptor }) => {
+              ? visibleUsageEntries.map(({ usage, index: usageIndex, descriptor }) => {
                 const { owner, widget, pathLabel } = descriptor;
                 const ownerTypeLabel = usage.target.type === "screen" ? "Screen" : "Component";
                 const ownerTestId = `style-usage-owner-${usage.target.type}-${usage.target.id}`;
@@ -1260,8 +1549,21 @@ export default function StyleManager(): JSX.Element {
                 );
               })
               : null}
-            {usageOverflow > 0 && (
-              <span className="field-hint">{usageOverflow} more matches not shown. Use “Focus next match” to cycle all.</span>
+            {usageOverflow > 0 && !usageListExpanded && (
+              <span className="field-hint field-hint--inline-action">
+                <span>{usageOverflow} more matches not shown. Focus next match cycles every reference.</span>
+                <button type="button" onClick={() => setUsageListExpanded(true)}>
+                  Show all matches
+                </button>
+              </span>
+            )}
+            {usageListExpanded && sortedStyleUsageEntries.length > MAX_USAGE_PREVIEW && (
+              <span className="field-hint field-hint--inline-action">
+                <span>Showing all matches.</span>
+                <button type="button" onClick={() => setUsageListExpanded(false)}>
+                  Collapse list
+                </button>
+              </span>
             )}
           </div>
           <div className="style-lint style-lint--auto">

@@ -127,8 +127,15 @@ describe("StyleManager guardrails", () => {
     });
     mockContext = setupContext(project, "primary");
 
-    render(<StyleManager />);
+    const view = render(<StyleManager />);
     await flushAsync();
+    const switchStyle = async (styleName: string) => {
+      await act(async () => {
+        mockContext.styleEditorSelection = styleName;
+        view.rerender(<StyleManager />);
+      });
+      await flushAsync();
+    };
 
     const deleteButton = screen.getByRole("button", { name: "Delete" });
     expect(deleteButton).toBeDisabled();
@@ -148,8 +155,15 @@ describe("StyleManager guardrails", () => {
       saveStyleToken: saveSpy,
     };
 
-    render(<StyleManager />);
+    const view = render(<StyleManager />);
     await flushAsync();
+    const switchStyle = async (styleName: string) => {
+      await act(async () => {
+        mockContext.styleEditorSelection = styleName;
+        view.rerender(<StyleManager />);
+      });
+      await flushAsync();
+    };
     const user = userEvent.setup();
     const nameInput = screen.getByLabelText("Style Name");
     await user.clear(nameInput);
@@ -178,8 +192,15 @@ describe("StyleManager guardrails", () => {
     });
     mockContext = setupContext(project, "used");
 
-    render(<StyleManager />);
+    const view = render(<StyleManager />);
     await flushAsync();
+    const switchStyle = async (styleName: string) => {
+      await act(async () => {
+        mockContext.styleEditorSelection = styleName;
+        view.rerender(<StyleManager />);
+      });
+      await flushAsync();
+    };
 
     expect(screen.getByText("1 use")).toBeInTheDocument();
     expect(screen.getByText("Unused")).toBeInTheDocument();
@@ -197,12 +218,19 @@ describe("StyleManager guardrails", () => {
     const project = createProject({
       styles: {
         primary: createStyle("primary"),
+        secondary: createStyle("secondary"),
       },
       widgets: [
         {
           type: "label",
           id: "hero",
           style: "primary",
+          widgets: [],
+        },
+        {
+          type: "box",
+          id: "secondaryFeature",
+          style: "secondary",
           widgets: [],
         },
       ],
@@ -313,18 +341,33 @@ describe("StyleManager guardrails", () => {
         origin: "cycle_prev",
       })
     );
+
+    fireEvent.keyDown(window, { key: "ArrowDown", altKey: true });
+    await flushAsync();
+    expect(screen.getAllByTestId(/style-usage-item-/)[1]!.classList.contains("is-active")).toBe(true);
+
+    fireEvent.keyDown(window, { key: "ArrowUp", altKey: true });
+    await flushAsync();
+    expect(screen.getAllByTestId(/style-usage-item-/)[0]!.classList.contains("is-active")).toBe(true);
   });
 
   it("filters usage entries by owner and widget type", async () => {
     const project = createProject({
       styles: {
         primary: createStyle("primary"),
+        secondary: createStyle("secondary"),
       },
       widgets: [
         {
           type: "label",
           id: "hero",
           style: "primary",
+          widgets: [],
+        },
+        {
+          type: "box",
+          id: "secondaryFeature",
+          style: "secondary",
           widgets: [],
         },
       ],
@@ -345,13 +388,30 @@ describe("StyleManager guardrails", () => {
       },
     };
     mockContext = setupContext(project, "primary");
+    window.localStorage?.clear();
 
-    render(<StyleManager />);
+    const view = render(<StyleManager />);
     await flushAsync();
+    const switchStyle = async (styleName: string) => {
+      await act(async () => {
+        mockContext.styleEditorSelection = styleName;
+        view.rerender(<StyleManager />);
+      });
+      await flushAsync();
+    };
 
     expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(2);
+    const screenStats = () => screen.getByTestId("usage-stats-screen");
+    const componentStats = () => screen.getByTestId("usage-stats-component");
+    const widgetTypeStats = () => screen.getByTestId("usage-stats-widget-types");
+    expect(screenStats()).toHaveTextContent(/Screens\s+1/);
+    expect(componentStats()).toHaveTextContent(/Components\s+1/);
+    expect(widgetTypeStats()).toHaveTextContent(/Widget types\s+2/);
+    const usageSortSelect = screen.getByTestId("usage-sort-select") as HTMLSelectElement;
+    const usageLockToggle = screen.getByTestId("usage-lock-toggle") as HTMLInputElement;
+    const getComponentFilter = () => screen.getByTestId("usage-owner-filter-component");
 
-    const componentFilter = screen.getByTestId("usage-owner-filter-component");
+    const componentFilter = getComponentFilter();
     const user = userEvent.setup();
     await user.click(componentFilter);
     await flushAsync();
@@ -359,18 +419,38 @@ describe("StyleManager guardrails", () => {
     const componentOnly = screen.getAllByTestId(/style-usage-item-/);
     expect(componentOnly).toHaveLength(1);
     expect(within(componentOnly[0]!).getByTestId("style-usage-owner-component-card")).toBeInTheDocument();
+    expect(screen.getByTestId("usage-filter-pill-owner")).toHaveTextContent("Owner: Components");
+    expect(screenStats()).toHaveTextContent(/Screens\s+0/);
+    expect(componentStats()).toHaveTextContent(/Components\s+1/);
+    expect(widgetTypeStats()).toHaveTextContent(/Widget types\s+1/);
 
     const widgetSelect = screen.getByLabelText("Widget type filter") as HTMLSelectElement;
     await user.selectOptions(widgetSelect, "label");
     await flushAsync();
 
     expect(screen.getByText("No matches for the current usage filters.")).toBeInTheDocument();
+    expect(screen.getByTestId("usage-filter-pill-widget")).toHaveTextContent("Widget: label");
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+    expect(screenStats()).toHaveTextContent(/Screens\s+0/);
+    expect(componentStats()).toHaveTextContent(/Components\s+0/);
+    expect(widgetTypeStats()).toHaveTextContent(/Widget types\s+0/);
 
     const resetUsageFilters = screen.getByRole("button", { name: "Reset usage filters" });
     await user.click(resetUsageFilters);
     await flushAsync();
 
     expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(2);
+    expect(usageSortSelect.value).toBe("document");
+    await user.selectOptions(usageSortSelect, "Owner");
+    await flushAsync();
+    const ownerSorted = screen.getAllByTestId(/style-usage-item-/);
+    expect(within(ownerSorted[0]!).getByTestId("style-usage-owner-component-card")).toBeInTheDocument();
+    await user.selectOptions(usageSortSelect, "Widget type");
+    await flushAsync();
+    const widgetSorted = screen.getAllByTestId(/style-usage-item-/);
+    expect(within(widgetSorted[0]!).getByText(/box #cardroot/i)).toBeInTheDocument();
+    await user.selectOptions(usageSortSelect, "Document order");
+    await flushAsync();
 
     const usageSearch = screen.getByPlaceholderText("Filter by owner, widget, or id");
     await user.type(usageSearch, "hero");
@@ -379,17 +459,160 @@ describe("StyleManager guardrails", () => {
     const heroOnly = screen.getAllByTestId(/style-usage-item-/);
     expect(heroOnly).toHaveLength(1);
     expect(within(heroOnly[0]!).getByText(/hero/i)).toBeInTheDocument();
+    const searchChip = screen.getByTestId("usage-filter-pill-search");
+    expect(searchChip).toHaveTextContent("Search: hero");
+    expect(screenStats()).toHaveTextContent(/Screens\s+1/);
+    expect(componentStats()).toHaveTextContent(/Components\s+0/);
+    expect(widgetTypeStats()).toHaveTextContent(/Widget types\s+1/);
+    await user.click(within(searchChip).getByRole("button", { name: "Clear search filter" }));
+    await flushAsync();
+    expect(screen.queryByTestId("usage-filter-pill-search")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(2);
 
     await user.clear(usageSearch);
     await user.type(usageSearch, "doesnotexist");
     await flushAsync();
 
     expect(screen.getByText("No matches for the current usage filters.")).toBeInTheDocument();
+    const inlineClear = screen.getByRole("button", { name: "Clear filters" });
+    await user.click(inlineClear);
+    await flushAsync();
+    expect((usageSearch as HTMLInputElement).value).toBe("");
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(2);
 
-    await user.clear(usageSearch);
+    expect(usageLockToggle).not.toBeChecked();
+    await user.click(usageLockToggle);
+    await flushAsync();
+    expect(usageLockToggle).toBeChecked();
+    await user.click(getComponentFilter());
+    await flushAsync();
+    await switchStyle("secondary");
+    expect(getComponentFilter()).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(usageLockToggle);
+    await flushAsync();
+    await switchStyle("primary");
+    expect(getComponentFilter()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("expands the usage list beyond the preview limit", async () => {
+    const widgets = Array.from({ length: 6 }, (_, index) => ({
+      type: "label",
+      id: `label${index}`,
+      style: "primary",
+      widgets: [],
+    }));
+    const project = createProject({
+      styles: {
+        primary: createStyle("primary"),
+      },
+      widgets,
+    });
+    project.components = {
+      card: {
+        name: "card",
+        title: "Card",
+        widgets: [
+          {
+            type: "label",
+            id: "cardLabel",
+            style: "primary",
+            widgets: [],
+          },
+        ],
+        metadata: {},
+      },
+      badge: {
+        name: "badge",
+        title: "Badge",
+        widgets: [
+          {
+            type: "label",
+            id: "badgeLabel",
+            style: "primary",
+            widgets: [],
+          },
+        ],
+        metadata: {},
+      },
+    };
+    mockContext = setupContext(project, "primary");
+
+    render(<StyleManager />);
     await flushAsync();
 
-    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(2);
+    const hiddenStats = () => screen.queryByTestId("usage-stats-hidden");
+    expect(hiddenStats()).toHaveTextContent(/Hidden matches\s+2/i);
+    expect(hiddenStats()).toHaveTextContent(/Components?\s+2/i);
+    expect(hiddenStats()).toHaveTextContent(/label only/i);
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(6);
+    const showAllButton = screen.getByRole("button", { name: "Show all matches" });
+    const user = userEvent.setup();
+    await user.click(showAllButton);
+    await flushAsync();
+
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(8);
+    expect(hiddenStats()).not.toBeInTheDocument();
+
+    const collapseButton = screen.getByRole("button", { name: "Collapse list" });
+    await user.click(collapseButton);
+    await flushAsync();
+
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(6);
+    expect(hiddenStats()).toHaveTextContent(/Hidden matches\s+2/i);
+    expect(hiddenStats()).toHaveTextContent(/label only/i);
+  });
+
+  it("keeps the usage list expanded across styles when filters are locked", async () => {
+    const widgets = [
+      ...Array.from({ length: 7 }, (_, index) => ({
+        type: "label",
+        id: `primary${index}`,
+        style: "primary",
+        widgets: [],
+      })),
+      {
+        type: "label",
+        id: "secondary",
+        style: "secondary",
+        widgets: [],
+      },
+    ];
+    const project = createProject({
+      styles: {
+        primary: createStyle("primary"),
+        secondary: createStyle("secondary"),
+      },
+      widgets,
+    });
+    mockContext = setupContext(project, "primary");
+
+    const view = render(<StyleManager />);
+    await flushAsync();
+    const switchStyle = async (styleName: string) => {
+      await act(async () => {
+        mockContext.styleEditorSelection = styleName;
+        view.rerender(<StyleManager />);
+      });
+      await flushAsync();
+    };
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Show all matches" }));
+    await flushAsync();
+
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(7);
+    const lockToggle = screen.getByTestId("usage-lock-toggle");
+    await user.click(lockToggle);
+    await flushAsync();
+
+    await switchStyle("secondary");
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(1);
+    expect(screen.queryByTestId("usage-stats-hidden")).not.toBeInTheDocument();
+
+    await switchStyle("primary");
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(7);
+    expect(screen.queryByTestId("usage-stats-hidden")).not.toBeInTheDocument();
   });
 
   it("resets search, category, lint, and unused filters", async () => {
