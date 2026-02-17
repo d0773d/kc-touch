@@ -1,6 +1,63 @@
 import { AssetReference, ProjectModel, StylePreview, StyleTokenModel, ValidationIssue, WidgetMetadata } from "../types/yamui";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
+
+const getWindowOrigin = (): string | undefined => {
+  if (typeof window === "undefined" || !window.location?.origin) {
+    return undefined;
+  }
+  return window.location.origin;
+};
+
+const LOCAL_DEV_BACKEND = "http://localhost:8000";
+
+const determineFallbackOrigin = (): string => {
+  const origin = getWindowOrigin();
+  if (!origin) {
+    return LOCAL_DEV_BACKEND;
+  }
+  try {
+    const parsed = new URL(origin);
+    const isLocalDevHost = ["localhost", "127.0.0.1"].includes(parsed.hostname) && parsed.port === "5173"; // Vite dev server
+    return isLocalDevHost ? LOCAL_DEV_BACKEND : origin;
+  } catch {
+    return LOCAL_DEV_BACKEND;
+  }
+};
+
+const determineApiBase = (): { root: string; origin: string; path: string } => {
+  const raw = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const fallbackOrigin = determineFallbackOrigin();
+  const target = raw && raw.trim().length ? raw.trim() : fallbackOrigin;
+  try {
+    const baseUrl = ABSOLUTE_URL_PATTERN.test(target)
+      ? new URL(target)
+      : new URL(target, fallbackOrigin);
+    const root = baseUrl.href.replace(/\/$/, "");
+    const path = baseUrl.pathname === "/" ? "" : baseUrl.pathname.replace(/\/$/, "");
+    return { root, origin: baseUrl.origin, path };
+  } catch {
+    return { root: fallbackOrigin, origin: fallbackOrigin, path: "" };
+  }
+};
+
+const { root: API_BASE_URL, origin: API_BASE_ORIGIN, path: API_BASE_PATH } = determineApiBase();
+
+const resolveAssetUrl = (url?: string | null): string | undefined => {
+  if (!url) {
+    return undefined;
+  }
+  try {
+    const basePath = API_BASE_PATH && API_BASE_PATH !== "/" ? API_BASE_PATH : "";
+    if (url.startsWith("/")) {
+      const combined = `${basePath}${url}` || url;
+      return new URL(combined, `${API_BASE_ORIGIN}/`).toString();
+    }
+    return new URL(url, `${API_BASE_ORIGIN}/`).toString();
+  } catch {
+    return url;
+  }
+};
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -93,9 +150,9 @@ const mapAssetReference = (asset: AssetReferenceWire): AssetReference => ({
   tags: asset.tags ?? [],
   sizeBytes: asset.size_bytes,
   metadata: asset.metadata,
-  previewUrl: asset.preview_url,
-  thumbnailUrl: asset.thumbnail_url,
-  downloadUrl: asset.download_url,
+  previewUrl: resolveAssetUrl(asset.preview_url),
+  thumbnailUrl: resolveAssetUrl(asset.thumbnail_url),
+  downloadUrl: resolveAssetUrl(asset.download_url),
 });
 
 export async function fetchAssetCatalog(project: ProjectModel): Promise<AssetReference[]> {

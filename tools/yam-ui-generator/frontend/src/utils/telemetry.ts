@@ -1,4 +1,4 @@
-export type TelemetryChannel = "assets" | "preview" | "issues";
+export type TelemetryChannel = "assets" | "preview" | "issues" | "styles";
 
 export interface TelemetryEventDetail {
   channel: TelemetryChannel;

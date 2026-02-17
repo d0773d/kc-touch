@@ -10,6 +10,7 @@ import {
   WidgetPath,
 } from "../types/yamui";
 import { lintStyles, previewStyle } from "../utils/api";
+import { emitTelemetry } from "../utils/telemetry";
 import StylePreviewCard, { buildStylePreviewKnobs } from "./StylePreviewCard";
 
 const CATEGORY_OPTIONS: StyleCategory[] = ["color", "surface", "text", "spacing", "shadow"];
@@ -25,8 +26,6 @@ interface FormState {
   valueText: string;
   metadataText: string;
 }
-
-type FormErrors = Partial<Record<keyof FormState, string>>;
 
 const EMPTY_JSON = JSON.stringify({}, null, 2);
 
@@ -83,6 +82,15 @@ interface StyleUsage {
   target: EditorTarget;
   path: WidgetPath;
   widget: WidgetNode;
+}
+
+type UsageFocusOrigin = "list_click" | "cycle" | "lint_jump";
+
+interface LintDrawerEntry {
+  name: string;
+  issues: ValidationIssue[];
+  errorCount: number;
+  warningCount: number;
 }
 
 function buildStyleUsageMap(project: ProjectModel): Record<string, StyleUsage[]> {
@@ -146,16 +154,39 @@ export default function StyleManager(): JSX.Element {
   const [lintScanError, setLintScanError] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
   const [filterCategory, setFilterCategory] = useState<StyleCategory | "all">("all");
+  const [lintFilter, setLintFilter] = useState<"all" | "issues" | "errors">("all");
   const [usageCursor, setUsageCursor] = useState<Record<string, number>>({});
+  const [usageOwnerFilter, setUsageOwnerFilter] = useState<"all" | "screen" | "component">("all");
+  const [usageWidgetFilter, setUsageWidgetFilter] = useState<string>("all");
+  const [showUnusedOnly, setShowUnusedOnly] = useState(false);
+  const [valueCopyState, setValueCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [valueFormatState, setValueFormatState] = useState<"idle" | "formatted" | "error">("idle");
+  const [metadataCopyState, setMetadataCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [metadataFormatState, setMetadataFormatState] = useState<"idle" | "formatted" | "error">("idle");
+  const [isLintDrawerOpen, setIsLintDrawerOpen] = useState(false);
   const previewCacheRef = useRef<Map<string, StylePreview>>(new Map());
 
   const normalizedQuery = filterQuery.trim().toLowerCase();
+  const styleUsageMap = useMemo(() => buildStyleUsageMap(project), [project]);
   const styleEntries = useMemo(() => {
     const entries = Object.entries(project.styles).map(([key, token]) => ({ key, token }));
     return entries
       .filter(({ token }) => {
         const matchesCategory = filterCategory === "all" || token.category === filterCategory;
         if (!matchesCategory) {
+          return false;
+        }
+        const lintIssues = styleLintMap[token.name] ?? [];
+        const matchesLintFilter =
+          lintFilter === "all"
+            ? true
+            : lintFilter === "issues"
+              ? lintIssues.length > 0
+              : lintIssues.some((issue) => issue.severity === "error");
+        if (!matchesLintFilter) {
+          return false;
+        }
+        if (showUnusedOnly && (styleUsageMap[token.name]?.length ?? 0) > 0) {
           return false;
         }
         if (!normalizedQuery) {
@@ -166,16 +197,51 @@ export default function StyleManager(): JSX.Element {
         const inTags = token.tags?.some((tag) => tag.toLowerCase().includes(normalizedQuery));
         return Boolean(inName || inDescription || inTags);
       })
-      .sort((a, b) => a.token.name.localeCompare(b.token.name));
-  }, [project.styles, filterCategory, normalizedQuery]);
+        .sort((a, b) => a.token.name.localeCompare(b.token.name));
+      }, [project.styles, filterCategory, lintFilter, normalizedQuery, showUnusedOnly, styleLintMap, styleUsageMap]);
+  const visibleLintStats = useMemo(() => {
+    return styleEntries.reduce(
+      (acc, { token }) => {
+        const issues = styleLintMap[token.name] ?? [];
+        issues.forEach((issue) => {
+          if (issue.severity === "error") {
+            acc.errors += 1;
+          } else {
+            acc.warnings += 1;
+          }
+        });
+        return acc;
+      },
+      { errors: 0, warnings: 0 }
+    );
+  }, [styleEntries, styleLintMap]);
   const selectedStyle = styleEditorSelection;
   const selectedToken = selectedStyle ? project.styles[selectedStyle] : undefined;
   const hasAnyStyles = Object.keys(project.styles).length > 0;
-  const styleUsageMap = useMemo(() => buildStyleUsageMap(project), [project]);
   const selectedStyleUsage = selectedStyle && styleUsageMap[selectedStyle] ? styleUsageMap[selectedStyle]! : [];
   const selectedStyleLintIssues = selectedStyle && styleLintMap[selectedStyle] ? styleLintMap[selectedStyle]! : [];
-  const usagePreview = selectedStyleUsage.slice(0, MAX_USAGE_PREVIEW);
-  const usageOverflow = Math.max(0, selectedStyleUsage.length - usagePreview.length);
+  const availableUsageWidgetTypes = useMemo(() => {
+    const types = new Set<string>();
+    selectedStyleUsage.forEach((usage) => types.add(usage.widget.type));
+    return Array.from(types).sort((a, b) => a.localeCompare(b));
+  }, [selectedStyleUsage]);
+  const filteredStyleUsageEntries = useMemo(() => {
+    return selectedStyleUsage
+      .map((usage, index) => ({ usage, index }))
+      .filter(({ usage }) => {
+        const ownerMatches = usageOwnerFilter === "all" || usage.target.type === usageOwnerFilter;
+        const widgetMatches = usageWidgetFilter === "all" || usage.widget.type === usageWidgetFilter;
+        return ownerMatches && widgetMatches;
+      });
+  }, [selectedStyleUsage, usageOwnerFilter, usageWidgetFilter]);
+  const usagePreview = filteredStyleUsageEntries.slice(0, MAX_USAGE_PREVIEW);
+  const usageOverflow = Math.max(0, filteredStyleUsageEntries.length - usagePreview.length);
+  const deleteGuardReason = selectedStyleUsage.length
+    ? `Used by ${selectedStyleUsage.length} widget${selectedStyleUsage.length === 1 ? "" : "s"}. Remove references before deleting.`
+    : null;
+  const highlightedUsageIndex = selectedStyle ? usageCursor[selectedStyle] ?? null : null;
+  const noUsageMatches = filteredStyleUsageEntries.length === 0;
+  const usageFiltersDirty = usageOwnerFilter !== "all" || usageWidgetFilter !== "all";
   const lintErrorCount = selectedStyleLintIssues.filter((issue) => issue.severity === "error").length;
   const lintWarningCount = selectedStyleLintIssues.filter((issue) => issue.severity !== "error").length;
   const lintSummaryLabel = lintErrorCount || lintWarningCount
@@ -187,6 +253,66 @@ export default function StyleManager(): JSX.Element {
         .join(" • ")
     : "";
   const lintSeverityClass = lintErrorCount ? "danger" : "warning";
+  const lintHelpText = lintErrorCount
+    ? "Resolve errors before shipping this style."
+    : lintWarningCount
+      ? "Warnings highlight optional improvements."
+      : lintScanBusy
+        ? "Running background lint…"
+        : "Lint stays fresh automatically as styles change.";
+  const filtersAreDefault = !normalizedQuery && filterCategory === "all" && lintFilter === "all" && !showUnusedOnly;
+  const totalStyleCount = Object.keys(project.styles).length;
+  const visibleStyleCount = styleEntries.length;
+  const visibleLintSummaryParts = [
+    visibleLintStats.errors ? `${visibleLintStats.errors} error${visibleLintStats.errors === 1 ? "" : "s"}` : "",
+    visibleLintStats.warnings ? `${visibleLintStats.warnings} warning${visibleLintStats.warnings === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  const visibleLintSummaryLabel = lintScanBusy
+    ? "Lint updating…"
+    : visibleLintSummaryParts.length > 0
+      ? visibleLintSummaryParts.join(" • ")
+      : "No lint issues in view";
+  const visibleLintSummaryTone = lintScanBusy
+    ? "is-busy"
+    : visibleLintStats.errors
+      ? "is-danger"
+      : visibleLintStats.warnings
+        ? "is-warning"
+        : "is-clean";
+  const lintDrawerGroups = useMemo(() => {
+    const entries: LintDrawerEntry[] = Object.entries(project.styles)
+      .map(([name]) => {
+        const issues = styleLintMap[name] ?? [];
+        if (!issues.length) {
+          return null;
+        }
+        const errorCount = issues.filter((issue) => issue.severity === "error").length;
+        const warningCount = issues.length - errorCount;
+        return { name, issues, errorCount, warningCount };
+      })
+      .filter((entry): entry is LintDrawerEntry => Boolean(entry));
+    const errors = entries
+      .filter((entry) => entry.errorCount > 0)
+      .sort((a, b) => b.errorCount - a.errorCount || b.warningCount - a.warningCount || a.name.localeCompare(b.name));
+    const warnings = entries
+      .filter((entry) => entry.errorCount === 0 && entry.warningCount > 0)
+      .sort((a, b) => b.warningCount - a.warningCount || a.name.localeCompare(b.name));
+    const totalIssues = entries.reduce((sum, entry) => sum + entry.issues.length, 0);
+    return { errors, warnings, totalIssues };
+  }, [project.styles, styleLintMap]);
+  const lintDrawerHasIssues = lintDrawerGroups.totalIssues > 0;
+  const hasUnsavedChanges = useMemo(() => {
+    const baseline = selectedToken ? tokenToForm(selectedToken) : defaultFormState();
+    return (
+      baseline.name !== formState.name ||
+      baseline.category !== formState.category ||
+      baseline.description !== formState.description ||
+      baseline.tagsText !== formState.tagsText ||
+      baseline.valueText !== formState.valueText ||
+      baseline.metadataText !== formState.metadataText
+    );
+  }, [formState, selectedToken]);
+  const saveStatusLabel = hasUnsavedChanges ? "Unsaved edits" : "All changes saved";
   const liveFormToken = useMemo(() => {
     let parsedValue: Record<string, unknown>;
     let parsedMetadata: Record<string, unknown>;
@@ -231,6 +357,21 @@ export default function StyleManager(): JSX.Element {
       return next;
     });
   }, [styleUsageMap]);
+
+  useEffect(() => {
+    setUsageOwnerFilter("all");
+    setUsageWidgetFilter("all");
+  }, [selectedStyle]);
+
+  useEffect(() => {
+    if (usageWidgetFilter === "all") {
+      return;
+    }
+    const hasType = selectedStyleUsage.some((usage) => usage.widget.type === usageWidgetFilter);
+    if (!hasType) {
+      setUsageWidgetFilter("all");
+    }
+  }, [selectedStyleUsage, usageWidgetFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -347,12 +488,33 @@ export default function StyleManager(): JSX.Element {
       delete next[field];
       return next;
     });
+    if (field === "valueText") {
+      if (valueCopyState !== "idle") {
+        setValueCopyState("idle");
+      }
+      if (valueFormatState !== "idle") {
+        setValueFormatState("idle");
+      }
+    }
+    if (field === "metadataText") {
+      if (metadataCopyState !== "idle") {
+        setMetadataCopyState("idle");
+      }
+      if (metadataFormatState !== "idle") {
+        setMetadataFormatState("idle");
+      }
+    }
   };
 
   const buildTokenFromForm = (): StyleTokenModel | null => {
     const trimmedName = formState.name.trim();
     if (!trimmedName) {
       setFormErrors((prev) => ({ ...prev, name: "Name is required" }));
+      return null;
+    }
+    const existingToken = project.styles[trimmedName];
+    if (existingToken && trimmedName !== selectedStyle) {
+      setFormErrors((prev) => ({ ...prev, name: "A different style already uses this name" }));
       return null;
     }
     let parsedValue: Record<string, unknown>;
@@ -415,7 +577,7 @@ export default function StyleManager(): JSX.Element {
   };
 
   const focusUsageAtIndex = useCallback(
-    (styleName: string, usageIndex: number) => {
+    (styleName: string, usageIndex: number, origin: UsageFocusOrigin = "list_click") => {
       const usages = styleUsageMap[styleName];
       if (!usages?.length) {
         return;
@@ -424,8 +586,20 @@ export default function StyleManager(): JSX.Element {
       const usage = usages[clampedIndex];
       setEditorTarget(usage.target);
       selectWidget(usage.path);
+      emitTelemetry("styles", "style_usage_focus", {
+        style: styleName,
+        targetType: usage.target.type,
+        targetId: usage.target.id,
+        widgetType: usage.widget.type,
+        widgetId: usage.widget.id ?? null,
+        usageIndex: clampedIndex,
+        usageCount: usages.length,
+        origin,
+        ownerFilter: usageOwnerFilter,
+        widgetFilter: usageWidgetFilter,
+      });
     },
-    [selectWidget, setEditorTarget, styleUsageMap]
+    [selectWidget, setEditorTarget, styleUsageMap, usageOwnerFilter, usageWidgetFilter]
   );
 
   const handleFocusNextUsage = useCallback(
@@ -436,7 +610,7 @@ export default function StyleManager(): JSX.Element {
       }
       setUsageCursor((prev) => {
         const nextIndex = ((prev[styleName] ?? -1) + 1) % usages.length;
-        focusUsageAtIndex(styleName, nextIndex);
+        focusUsageAtIndex(styleName, nextIndex, "cycle");
         return { ...prev, [styleName]: nextIndex };
       });
     },
@@ -447,11 +621,11 @@ export default function StyleManager(): JSX.Element {
     if (!selectedStyle) {
       return;
     }
-    const usageCount = selectedStyleUsage.length;
-    const message =
-      usageCount > 0
-        ? `Style "${selectedStyle}" is used by ${usageCount} widget${usageCount === 1 ? "" : "s"}. Delete anyway? Widgets will lose the reference.`
-        : `Delete style "${selectedStyle}"?`;
+    if (selectedStyleUsage.length > 0) {
+      window.alert("Remove this style from all widgets before deleting it.");
+      return;
+    }
+    const message = `Delete style "${selectedStyle}"? This cannot be undone.`;
     if (!window.confirm(message)) {
       return;
     }
@@ -481,6 +655,126 @@ export default function StyleManager(): JSX.Element {
     setFormErrors({});
     setDraftPreview(null);
     setDraftLintIssues([]);
+  };
+
+  const handleResetFilters = () => {
+    setFilterQuery("");
+    setFilterCategory("all");
+    setLintFilter("all");
+    setShowUnusedOnly(false);
+  };
+
+  const handleResetUsageFilters = () => {
+    setUsageOwnerFilter("all");
+    setUsageWidgetFilter("all");
+  };
+
+  const handleToggleLintDrawer = () => {
+    setIsLintDrawerOpen((prev) => !prev);
+  };
+
+  const handleNavigateFromLintDrawer = (styleName: string) => {
+    setStyleEditorSelection(styleName);
+    setIsLintDrawerOpen(false);
+  };
+
+  const copyJsonPayload = async (payload: string): Promise<void> => {
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(payload);
+        return;
+      } catch {
+        // Clipboard API can fail in insecure contexts; fall back to execCommand below.
+      }
+    }
+    if (!document?.body) {
+      throw new Error("Clipboard unavailable");
+    }
+    const temp = document.createElement("textarea");
+    temp.value = payload;
+    temp.style.position = "fixed";
+    temp.style.opacity = "0";
+    document.body.appendChild(temp);
+    temp.focus();
+    temp.select();
+    const succeeded = document.execCommand("copy");
+    document.body.removeChild(temp);
+    if (!succeeded) {
+      throw new Error("execCommand failed");
+    }
+  };
+
+  const handleCopyValueJson = async () => {
+    const payload = formState.valueText || EMPTY_JSON;
+    try {
+      await copyJsonPayload(payload);
+      setValueCopyState("copied");
+    } catch {
+      setValueCopyState("error");
+    }
+  };
+
+  const handleCopyMetadataJson = async () => {
+    const payload = formState.metadataText || EMPTY_JSON;
+    try {
+      await copyJsonPayload(payload);
+      setMetadataCopyState("copied");
+    } catch {
+      setMetadataCopyState("error");
+    }
+  };
+
+  const handleFormatValueJson = () => {
+    try {
+      const parsed = formState.valueText.trim() ? JSON.parse(formState.valueText) : {};
+      const formatted = JSON.stringify(parsed, null, 2);
+      setFormState((prev) => ({ ...prev, valueText: formatted }));
+      setFormErrors((prev) => {
+        const next = { ...prev };
+        delete next.valueText;
+        return next;
+      });
+      setValueFormatState("formatted");
+      setValueCopyState("idle");
+    } catch {
+      setValueFormatState("error");
+      setFormErrors((prev) => ({ ...prev, valueText: "Value JSON is invalid" }));
+    }
+  };
+
+  const handleFormatMetadataJson = () => {
+    try {
+      const parsed = formState.metadataText.trim() ? JSON.parse(formState.metadataText) : {};
+      const formatted = JSON.stringify(parsed, null, 2);
+      setFormState((prev) => ({ ...prev, metadataText: formatted }));
+      setFormErrors((prev) => {
+        const next = { ...prev };
+        delete next.metadataText;
+        return next;
+      });
+      setMetadataFormatState("formatted");
+      setMetadataCopyState("idle");
+    } catch {
+      setMetadataFormatState("error");
+      setFormErrors((prev) => ({ ...prev, metadataText: "Metadata JSON is invalid" }));
+    }
+  };
+
+  const handleResetForm = () => {
+    if (selectedToken) {
+      setFormState(tokenToForm(selectedToken));
+    } else {
+      setFormState(defaultFormState());
+    }
+    setFormErrors({});
+    setDraftPreview(null);
+    setDraftPreviewError(null);
+    setDraftLintIssues([]);
+    setDraftLintError(null);
+    setValueCopyState("idle");
+    setValueFormatState("idle");
+    setMetadataCopyState("idle");
+    setMetadataFormatState("idle");
   };
 
   const handleKnobFieldChange = useCallback(
@@ -570,16 +864,142 @@ export default function StyleManager(): JSX.Element {
             </option>
           ))}
         </select>
+        <label className="style-manager__lint-filter">
+          <span>Lint filter</span>
+          <select
+            className="select-field"
+            value={lintFilter}
+            onChange={(event) => setLintFilter(event.target.value as "all" | "issues" | "errors")}
+          >
+            <option value="all">All styles</option>
+            <option value="issues">Only lint issues</option>
+            <option value="errors">Errors only</option>
+          </select>
+        </label>
+        <label className="style-manager__unused-toggle">
+          <input
+            type="checkbox"
+            checked={showUnusedOnly}
+            onChange={(event) => setShowUnusedOnly(event.target.checked)}
+          />
+          <span>Show unused only</span>
+        </label>
+        <button
+          type="button"
+          className="button tertiary style-manager__filters-reset"
+          onClick={handleResetFilters}
+          disabled={filtersAreDefault}
+        >
+          Reset filters
+        </button>
+        <div className="style-manager__results">
+          <span
+            className={`style-manager__results-summary ${filtersAreDefault ? "is-baseline" : "is-filtered"}`}
+            data-testid="style-results-summary"
+          >
+            {totalStyleCount === 0
+              ? "No styles yet"
+              : filtersAreDefault
+                ? `${totalStyleCount} style${totalStyleCount === 1 ? "" : "s"}`
+                : `Showing ${visibleStyleCount} of ${totalStyleCount}`}
+          </span>
+          <button
+            type="button"
+            className={`style-manager__lint-summary-pill ${visibleLintSummaryTone}`}
+            data-testid="style-lint-summary"
+            onClick={handleToggleLintDrawer}
+            aria-expanded={isLintDrawerOpen}
+          >
+            {visibleLintSummaryLabel}
+          </button>
+        </div>
       </div>
       <div className="style-manager__lint-status">
         {lintScanBusy ? (
           <span>Running background lint…</span>
         ) : lintScanError ? (
           <span className="field-hint error-text">Lint unavailable: {lintScanError}</span>
+        ) : lintSummaryLabel ? (
+          <span className={`field-hint lint-hint lint-hint--${lintSeverityClass}`}>
+            <strong>{lintSummaryLabel}</strong>
+            <span>{lintHelpText}</span>
+          </span>
         ) : (
-          <span className="field-hint">Lint stays fresh automatically as styles change.</span>
+          <span className="field-hint">{lintHelpText}</span>
         )}
       </div>
+      {isLintDrawerOpen && (
+        <div className="style-manager__lint-drawer" role="dialog" aria-label="Lint breakdown">
+          <div className="lint-drawer__header">
+            <div>
+              <strong>Lint breakdown</strong>
+              <span>
+                {lintScanBusy
+                  ? "Lint status updating…"
+                  : lintDrawerHasIssues
+                    ? `${lintDrawerGroups.totalIssues} open ${lintDrawerGroups.totalIssues === 1 ? "issue" : "issues"}`
+                    : "No lint issues detected"}
+              </span>
+            </div>
+            <button type="button" className="button tertiary lint-drawer__close" onClick={handleToggleLintDrawer}>
+              Close
+            </button>
+          </div>
+          <div className="lint-drawer__body">
+            {lintScanBusy ? (
+              <span className="field-hint">Lint results will appear when the scan finishes.</span>
+            ) : !lintDrawerHasIssues ? (
+              <span className="field-hint">All visible styles are lint-clean.</span>
+            ) : (
+              <>
+                {lintDrawerGroups.errors.length > 0 && (
+                  <section className="lint-drawer__section">
+                    <p className="lint-drawer__section-title">Errors</p>
+                    <ul>
+                      {lintDrawerGroups.errors.map((entry) => (
+                        <li key={entry.name}>
+                          <button
+                            type="button"
+                            className="lint-drawer__style-button is-danger"
+                            onClick={() => handleNavigateFromLintDrawer(entry.name)}
+                          >
+                            <span className="lint-drawer__style-name">{entry.name}</span>
+                            <span className="lint-drawer__style-meta">
+                              {entry.errorCount} error{entry.errorCount === 1 ? "" : "s"}
+                              {entry.warningCount > 0 ? ` • ${entry.warningCount} warning${entry.warningCount === 1 ? "" : "s"}` : ""}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+                {lintDrawerGroups.warnings.length > 0 && (
+                  <section className="lint-drawer__section">
+                    <p className="lint-drawer__section-title">Warnings</p>
+                    <ul>
+                      {lintDrawerGroups.warnings.map((entry) => (
+                        <li key={entry.name}>
+                          <button
+                            type="button"
+                            className="lint-drawer__style-button is-warning"
+                            onClick={() => handleNavigateFromLintDrawer(entry.name)}
+                          >
+                            <span className="lint-drawer__style-name">{entry.name}</span>
+                            <span className="lint-drawer__style-meta">
+                              {entry.warningCount} warning{entry.warningCount === 1 ? "" : "s"}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {!hasAnyStyles ? (
         <p className="style-manager__empty">No tokens yet. Generate a style to drive consistent theming.</p>
       ) : styleEntries.length === 0 ? (
@@ -595,6 +1015,7 @@ export default function StyleManager(): JSX.Element {
               : lintForToken.length > 0
                 ? "warning"
                 : null;
+            const usageCount = styleUsageMap[key]?.length ?? 0;
             return (
               <button
                 type="button"
@@ -605,6 +1026,9 @@ export default function StyleManager(): JSX.Element {
                 <div className="style-card__meta">
                   <strong>{token.name}</strong>
                   <span>{token.category}</span>
+                  <span className={`style-card__usage ${usageCount === 0 ? "is-unused" : ""}`}>
+                    {usageCount === 0 ? "Unused" : `${usageCount} use${usageCount === 1 ? "" : "s"}`}
+                  </span>
                   {token.tags?.length ? (
                     <span className="style-card__tags">{token.tags.join(", ")}</span>
                   ) : (
@@ -652,27 +1076,94 @@ export default function StyleManager(): JSX.Element {
               </button>
             )}
           </div>
+          {selectedStyleUsage.length > 0 && (
+            <div className="style-usage-controls">
+              <div className="style-usage-filter-group">
+                <span className="style-usage-filter-label">Owner scope</span>
+                <div className="style-usage-filter-chips" role="group" aria-label="Owner filter">
+                  {(["all", "screen", "component"] as const).map((option) => {
+                    const label = option === "all" ? "All" : option === "screen" ? "Screens" : "Components";
+                    const isActive = usageOwnerFilter === option;
+                    return (
+                      <button
+                        type="button"
+                        key={option}
+                        className={`style-usage-filter-button${isActive ? " is-active" : ""}`}
+                        data-testid={`usage-owner-filter-${option}`}
+                        aria-pressed={isActive}
+                        onClick={() => setUsageOwnerFilter(option)}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <label className="style-usage-filter-group style-usage-widget-filter">
+                <span className="style-usage-filter-label">Widget type</span>
+                <select
+                  className="select-field"
+                  value={usageWidgetFilter}
+                  onChange={(event) => setUsageWidgetFilter(event.target.value)}
+                  aria-label="Widget type filter"
+                  disabled={availableUsageWidgetTypes.length === 0}
+                >
+                  <option value="all">All widgets</option>
+                  {availableUsageWidgetTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {usageFiltersDirty && (
+                <button type="button" className="button tertiary style-usage-filter-reset" onClick={handleResetUsageFilters}>
+                  Reset usage filters
+                </button>
+              )}
+            </div>
+          )}
           <div className="style-usage-list">
             {selectedStyleUsage.length === 0 && <span className="field-hint">No widgets reference this token yet.</span>}
-            {selectedStyle &&
-              usagePreview.map((usage, index) => {
+            {selectedStyleUsage.length > 0 && noUsageMatches && (
+              <span className="field-hint">No matches for the current usage filters.</span>
+            )}
+            {selectedStyle
+              ? usagePreview.map(({ usage, index: usageIndex }) => {
                 const { owner, widget, pathLabel } = describeUsageLocation(usage);
+                const ownerTypeLabel = usage.target.type === "screen" ? "Screen" : "Component";
+                const ownerTestId = `style-usage-owner-${usage.target.type}-${usage.target.id}`;
+                const isActive = highlightedUsageIndex === usageIndex;
+                const usageTestId = `style-usage-item-${usage.target.type}-${usage.target.id}-${usageIndex}`;
                 return (
                   <button
                     type="button"
-                    key={`${owner}-${widget}-${pathLabel}-${index}`}
-                    className="style-usage-item"
+                    key={`${owner}-${widget}-${pathLabel}-${usageIndex}`}
+                    className={`style-usage-item${isActive ? " is-active" : ""}`}
+                    data-testid={usageTestId}
                     onClick={() => {
-                      setUsageCursor((prev) => ({ ...prev, [selectedStyle]: index }));
-                      focusUsageAtIndex(selectedStyle, index);
+                      setUsageCursor((prev) => ({ ...prev, [selectedStyle]: usageIndex }));
+                      focusUsageAtIndex(selectedStyle, usageIndex, "list_click");
                     }}
+                    title={`Jump to ${owner}`}
                   >
                     <div className="style-usage-item__meta">
+                      <div
+                        className={`style-usage-item__owner-pill owner-pill--${usage.target.type}`}
+                        data-testid={ownerTestId}
+                      >
+                        <span className="style-usage-item__owner-type">{ownerTypeLabel}</span>
+                        <span className="style-usage-item__owner-id">{usage.target.id}</span>
+                      </div>
                       <span className="style-usage-item__owner">{owner}</span>
                       <span className="style-usage-item__widget">{widget}</span>
                     </div>
                     {autoPreview && (
-                      <div className="style-usage-item__preview" style={{ background: autoPreview.backgroundColor, color: autoPreview.color }}>
+                      <div
+                        className="style-usage-item__preview style-usage-item__hover-preview"
+                        style={{ background: autoPreview.backgroundColor, color: autoPreview.color }}
+                        aria-hidden="true"
+                      >
                         <div className="style-usage-item__preview-top">
                           <span className="style-usage-item__preview-category">{autoPreview.category}</span>
                           {autoPreview.description && <span className="style-usage-item__preview-description">{autoPreview.description}</span>}
@@ -699,7 +1190,8 @@ export default function StyleManager(): JSX.Element {
                     <span className="style-usage-item__cta">Jump</span>
                   </button>
                 );
-              })}
+              })
+              : null}
             {usageOverflow > 0 && (
               <span className="field-hint">{usageOverflow} more matches not shown. Use “Focus next match” to cycle all.</span>
             )}
@@ -774,10 +1266,37 @@ export default function StyleManager(): JSX.Element {
           <label className={`inspector-field ${formErrors.valueText ? "error" : ""}`}>
             <div className="field-label">
               <span>Value JSON</span>
+              <div className="field-label__actions">
+                <button
+                  type="button"
+                  className="button tertiary field-action-button"
+                  onClick={handleCopyValueJson}
+                  aria-label="Copy Value JSON"
+                  title="Copy Value JSON"
+                >
+                  Copy JSON
+                </button>
+                <button
+                  type="button"
+                  className="button tertiary field-action-button"
+                  onClick={handleFormatValueJson}
+                  aria-label="Format Value JSON"
+                  title="Format Value JSON"
+                >
+                  Format JSON
+                </button>
+                <div className="field-label__status">
+                {valueCopyState === "copied" && <span className="field-hint success-text">Copied!</span>}
+                {valueCopyState === "error" && <span className="field-hint error-text">Copy failed</span>}
+                {valueFormatState === "formatted" && <span className="field-hint success-text">Formatted</span>}
+                {valueFormatState === "error" && <span className="field-hint error-text">Format failed</span>}
+                </div>
+              </div>
             </div>
             <textarea
               className="textarea-field"
               rows={4}
+              aria-label="Value JSON"
               value={formState.valueText}
               onChange={(event) => updateForm("valueText", event.target.value)}
             />
@@ -786,19 +1305,49 @@ export default function StyleManager(): JSX.Element {
           <label className={`inspector-field ${formErrors.metadataText ? "error" : ""}`}>
             <div className="field-label">
               <span>Metadata JSON</span>
-              <span className="field-badge warning">Optional hints</span>
+              <div className="field-label__actions">
+                <span className="field-badge warning">Optional hints</span>
+                <button
+                  type="button"
+                  className="button tertiary field-action-button"
+                  onClick={handleCopyMetadataJson}
+                  aria-label="Copy Metadata JSON"
+                  title="Copy Metadata JSON"
+                >
+                  Copy JSON
+                </button>
+                <button
+                  type="button"
+                  className="button tertiary field-action-button"
+                  onClick={handleFormatMetadataJson}
+                  aria-label="Format Metadata JSON"
+                  title="Format Metadata JSON"
+                >
+                  Format JSON
+                </button>
+                <div className="field-label__status">
+                  {metadataCopyState === "copied" && <span className="field-hint success-text">Copied!</span>}
+                  {metadataCopyState === "error" && <span className="field-hint error-text">Copy failed</span>}
+                  {metadataFormatState === "formatted" && <span className="field-hint success-text">Formatted</span>}
+                  {metadataFormatState === "error" && <span className="field-hint error-text">Format failed</span>}
+                </div>
+              </div>
             </div>
             <textarea
               className="textarea-field"
               rows={3}
+              aria-label="Metadata JSON"
               value={formState.metadataText}
               onChange={(event) => updateForm("metadataText", event.target.value)}
             />
             {formErrors.metadataText && <span className="field-hint error-text">{formErrors.metadataText}</span>}
           </label>
           <div className="style-actions">
-            <button type="button" className="button primary" onClick={handleSave}>
+            <button type="button" className="button primary" onClick={handleSave} disabled={!hasUnsavedChanges}>
               Save Style
+            </button>
+            <button type="button" className="button secondary" onClick={handleResetForm} disabled={!hasUnsavedChanges}>
+              Reset Changes
             </button>
             <button type="button" className="button secondary" onClick={handleCloneStyle} disabled={!selectedToken}>
               Clone Style
@@ -809,10 +1358,18 @@ export default function StyleManager(): JSX.Element {
             <button type="button" className="button secondary" onClick={handleLintDraft} disabled={isLintingDraft}>
               {isLintingDraft ? "Linting…" : "Lint Draft"}
             </button>
-            <button type="button" className="button tertiary" onClick={handleDelete}>
+            <button
+              type="button"
+              className="button tertiary"
+              onClick={handleDelete}
+              disabled={Boolean(deleteGuardReason)}
+              title={deleteGuardReason ?? undefined}
+            >
               Delete
             </button>
+            <div className={`style-actions__status ${hasUnsavedChanges ? "is-dirty" : "is-clean"}`}>{saveStatusLabel}</div>
           </div>
+          {deleteGuardReason && <p className="field-hint warning-text">{deleteGuardReason}</p>}
           {draftPreview && (
             <div className="style-preview style-preview--draft" style={{ background: draftPreview.backgroundColor, color: draftPreview.color }}>
               <div className="style-preview__meta">

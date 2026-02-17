@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useProject } from "../context/ProjectContext";
 import { AssetReference, ProjectModel, StyleCategory, StylePreview, StyleTokenModel, ValidationIssue, WidgetNode, WidgetPath } from "../types/yamui";
-import { fetchAssetCatalog, previewStyle, updateAssetTags, uploadAsset } from "../utils/api";
+import { previewStyle, updateAssetTags, uploadAsset } from "../utils/api";
 import { emitTelemetry } from "../utils/telemetry";
 import StylePreviewCard from "./StylePreviewCard";
 
@@ -57,12 +57,6 @@ const EVENT_TEMPLATES = [
 const RECENT_STYLES_KEY = "yamui_recent_styles_v1";
 const STYLE_CATEGORY_OPTIONS: Array<StyleCategory | "all"> = ["all", "color", "surface", "text", "spacing", "shadow"];
 
-type AssetFilterState = {
-  tags: string[];
-  targets: string[];
-  kinds: AssetReference["kind"][];
-};
-
 type PendingUpload = {
   id: string;
   fileName: string;
@@ -70,13 +64,9 @@ type PendingUpload = {
   error?: string;
 };
 
-const DEFAULT_ASSET_FILTERS: AssetFilterState = {
-  tags: [],
-  targets: [],
-  kinds: [],
-};
-
 const ASSET_KIND_OPTIONS: AssetReference["kind"][] = ["image", "video", "audio", "font", "binary", "unknown"];
+
+type AssetFilterGroup = "tags" | "targets" | "kinds";
 
 const formatBytes = (size?: number): string => {
   if (typeof size !== "number" || Number.isNaN(size)) {
@@ -138,7 +128,23 @@ interface PropertyInspectorProps {
 }
 
 export default function PropertyInspector({ issues, style }: PropertyInspectorProps): JSX.Element {
-  const { project, editorTarget, selectedPath, updateWidget, setStyleEditorSelection } = useProject();
+  const {
+    project,
+    editorTarget,
+    selectedPath,
+    updateWidget,
+    setStyleEditorSelection,
+    assetCatalog,
+    assetCatalogBusy,
+    assetCatalogError,
+    assetCatalogLoadedAt,
+    loadAssetCatalog,
+    setAssetCatalog,
+    setAssetCatalogError,
+    assetFilters,
+    setAssetFilters,
+    resetAssetFilters,
+  } = useProject();
   const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
   const [formState, setFormState] = useState({
     id: "",
@@ -167,12 +173,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   const [stylePreviewBusy, setStylePreviewBusy] = useState(false);
   const [assetModalOpen, setAssetModalOpen] = useState(false);
   const [shortcutMessage, setShortcutMessage] = useState<string | null>(null);
-  const [assetCatalog, setAssetCatalog] = useState<AssetReference[]>([]);
-  const [assetCatalogBusy, setAssetCatalogBusy] = useState(false);
-  const [assetCatalogError, setAssetCatalogError] = useState<string | null>(null);
-  const [assetCatalogLoadedAt, setAssetCatalogLoadedAt] = useState<number | null>(null);
   const [assetSearch, setAssetSearch] = useState("");
-  const [assetFilters, setAssetFilters] = useState<AssetFilterState>(() => ({ ...DEFAULT_ASSET_FILTERS }));
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [isDroppingAsset, setIsDroppingAsset] = useState(false);
   const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({});
@@ -373,20 +374,6 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     [selectedPath, updateWidget]
   );
 
-  const loadAssetCatalog = useCallback(async () => {
-    setAssetCatalogBusy(true);
-    try {
-      const catalog = await fetchAssetCatalog(project);
-      setAssetCatalog(catalog);
-      setAssetCatalogError(null);
-      setAssetCatalogLoadedAt(Date.now());
-    } catch (error) {
-      setAssetCatalogError(error instanceof Error ? error.message : "Unable to load asset catalog");
-    } finally {
-      setAssetCatalogBusy(false);
-    }
-  }, [project]);
-
   const handleAddFilterTag = useCallback((tag: string) => {
     const normalized = tag.trim().toLowerCase();
     if (!normalized) {
@@ -414,10 +401,10 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     });
   }, [trackAssetEvent]);
 
-  const handleRemoveFilter = useCallback((group: keyof AssetFilterState, value: string) => {
+  const handleRemoveFilter = useCallback((group: AssetFilterGroup, value: string) => {
     setAssetFilters((prev) => {
       const nextGroup = prev[group].filter((entry) => entry !== value);
-      return { ...prev, [group]: nextGroup } as AssetFilterState;
+      return { ...prev, [group]: nextGroup };
     });
     trackAssetEvent("asset_filter_remove", { group, value });
   }, [trackAssetEvent]);
@@ -432,9 +419,9 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   }, [trackAssetEvent]);
 
   const handleClearFilters = useCallback(() => {
-    setAssetFilters({ ...DEFAULT_ASSET_FILTERS });
+    resetAssetFilters();
     trackAssetEvent("asset_filters_cleared");
-  }, [trackAssetEvent]);
+  }, [resetAssetFilters, trackAssetEvent]);
 
   const uploadSingleAsset = useCallback(async (file: File) => {
     const pendingId = createClientId();
@@ -459,7 +446,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     }
     trackAssetEvent("asset_upload_batch_start", { count: files.length });
     await Promise.all(files.map((file) => uploadSingleAsset(file)));
-    await loadAssetCatalog();
+    await loadAssetCatalog({ force: true });
     trackAssetEvent("asset_upload_batch_complete", { count: files.length });
   }, [loadAssetCatalog, trackAssetEvent, uploadSingleAsset]);
 

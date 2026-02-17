@@ -1,12 +1,19 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { ProjectModel, StyleTokenModel, ValidationIssue, WidgetNode, WidgetPath } from "../types/yamui";
+import { createContext, Dispatch, ReactNode, SetStateAction, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { AssetReference, ProjectModel, StyleTokenModel, ValidationIssue, WidgetNode, WidgetPath } from "../types/yamui";
 import { createWidget } from "../utils/widgetTemplates";
-import { fetchTemplateProject } from "../utils/api";
+import { fetchAssetCatalog, fetchTemplateProject } from "../utils/api";
 
 export interface EditorTarget {
   type: "screen" | "component";
   id: string;
 }
+
+export type AssetFilterState = {
+  query: string;
+  tags: string[];
+  targets: string[];
+  kinds: AssetReference["kind"][];
+};
 
 interface ProjectContextValue {
   project: ProjectModel;
@@ -34,7 +41,24 @@ interface ProjectContextValue {
   deleteStyleToken: (name: string) => void;
   styleEditorSelection: string | null;
   setStyleEditorSelection: (name: string | null) => void;
+  assetCatalog: AssetReference[];
+  assetCatalogBusy: boolean;
+  assetCatalogError: string | null;
+  assetCatalogLoadedAt: number | null;
+  loadAssetCatalog: (options?: { force?: boolean }) => Promise<void>;
+  setAssetCatalog: Dispatch<SetStateAction<AssetReference[]>>;
+  setAssetCatalogError: Dispatch<SetStateAction<string | null>>;
+  assetFilters: AssetFilterState;
+  setAssetFilters: Dispatch<SetStateAction<AssetFilterState>>;
+  resetAssetFilters: () => void;
 }
+
+const DEFAULT_ASSET_FILTERS: AssetFilterState = {
+  query: "",
+  tags: [],
+  targets: [],
+  kinds: [],
+};
 
 const DEFAULT_PROJECT: ProjectModel = {
   app: {},
@@ -188,6 +212,11 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
   const [selectedPath, setSelectedPath] = useState<WidgetPath | null>(null);
   const [lastExport, setLastExportState] = useState<{ yaml: string; issues: ValidationIssue[] } | undefined>(undefined);
   const [styleEditorSelection, setStyleEditorSelection] = useState<string | null>(null);
+  const [assetCatalog, setAssetCatalog] = useState<AssetReference[]>([]);
+  const [assetCatalogBusy, setAssetCatalogBusy] = useState(false);
+  const [assetCatalogError, setAssetCatalogError] = useState<string | null>(null);
+  const [assetCatalogLoadedAt, setAssetCatalogLoadedAt] = useState<number | null>(null);
+  const [assetFilters, setAssetFilters] = useState<AssetFilterState>(DEFAULT_ASSET_FILTERS);
 
   useEffect(() => {
     setStyleEditorSelection((current) => {
@@ -198,6 +227,30 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       return fallback ?? null;
     });
   }, [project.styles, setStyleEditorSelection]);
+
+  const loadAssetCatalog = useCallback(
+    async ({ force }: { force?: boolean } = {}) => {
+      if (assetCatalogBusy && !force) {
+        return;
+      }
+      setAssetCatalogBusy(true);
+      try {
+        const catalog = await fetchAssetCatalog(project);
+        setAssetCatalog(catalog);
+        setAssetCatalogError(null);
+        setAssetCatalogLoadedAt(Date.now());
+      } catch (error) {
+        setAssetCatalogError(error instanceof Error ? error.message : "Unable to load asset catalog");
+      } finally {
+        setAssetCatalogBusy(false);
+      }
+    },
+    [assetCatalogBusy, project]
+  );
+
+  const resetAssetFilters = useCallback(() => {
+    setAssetFilters(DEFAULT_ASSET_FILTERS);
+  }, []);
 
   const setProject = useCallback((next: ProjectModel) => {
     const normalized = normalizeProjectInPlace(cloneProject(next));
@@ -435,6 +488,16 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       deleteStyleToken,
       styleEditorSelection,
       setStyleEditorSelection,
+      assetCatalog,
+      assetCatalogBusy,
+      assetCatalogError,
+      assetCatalogLoadedAt,
+      loadAssetCatalog,
+      setAssetCatalog,
+      setAssetCatalogError,
+      assetFilters,
+      setAssetFilters,
+      resetAssetFilters,
     }),
     [
       project,
@@ -456,6 +519,16 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       deleteStyleToken,
       styleEditorSelection,
       setStyleEditorSelection,
+      assetCatalog,
+      assetCatalogBusy,
+      assetCatalogError,
+      assetCatalogLoadedAt,
+      loadAssetCatalog,
+      setAssetCatalog,
+      setAssetCatalogError,
+      assetFilters,
+      setAssetFilters,
+      resetAssetFilters,
     ]
   );
 

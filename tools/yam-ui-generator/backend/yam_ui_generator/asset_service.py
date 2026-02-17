@@ -10,7 +10,7 @@ import os
 import time
 from pathlib import Path
 from typing import BinaryIO, Dict, Iterable, Iterator, List, Tuple
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 try:  # pragma: no cover - Pillow is installed at runtime
     from PIL import Image
@@ -59,7 +59,16 @@ def _ensure_asset_root() -> Path:
 
 def _cdn_base() -> str | None:
     base = os.environ.get("YAMUI_ASSET_CDN")
-    return base.rstrip("/") if base else None
+    if not base:
+        return None
+    cleaned = base.strip().rstrip("/")
+    if not cleaned:
+        return None
+    parsed = urlparse(cleaned)
+    if not (parsed.scheme and parsed.netloc):
+        logger.warning("Ignoring YAMUI_ASSET_CDN because it is not an absolute URL: %s", base)
+        return None
+    return cleaned
 
 
 def _public_base_url() -> str | None:
