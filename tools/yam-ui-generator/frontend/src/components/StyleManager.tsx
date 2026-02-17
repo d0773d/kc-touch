@@ -14,6 +14,7 @@ import StylePreviewCard from "./StylePreviewCard";
 
 const CATEGORY_OPTIONS: StyleCategory[] = ["color", "surface", "text", "spacing", "shadow"];
 const STYLE_FILTER_CATEGORIES: Array<StyleCategory | "all"> = ["all", ...CATEGORY_OPTIONS];
+const MAX_USAGE_PREVIEW = 6;
 
 interface FormState {
   name: string;
@@ -61,6 +62,17 @@ function generateStyleName(existing: Record<string, StyleTokenModel>): string {
   return candidate;
 }
 
+function generateCloneName(baseName: string, existing: Record<string, StyleTokenModel>): string {
+  const sanitizedBase = baseName.replace(/\s+/g, "_");
+  let index = 1;
+  let candidate = `${sanitizedBase}_copy`;
+  while (existing[candidate]) {
+    index += 1;
+    candidate = `${sanitizedBase}_copy_${index}`;
+  }
+  return candidate;
+}
+
 function getColorValue(token: StyleTokenModel, key: "backgroundColor" | "color", fallback: string): string {
   const raw = token.value[key];
   return typeof raw === "string" ? raw : fallback;
@@ -96,6 +108,15 @@ function buildStyleUsageMap(project: ProjectModel): Record<string, StyleUsage[]>
     visit(component.widgets, { type: "component", id }, []);
   });
   return map;
+}
+
+function describeUsageLocation(usage: StyleUsage): { owner: string; widget: string; pathLabel: string } {
+  const ownerType = usage.target.type === "screen" ? "Screen" : "Component";
+  const owner = `${ownerType} • ${usage.target.id}`;
+  const widgetId = usage.widget.id ? `#${usage.widget.id}` : "(no id)";
+  const widget = `${usage.widget.type} ${widgetId}`;
+  const pathLabel = usage.path.length ? usage.path.join(" / ") : "root";
+  return { owner, widget, pathLabel };
 }
 
 export default function StyleManager(): JSX.Element {
@@ -151,6 +172,49 @@ export default function StyleManager(): JSX.Element {
   const styleUsageMap = useMemo(() => buildStyleUsageMap(project), [project]);
   const selectedStyleUsage = selectedStyle && styleUsageMap[selectedStyle] ? styleUsageMap[selectedStyle]! : [];
   const selectedStyleLintIssues = selectedStyle && styleLintMap[selectedStyle] ? styleLintMap[selectedStyle]! : [];
+  const usagePreview = selectedStyleUsage.slice(0, MAX_USAGE_PREVIEW);
+  const usageOverflow = Math.max(0, selectedStyleUsage.length - usagePreview.length);
+  const lintErrorCount = selectedStyleLintIssues.filter((issue) => issue.severity === "error").length;
+  const lintWarningCount = selectedStyleLintIssues.filter((issue) => issue.severity !== "error").length;
+  const lintSummaryLabel = lintErrorCount || lintWarningCount
+    ? [
+        lintErrorCount ? `${lintErrorCount} error${lintErrorCount === 1 ? "" : "s"}` : "",
+        lintWarningCount ? `${lintWarningCount} warning${lintWarningCount === 1 ? "" : "s"}` : "",
+      ]
+        .filter(Boolean)
+        .join(" • ")
+    : "";
+  const lintSeverityClass = lintErrorCount ? "danger" : "warning";
+  const liveFormToken = useMemo(() => {
+    let parsedValue: Record<string, unknown>;
+    let parsedMetadata: Record<string, unknown>;
+    try {
+      parsedValue = formState.valueText.trim() ? JSON.parse(formState.valueText) : {};
+    } catch {
+      return null;
+    }
+    try {
+      parsedMetadata = formState.metadataText.trim() ? JSON.parse(formState.metadataText) : {};
+    } catch {
+      parsedMetadata = {};
+    }
+    const tags = formState.tagsText
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    const fallbackName = selectedToken?.name ?? "preview_style";
+    const token: StyleTokenModel = {
+      name: formState.name.trim() || fallbackName,
+      category: formState.category,
+      description: formState.description.trim() || undefined,
+      value: parsedValue,
+      tags,
+      metadata: parsedMetadata,
+    };
+    return token;
+  }, [formState, selectedToken]);
+  const previewToken = liveFormToken ?? selectedToken;
+  const knobEditingDisabledReason = liveFormToken ? undefined : "Fix Value JSON to use quick knobs.";
 
   useEffect(() => {
     setUsageCursor((prev) => {
@@ -326,6 +390,20 @@ export default function StyleManager(): JSX.Element {
     setDraftLintIssues([]);
   };
 
+  const focusUsageAtIndex = useCallback(
+    (styleName: string, usageIndex: number) => {
+      const usages = styleUsageMap[styleName];
+      if (!usages?.length) {
+        return;
+      }
+      const clampedIndex = Math.max(0, Math.min(usageIndex, usages.length - 1));
+      const usage = usages[clampedIndex];
+      setEditorTarget(usage.target);
+      selectWidget(usage.path);
+    },
+    [selectWidget, setEditorTarget, styleUsageMap]
+  );
+
   const handleFocusNextUsage = useCallback(
     (styleName: string) => {
       const usages = styleUsageMap[styleName];
@@ -334,21 +412,23 @@ export default function StyleManager(): JSX.Element {
       }
       setUsageCursor((prev) => {
         const nextIndex = ((prev[styleName] ?? -1) + 1) % usages.length;
-        const nextMap = { ...prev, [styleName]: nextIndex };
-        const usage = usages[nextIndex];
-        setEditorTarget(usage.target);
-        selectWidget(usage.path);
-        return nextMap;
+        focusUsageAtIndex(styleName, nextIndex);
+        return { ...prev, [styleName]: nextIndex };
       });
     },
-    [selectWidget, setEditorTarget, styleUsageMap]
+    [focusUsageAtIndex, styleUsageMap]
   );
 
   const handleDelete = () => {
     if (!selectedStyle) {
       return;
     }
-    if (!window.confirm(`Delete style "${selectedStyle}"? Widgets using it will lose the reference.`)) {
+    const usageCount = selectedStyleUsage.length;
+    const message =
+      usageCount > 0
+        ? `Style "${selectedStyle}" is used by ${usageCount} widget${usageCount === 1 ? "" : "s"}. Delete anyway? Widgets will lose the reference.`
+        : `Delete style "${selectedStyle}"?`;
+    if (!window.confirm(message)) {
       return;
     }
     deleteStyleToken(selectedStyle);
@@ -356,6 +436,48 @@ export default function StyleManager(): JSX.Element {
     setDraftPreview(null);
     setDraftLintIssues([]);
   };
+
+  const handleCloneStyle = () => {
+    if (!selectedToken) {
+      return;
+    }
+    const cloneName = generateCloneName(selectedToken.name, project.styles);
+    const clonedValue = JSON.parse(JSON.stringify(selectedToken.value ?? {}));
+    const clonedMetadata = JSON.parse(JSON.stringify(selectedToken.metadata ?? {}));
+    const cloneToken: StyleTokenModel = {
+      ...selectedToken,
+      name: cloneName,
+      description: selectedToken.description ? `${selectedToken.description} (clone)` : "Cloned style",
+      tags: Array.from(new Set([...(selectedToken.tags ?? []), "clone"])),
+      metadata: { ...clonedMetadata, clonedFrom: selectedToken.name },
+      value: clonedValue,
+    };
+    saveStyleToken(cloneToken);
+    setFormState(tokenToForm(cloneToken));
+    setFormErrors({});
+    setDraftPreview(null);
+    setDraftLintIssues([]);
+  };
+
+  const handleKnobFieldChange = useCallback(
+    (fieldKey: string, rawValue: string) => {
+      let parsedValue: Record<string, unknown>;
+      try {
+        parsedValue = formState.valueText.trim() ? JSON.parse(formState.valueText) : {};
+      } catch {
+        setFormErrors((prev) => ({ ...prev, valueText: "Value JSON is invalid" }));
+        return;
+      }
+      const nextValue = rawValue.trim().length === 0 ? undefined : rawValue;
+      if (nextValue === undefined) {
+        delete parsedValue[fieldKey];
+      } else {
+        parsedValue[fieldKey] = nextValue;
+      }
+      updateForm("valueText", JSON.stringify(parsedValue, null, 2));
+    },
+    [formState.valueText, setFormErrors, updateForm]
+  );
 
   const handlePreviewDraft = async () => {
     const token = buildTokenFromForm();
@@ -486,12 +608,15 @@ export default function StyleManager(): JSX.Element {
         <div className="style-editor">
           <StylePreviewCard
             label="Style Preview"
-            token={selectedToken}
+            token={previewToken ?? undefined}
             preview={autoPreview}
             busy={autoPreviewBusy}
             error={autoPreviewError}
             emptyHint="Preview loads from the backend as soon as the token is saved."
             footnote="Auto-refreshes whenever this token changes."
+            knobEditingEnabled={Boolean(liveFormToken)}
+            knobEditingDisabledReason={knobEditingDisabledReason}
+            onKnobFieldChange={handleKnobFieldChange}
           />
           <div className="style-usage-banner">
             <div>
@@ -503,6 +628,55 @@ export default function StyleManager(): JSX.Element {
               </button>
             )}
           </div>
+          <div className="style-usage-list">
+            {selectedStyleUsage.length === 0 && <span className="field-hint">No widgets reference this token yet.</span>}
+            {selectedStyle &&
+              usagePreview.map((usage, index) => {
+                const { owner, widget, pathLabel } = describeUsageLocation(usage);
+                return (
+                  <button
+                    type="button"
+                    key={`${owner}-${widget}-${pathLabel}-${index}`}
+                    className="style-usage-item"
+                    onClick={() => {
+                      setUsageCursor((prev) => ({ ...prev, [selectedStyle]: index }));
+                      focusUsageAtIndex(selectedStyle, index);
+                    }}
+                  >
+                    <div className="style-usage-item__meta">
+                      <span className="style-usage-item__owner">{owner}</span>
+                      <span className="style-usage-item__widget">{widget}</span>
+                    </div>
+                    <div className="style-usage-item__path">Path: {pathLabel}</div>
+                    <span className="style-usage-item__cta">Jump</span>
+                  </button>
+                );
+              })}
+            {usageOverflow > 0 && (
+              <span className="field-hint">{usageOverflow} more matches not shown. Use “Focus next match” to cycle all.</span>
+            )}
+          </div>
+                      {autoPreview && (
+                        <div
+                          className="style-usage-item__preview"
+                          style={{ background: autoPreview.backgroundColor, color: autoPreview.color }}
+                        >
+                          <div className="style-usage-item__preview-top">
+                            <span className="style-usage-item__preview-category">{autoPreview.category}</span>
+                            {autoPreview.description && (
+                              <span className="style-usage-item__preview-description">{autoPreview.description}</span>
+                            )}
+                          </div>
+                          <span className="style-usage-item__preview-meta">
+                            BG {autoPreview.backgroundColor} • FG {autoPreview.color}
+                          </span>
+                        </div>
+                      )}
+                      {lintSummaryLabel && (
+                        <div className="style-usage-item__lint">
+                          <span className={`style-usage-item__lint-pill ${lintSeverityClass}`}>{lintSummaryLabel}</span>
+                        </div>
+                      )}
           <div className="style-lint style-lint--auto">
             <p className="style-lint__title">Auto lint</p>
             {lintScanBusy ? (
@@ -598,6 +772,9 @@ export default function StyleManager(): JSX.Element {
           <div className="style-actions">
             <button type="button" className="button primary" onClick={handleSave}>
               Save Style
+            </button>
+            <button type="button" className="button secondary" onClick={handleCloneStyle} disabled={!selectedToken}>
+              Clone Style
             </button>
             <button type="button" className="button secondary" onClick={handlePreviewDraft} disabled={isPreviewingDraft}>
               {isPreviewingDraft ? "Previewing…" : "Preview Draft"}

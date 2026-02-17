@@ -43,6 +43,8 @@ esp-idf/
 .espressif/
 tools/*
 !tools/yamui_bundle.py
+!tools/yam-ui-generator/
+!tools/yam-ui-generator/**
 dist/
 
 # ESP-IDF Component Manager
