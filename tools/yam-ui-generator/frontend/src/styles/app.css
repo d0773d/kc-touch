@@ -1540,6 +1540,13 @@ body {
   font-size: 0.85rem;
 }
 
+.style-usage-banner__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .style-usage-controls {
   display: flex;
   flex-wrap: wrap;
@@ -1551,6 +1558,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.style-usage-filter-group.style-usage-search {
+  flex: 1;
+  min-width: 220px;
 }
 
 .style-usage-filter-label {
@@ -1593,6 +1605,11 @@ body {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.style-usage-search__input {
+  width: 100%;
+  min-width: 0;
 }
 
 .style-usage-list {

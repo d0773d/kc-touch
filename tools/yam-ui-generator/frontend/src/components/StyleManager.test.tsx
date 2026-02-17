@@ -280,6 +280,7 @@ describe("StyleManager guardrails", () => {
     );
 
     const focusNextButton = screen.getByRole("button", { name: "Focus next match" });
+    const focusPrevButton = screen.getByRole("button", { name: "Focus previous match" });
     await user.click(focusNextButton);
     await flushAsync();
 
@@ -294,6 +295,22 @@ describe("StyleManager guardrails", () => {
         style: "primary",
         usageIndex: 1,
         origin: "cycle",
+      })
+    );
+
+    await user.click(focusPrevButton);
+    await flushAsync();
+
+    const cycledButtons = screen.getAllByTestId(/style-usage-item-/);
+    expect(cycledButtons[0]!.classList.contains("is-active")).toBe(true);
+    expect(emitTelemetryMock).toHaveBeenCalledTimes(3);
+    expect(emitTelemetryMock).toHaveBeenLastCalledWith(
+      "styles",
+      "style_usage_focus",
+      expect.objectContaining({
+        style: "primary",
+        usageIndex: 0,
+        origin: "cycle_prev",
       })
     );
   });
@@ -351,6 +368,25 @@ describe("StyleManager guardrails", () => {
 
     const resetUsageFilters = screen.getByRole("button", { name: "Reset usage filters" });
     await user.click(resetUsageFilters);
+    await flushAsync();
+
+    expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(2);
+
+    const usageSearch = screen.getByPlaceholderText("Filter by owner, widget, or id");
+    await user.type(usageSearch, "hero");
+    await flushAsync();
+
+    const heroOnly = screen.getAllByTestId(/style-usage-item-/);
+    expect(heroOnly).toHaveLength(1);
+    expect(within(heroOnly[0]!).getByText(/hero/i)).toBeInTheDocument();
+
+    await user.clear(usageSearch);
+    await user.type(usageSearch, "doesnotexist");
+    await flushAsync();
+
+    expect(screen.getByText("No matches for the current usage filters.")).toBeInTheDocument();
+
+    await user.clear(usageSearch);
     await flushAsync();
 
     expect(screen.getAllByTestId(/style-usage-item-/)).toHaveLength(2);

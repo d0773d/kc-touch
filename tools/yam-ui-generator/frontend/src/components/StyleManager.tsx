@@ -84,7 +84,8 @@ interface StyleUsage {
   widget: WidgetNode;
 }
 
-type UsageFocusOrigin = "list_click" | "cycle" | "lint_jump";
+type UsageFocusOrigin = "list_click" | "cycle" | "cycle_prev" | "lint_jump";
+
 
 interface LintDrawerEntry {
   name: string;
@@ -158,6 +159,7 @@ export default function StyleManager(): JSX.Element {
   const [usageCursor, setUsageCursor] = useState<Record<string, number>>({});
   const [usageOwnerFilter, setUsageOwnerFilter] = useState<"all" | "screen" | "component">("all");
   const [usageWidgetFilter, setUsageWidgetFilter] = useState<string>("all");
+  const [usageSearchQuery, setUsageSearchQuery] = useState("");
   const [showUnusedOnly, setShowUnusedOnly] = useState(false);
   const [valueCopyState, setValueCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [valueFormatState, setValueFormatState] = useState<"idle" | "formatted" | "error">("idle");
@@ -167,6 +169,7 @@ export default function StyleManager(): JSX.Element {
   const previewCacheRef = useRef<Map<string, StylePreview>>(new Map());
 
   const normalizedQuery = filterQuery.trim().toLowerCase();
+  const normalizedUsageSearch = usageSearchQuery.trim().toLowerCase();
   const styleUsageMap = useMemo(() => buildStyleUsageMap(project), [project]);
   const styleEntries = useMemo(() => {
     const entries = Object.entries(project.styles).map(([key, token]) => ({ key, token }));
@@ -227,21 +230,50 @@ export default function StyleManager(): JSX.Element {
   }, [selectedStyleUsage]);
   const filteredStyleUsageEntries = useMemo(() => {
     return selectedStyleUsage
-      .map((usage, index) => ({ usage, index }))
-      .filter(({ usage }) => {
+      .map((usage, index) => ({ usage, index, descriptor: describeUsageLocation(usage) }))
+      .filter(({ usage, descriptor }) => {
         const ownerMatches = usageOwnerFilter === "all" || usage.target.type === usageOwnerFilter;
         const widgetMatches = usageWidgetFilter === "all" || usage.widget.type === usageWidgetFilter;
-        return ownerMatches && widgetMatches;
+        if (!ownerMatches || !widgetMatches) {
+          return false;
+        }
+        if (!normalizedUsageSearch) {
+          return true;
+        }
+        const haystack = [
+          descriptor.owner,
+          descriptor.widget,
+          descriptor.pathLabel,
+          usage.target.id,
+          usage.widget.id ?? "",
+          usage.widget.type,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(normalizedUsageSearch);
       });
-  }, [selectedStyleUsage, usageOwnerFilter, usageWidgetFilter]);
+  }, [normalizedUsageSearch, selectedStyleUsage, usageOwnerFilter, usageWidgetFilter]);
   const usagePreview = filteredStyleUsageEntries.slice(0, MAX_USAGE_PREVIEW);
   const usageOverflow = Math.max(0, filteredStyleUsageEntries.length - usagePreview.length);
   const deleteGuardReason = selectedStyleUsage.length
     ? `Used by ${selectedStyleUsage.length} widget${selectedStyleUsage.length === 1 ? "" : "s"}. Remove references before deleting.`
     : null;
   const highlightedUsageIndex = selectedStyle ? usageCursor[selectedStyle] ?? null : null;
-  const noUsageMatches = filteredStyleUsageEntries.length === 0;
-  const usageFiltersDirty = usageOwnerFilter !== "all" || usageWidgetFilter !== "all";
+  const filteredUsageCount = filteredStyleUsageEntries.length;
+  const totalUsageCount = selectedStyleUsage.length;
+  const noUsageMatches = filteredUsageCount === 0;
+  const usageFiltersDirty =
+    usageOwnerFilter !== "all" || usageWidgetFilter !== "all" || Boolean(normalizedUsageSearch.length);
+  const usageBannerLeadValue =
+    totalUsageCount === 0
+      ? "No"
+      : filteredUsageCount === totalUsageCount
+        ? String(filteredUsageCount)
+        : `${filteredUsageCount}/${totalUsageCount}`;
+  const usageBannerLeadSuffix =
+    filteredUsageCount === totalUsageCount || totalUsageCount === 0
+      ? "matches using this style"
+      : "matches in filter scope";
   const lintErrorCount = selectedStyleLintIssues.filter((issue) => issue.severity === "error").length;
   const lintWarningCount = selectedStyleLintIssues.filter((issue) => issue.severity !== "error").length;
   const lintSummaryLabel = lintErrorCount || lintWarningCount
@@ -617,6 +649,22 @@ export default function StyleManager(): JSX.Element {
     [focusUsageAtIndex, styleUsageMap]
   );
 
+  const handleFocusPreviousUsage = useCallback(
+    (styleName: string) => {
+      const usages = styleUsageMap[styleName];
+      if (!usages?.length) {
+        return;
+      }
+      setUsageCursor((prev) => {
+        const prevIndex = prev[styleName] ?? 0;
+        const nextIndex = (prevIndex - 1 + usages.length) % usages.length;
+        focusUsageAtIndex(styleName, nextIndex, "cycle_prev");
+        return { ...prev, [styleName]: nextIndex };
+      });
+    },
+    [focusUsageAtIndex, styleUsageMap]
+  );
+
   const handleDelete = () => {
     if (!selectedStyle) {
       return;
@@ -667,6 +715,7 @@ export default function StyleManager(): JSX.Element {
   const handleResetUsageFilters = () => {
     setUsageOwnerFilter("all");
     setUsageWidgetFilter("all");
+    setUsageSearchQuery("");
   };
 
   const handleToggleLintDrawer = () => {
@@ -1068,12 +1117,21 @@ export default function StyleManager(): JSX.Element {
           />
           <div className="style-usage-banner">
             <div>
-              <strong>{selectedStyleUsage.length || "No"}</strong> matches using this style
+              <strong>{usageBannerLeadValue}</strong> {usageBannerLeadSuffix}
             </div>
             {selectedStyleUsage.length > 0 && selectedStyle && (
-              <button type="button" className="button tertiary" onClick={() => handleFocusNextUsage(selectedStyle)}>
-                Focus next match
-              </button>
+              <div className="style-usage-banner__actions">
+                <button
+                  type="button"
+                  className="button tertiary"
+                  onClick={() => handleFocusPreviousUsage(selectedStyle)}
+                >
+                  Focus previous match
+                </button>
+                <button type="button" className="button tertiary" onClick={() => handleFocusNextUsage(selectedStyle)}>
+                  Focus next match
+                </button>
+              </div>
             )}
           </div>
           {selectedStyleUsage.length > 0 && (
@@ -1116,6 +1174,16 @@ export default function StyleManager(): JSX.Element {
                   ))}
                 </select>
               </label>
+              <label className="style-usage-filter-group style-usage-search">
+                <span className="style-usage-filter-label">Usage search</span>
+                <input
+                  className="input-field style-usage-search__input"
+                  value={usageSearchQuery}
+                  onChange={(event) => setUsageSearchQuery(event.target.value)}
+                  placeholder="Filter by owner, widget, or id"
+                  aria-label="Usage search filter"
+                />
+              </label>
               {usageFiltersDirty && (
                 <button type="button" className="button tertiary style-usage-filter-reset" onClick={handleResetUsageFilters}>
                   Reset usage filters
@@ -1129,8 +1197,8 @@ export default function StyleManager(): JSX.Element {
               <span className="field-hint">No matches for the current usage filters.</span>
             )}
             {selectedStyle
-              ? usagePreview.map(({ usage, index: usageIndex }) => {
-                const { owner, widget, pathLabel } = describeUsageLocation(usage);
+              ? usagePreview.map(({ usage, index: usageIndex, descriptor }) => {
+                const { owner, widget, pathLabel } = descriptor;
                 const ownerTypeLabel = usage.target.type === "screen" ? "Screen" : "Component";
                 const ownerTestId = `style-usage-owner-${usage.target.type}-${usage.target.id}`;
                 const isActive = highlightedUsageIndex === usageIndex;
