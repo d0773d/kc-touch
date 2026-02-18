@@ -3,7 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sdkconfig.h"
 #include "yamui_logging.h"
+
+#ifndef CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH
+#define CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH 0
+#endif
 
 typedef struct {
     yui_nav_request_type_t type;
@@ -41,6 +46,15 @@ static void yui_nav_queue_reset_request(yui_nav_request_t *request)
 
 static esp_err_t yui_nav_queue_push(yui_nav_request_type_t type, const char *arg)
 {
+#if CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH > 0
+    if (s_queue_count >= CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH) {
+        yamui_log(YAMUI_LOG_LEVEL_WARN,
+                  YAMUI_LOG_CAT_NAV,
+                  "Navigation queue depth limit reached (%u)",
+                  (unsigned int)CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH);
+        return ESP_ERR_INVALID_SIZE;
+    }
+#endif
     if (s_queue_count == s_queue_capacity) {
         size_t new_capacity = s_queue_capacity == 0 ? 4U : s_queue_capacity * 2U;
         yui_nav_request_t *resized = (yui_nav_request_t *)realloc(s_queue, new_capacity * sizeof(yui_nav_request_t));

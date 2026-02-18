@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Widget(BaseModel):
@@ -53,6 +53,79 @@ class ComponentDefinition(BaseModel):
     widgets: List[Widget] = Field(default_factory=list)
 
 
+class ColorStyleValue(BaseModel):
+    backgroundColor: Optional[str] = None
+    color: Optional[str] = None
+    borderColor: Optional[str] = None
+    accentColor: Optional[str] = None
+    overlayColor: Optional[str] = None
+
+
+class SurfaceStyleValue(BaseModel):
+    backgroundColor: Optional[str] = None
+    color: Optional[str] = None
+    borderColor: Optional[str] = None
+    borderWidth: Optional[float] = Field(default=None, ge=0)
+    borderRadius: Optional[float] = Field(default=None, ge=0)
+    padding: Optional[float] = Field(default=None, ge=0)
+    paddingHorizontal: Optional[float] = Field(default=None, ge=0)
+    paddingVertical: Optional[float] = Field(default=None, ge=0)
+    gap: Optional[float] = Field(default=None, ge=0)
+    shadow: Optional[str] = None
+    elevation: Optional[str] = None
+
+
+class TextStyleValue(BaseModel):
+    fontFamily: Optional[str] = None
+    fontSize: Optional[float] = Field(default=None, ge=0)
+    fontWeight: Optional[int] = Field(default=None, ge=100, le=900)
+    letterSpacing: Optional[float] = None
+    lineHeight: Optional[float] = Field(default=None, ge=0)
+    textTransform: Optional[str] = None
+    textAlign: Optional[Literal["left", "right", "center", "justify"]] = None
+    color: Optional[str] = None
+
+
+class SpacingStyleValue(BaseModel):
+    padding: Optional[float] = Field(default=None, ge=0)
+    paddingHorizontal: Optional[float] = Field(default=None, ge=0)
+    paddingVertical: Optional[float] = Field(default=None, ge=0)
+    paddingTop: Optional[float] = Field(default=None, ge=0)
+    paddingBottom: Optional[float] = Field(default=None, ge=0)
+    paddingLeft: Optional[float] = Field(default=None, ge=0)
+    paddingRight: Optional[float] = Field(default=None, ge=0)
+    margin: Optional[float] = Field(default=None, ge=0)
+    marginHorizontal: Optional[float] = Field(default=None, ge=0)
+    marginVertical: Optional[float] = Field(default=None, ge=0)
+    marginTop: Optional[float] = Field(default=None, ge=0)
+    marginBottom: Optional[float] = Field(default=None, ge=0)
+    marginLeft: Optional[float] = Field(default=None, ge=0)
+    marginRight: Optional[float] = Field(default=None, ge=0)
+    gap: Optional[float] = Field(default=None, ge=0)
+    rowGap: Optional[float] = Field(default=None, ge=0)
+    columnGap: Optional[float] = Field(default=None, ge=0)
+
+
+class ShadowStyleValue(BaseModel):
+    offsetX: Optional[float] = None
+    offsetY: Optional[float] = None
+    blurRadius: Optional[float] = Field(default=None, ge=0)
+    spreadRadius: Optional[float] = Field(default=None, ge=0)
+    color: Optional[str] = None
+    opacity: Optional[float] = Field(default=None, ge=0, le=1)
+    inset: Optional[bool] = None
+    elevation: Optional[str] = None
+
+
+STYLE_VALUE_CLASSES: Dict[str, Type[BaseModel]] = {
+    "color": ColorStyleValue,
+    "surface": SurfaceStyleValue,
+    "text": TextStyleValue,
+    "spacing": SpacingStyleValue,
+    "shadow": ShadowStyleValue,
+}
+
+
 class StyleToken(BaseModel):
     """Structured style definition used across widgets/components."""
 
@@ -62,6 +135,18 @@ class StyleToken(BaseModel):
     value: Dict[str, Any] = Field(default_factory=dict)
     tags: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _ensure_category_value(self) -> "StyleToken":
+        value_cls = STYLE_VALUE_CLASSES.get(self.category)
+        if not value_cls:
+            return self
+        if isinstance(self.value, value_cls):
+            object.__setattr__(self, "value", self.value.model_dump())
+            return self
+        parsed = value_cls.model_validate(self.value or {}).model_dump()
+        object.__setattr__(self, "value", parsed)
+        return self
 
 
 class Project(BaseModel):

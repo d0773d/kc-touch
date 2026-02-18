@@ -1,15 +1,26 @@
 #include <string.h>
 
+#include "sdkconfig.h"
 #include "unity.h"
 
 #include "yui_navigation_queue.h"
+
+#ifndef CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH
+#define CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH 0
+#endif
+
+#if CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH > 0
+#define NAV_CALL_CAPACITY (CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH + 4)
+#else
+#define NAV_CALL_CAPACITY 16
+#endif
 
 typedef struct {
     yui_nav_request_type_t type;
     char arg[32];
 } nav_call_t;
 
-static nav_call_t s_calls[8];
+static nav_call_t s_calls[NAV_CALL_CAPACITY];
 static size_t s_call_count;
 
 static esp_err_t nav_queue_executor(yui_nav_request_type_t type, const char *arg, void *user_ctx)
@@ -82,6 +93,29 @@ TEST_CASE("nav queue reset drops pending work", "[yamui][nav]")
     TEST_ASSERT_EQUAL_UINT32(1, s_call_count);
     TEST_ASSERT_EQUAL(YUI_NAV_REQUEST_POP, s_calls[0].type);
 }
+
+#if CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH > 0
+TEST_CASE("nav queue enforces depth guard", "[yamui][nav]")
+{
+    const size_t guard = (size_t)CONFIG_YAMUI_NAV_QUEUE_MAX_DEPTH;
+    nav_queue_test_reset();
+    TEST_ASSERT_EQUAL(ESP_OK, yui_nav_queue_begin_render());
+
+    for (size_t i = 0; i < guard; ++i) {
+        TEST_ASSERT_EQUAL(ESP_OK, yui_nav_queue_submit(YUI_NAV_REQUEST_PUSH, NULL));
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(guard, yui_nav_queue_depth());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, yui_nav_queue_submit(YUI_NAV_REQUEST_PUSH, NULL));
+    TEST_ASSERT_EQUAL_UINT32(guard, yui_nav_queue_depth());
+    TEST_ASSERT_EQUAL_UINT32(0, s_call_count);
+
+    yui_nav_queue_end_render(true);
+
+    TEST_ASSERT_EQUAL_UINT32(guard, s_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0, yui_nav_queue_depth());
+}
+#endif
 
 void app_main(void)
 {

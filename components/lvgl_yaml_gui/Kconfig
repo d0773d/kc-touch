@@ -1,0 +1,12 @@
+menu "YamUI LVGL YAML GUI"
+
+config YAMUI_NAV_QUEUE_MAX_DEPTH
+    int "Navigation queue depth limit"
+    default 16
+    range 0 64
+    help
+        Maximum number of navigation requests the UI can defer while a render
+        is in progress. Set to 0 to disable the guard and allow unbounded
+        queuing (not recommended for memory-constrained targets).
+
+endmenu

@@ -31,6 +31,103 @@ WIDGET_SCHEMA: Dict[str, Any] = {
     "additionalProperties": True,
 }
 
+COLOR_STYLE_SCHEMA: Dict[str, Any] = {
+    "$id": "https://yamui.spec/style-color.schema.json",
+    "type": "object",
+    "properties": {
+        "backgroundColor": {"type": "string"},
+        "color": {"type": "string"},
+        "borderColor": {"type": "string"},
+        "accentColor": {"type": "string"},
+        "overlayColor": {"type": "string"},
+    },
+    "additionalProperties": False,
+    "default": {},
+}
+
+SURFACE_STYLE_SCHEMA: Dict[str, Any] = {
+    "$id": "https://yamui.spec/style-surface.schema.json",
+    "type": "object",
+    "properties": {
+        "backgroundColor": {"type": "string"},
+        "color": {"type": "string"},
+        "borderColor": {"type": "string"},
+        "borderWidth": {"type": "number", "minimum": 0},
+        "borderRadius": {"type": "number", "minimum": 0},
+        "padding": {"type": "number", "minimum": 0},
+        "paddingHorizontal": {"type": "number", "minimum": 0},
+        "paddingVertical": {"type": "number", "minimum": 0},
+        "gap": {"type": "number", "minimum": 0},
+        "shadow": {"type": "string"},
+        "elevation": {"type": "string"},
+    },
+    "additionalProperties": False,
+    "default": {},
+}
+
+TEXT_STYLE_SCHEMA: Dict[str, Any] = {
+    "$id": "https://yamui.spec/style-text.schema.json",
+    "type": "object",
+    "properties": {
+        "fontFamily": {"type": "string"},
+        "fontSize": {"type": "number", "minimum": 0},
+        "fontWeight": {"type": "number", "minimum": 100, "maximum": 900},
+        "letterSpacing": {"type": "number"},
+        "lineHeight": {"type": "number", "minimum": 0},
+        "textTransform": {"type": "string"},
+        "textAlign": {
+            "type": "string",
+            "enum": ["left", "right", "center", "justify"],
+        },
+        "color": {"type": "string"},
+    },
+    "additionalProperties": False,
+    "default": {},
+}
+
+SPACING_STYLE_SCHEMA: Dict[str, Any] = {
+    "$id": "https://yamui.spec/style-spacing.schema.json",
+    "type": "object",
+    "properties": {
+        "padding": {"type": "number", "minimum": 0},
+        "paddingHorizontal": {"type": "number", "minimum": 0},
+        "paddingVertical": {"type": "number", "minimum": 0},
+        "paddingTop": {"type": "number", "minimum": 0},
+        "paddingBottom": {"type": "number", "minimum": 0},
+        "paddingLeft": {"type": "number", "minimum": 0},
+        "paddingRight": {"type": "number", "minimum": 0},
+        "margin": {"type": "number", "minimum": 0},
+        "marginHorizontal": {"type": "number", "minimum": 0},
+        "marginVertical": {"type": "number", "minimum": 0},
+        "marginTop": {"type": "number", "minimum": 0},
+        "marginBottom": {"type": "number", "minimum": 0},
+        "marginLeft": {"type": "number", "minimum": 0},
+        "marginRight": {"type": "number", "minimum": 0},
+        "gap": {"type": "number", "minimum": 0},
+        "rowGap": {"type": "number", "minimum": 0},
+        "columnGap": {"type": "number", "minimum": 0},
+    },
+    "additionalProperties": False,
+    "default": {},
+}
+
+SHADOW_STYLE_SCHEMA: Dict[str, Any] = {
+    "$id": "https://yamui.spec/style-shadow.schema.json",
+    "type": "object",
+    "properties": {
+        "offsetX": {"type": "number"},
+        "offsetY": {"type": "number"},
+        "blurRadius": {"type": "number", "minimum": 0},
+        "spreadRadius": {"type": "number", "minimum": 0},
+        "color": {"type": "string"},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "inset": {"type": "boolean"},
+        "elevation": {"type": "string"},
+    },
+    "additionalProperties": False,
+    "default": {},
+}
+
 STYLE_TOKEN_SCHEMA: Dict[str, Any] = {
     "$id": "https://yamui.spec/style-token.schema.json",
     "type": "object",
@@ -42,7 +139,16 @@ STYLE_TOKEN_SCHEMA: Dict[str, Any] = {
             "enum": ["color", "surface", "text", "spacing", "shadow"],
         },
         "description": {"type": "string"},
-        "value": {"type": "object", "default": {}},
+        "value": {
+            "oneOf": [
+                {"$ref": "https://yamui.spec/style-color.schema.json"},
+                {"$ref": "https://yamui.spec/style-surface.schema.json"},
+                {"$ref": "https://yamui.spec/style-text.schema.json"},
+                {"$ref": "https://yamui.spec/style-spacing.schema.json"},
+                {"$ref": "https://yamui.spec/style-shadow.schema.json"},
+            ],
+            "default": {},
+        },
         "tags": {
             "type": "array",
             "items": {"type": "string"},
@@ -130,6 +236,11 @@ PROJECT_SCHEMA: Dict[str, Any] = {
     "$defs": {
         "widget": WIDGET_SCHEMA,
         "styleToken": STYLE_TOKEN_SCHEMA,
+        "colorStyle": COLOR_STYLE_SCHEMA,
+        "surfaceStyle": SURFACE_STYLE_SCHEMA,
+        "textStyle": TEXT_STYLE_SCHEMA,
+        "spacingStyle": SPACING_STYLE_SCHEMA,
+        "shadowStyle": SHADOW_STYLE_SCHEMA,
     },
 }
 

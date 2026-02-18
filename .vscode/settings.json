@@ -11,5 +11,6 @@
   "idf.port": "rfc2217://24.251.114.49:4000?ign_set_control",
   "idf.flashBaudRate": "2000000",
   "idf.monitorBaudRate": "115200",
-  "idf.currentSetup": "c:\\Users\\d0773\\esp\\v5.5.2\\esp-idf"
+  "idf.currentSetup": "c:\\Users\\d0773\\esp\\v5.5.2\\esp-idf",
+  "idf.portWin": "COM7"
 }
