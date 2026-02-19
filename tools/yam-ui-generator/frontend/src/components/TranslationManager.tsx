@@ -16,10 +16,15 @@ interface TranslationManagerProps {
   issues: ValidationIssue[];
 }
 
+interface DiffPreviewTarget {
+  code: string;
+  before: string;
+}
+
 interface FillPreviewState {
   key: string;
   source: string;
-  targets: Array<{ code: string; before: string }>;
+  targets: DiffPreviewTarget[];
 }
 
 interface TranslationIssueDetail {
@@ -28,11 +33,18 @@ interface TranslationIssueDetail {
   key: string;
 }
 
+interface DiffViewerTarget extends DiffPreviewTarget {
+  currentValue: string;
+  isFilled: boolean;
+}
+
 interface DiffViewerProps {
   title: string;
   sourceLabel: string;
   sourceValue: string;
-  targets: Array<{ code: string; before: string }>;
+  targets: DiffViewerTarget[];
+  selectedLocales: string[];
+  onSelectionChange: (locales: string[]) => void;
   onConfirm: (locales: string[]) => void;
   onDismiss: () => void;
 }
@@ -75,6 +87,13 @@ const escapeSelector = (value: string): string => {
   return value.replace(/["\\]/g, "\\$&");
 };
 
+const arraysEqual = (left: string[] | undefined, right: string[]): boolean => {
+  if (!left || left.length !== right.length) {
+    return false;
+  }
+  return left.every((value, index) => value === right[index]);
+};
+
 export default function TranslationManager({ issues }: TranslationManagerProps): JSX.Element | null {
   const {
     project,
@@ -103,6 +122,7 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [renameError, setRenameError] = useState<string | null>(null);
   const [activeDiff, setActiveDiff] = useState<FillPreviewState | null>(null);
+  const [fillSelections, setFillSelections] = useState<Record<string, string[]>>({});
   const [localeError, setLocaleError] = useState<string | null>(null);
   const [keyError, setKeyError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<"json" | "csv" | null>(null);
@@ -223,23 +243,61 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
       if (!missingTargets.length) {
         return;
       }
+      const missingCodes = missingTargets.map((entry) => entry.code);
       if (previewOnly) {
         setActiveDiff({ key, source, targets: missingTargets });
+        setFillSelections((prev) => {
+          const allowed = new Set(missingCodes);
+          const previous = prev[key] ?? [];
+          const sanitized = previous.filter((code) => allowed.has(code));
+          const nextSelection = sanitized.length ? sanitized : missingCodes;
+          if (arraysEqual(previous, nextSelection)) {
+            return prev;
+          }
+          return { ...prev, [key]: nextSelection };
+        });
         return;
       }
       const allowed = selectedLocales && selectedLocales.length ? new Set(selectedLocales) : null;
-      const targetsToFill = missingTargets
-        .map(({ code }) => code)
-        .filter((code) => !allowed || allowed.has(code));
+      const targetsToFill = missingCodes.filter((code) => {
+        if (allowed && !allowed.has(code)) {
+          return false;
+        }
+        const current = translations[code]?.entries?.[key];
+        return !current || !current.trim().length;
+      });
       if (!targetsToFill.length) {
+        setIoStatus(`No locales needed filling for ${key}`);
+        setActiveDiff(null);
         return;
       }
       targetsToFill.forEach((code) => updateTranslationValue(code, key, source));
+      setFillSelections((prev) => {
+        if (arraysEqual(prev[key], targetsToFill)) {
+          return prev;
+        }
+        return { ...prev, [key]: targetsToFill };
+      });
       setIoError(null);
-      setIoStatus(`Filled ${targetsToFill.length} locale${targetsToFill.length === 1 ? "" : "s"} for ${key}`);
+      const summary = targetsToFill.join(", ");
+      setIoStatus(
+        `Filled ${targetsToFill.length} locale${targetsToFill.length === 1 ? "" : "s"} (${summary}) for ${key}`
+      );
       setActiveDiff(null);
     },
-    [localeCodes, primaryLocale, setIoError, setIoStatus, translations, updateTranslationValue]
+    [localeCodes, primaryLocale, setFillSelections, setIoError, setIoStatus, translations, updateTranslationValue]
+  );
+
+  const handleDiffSelectionChange = useCallback(
+    (key: string, locales: string[]) => {
+      setFillSelections((prev) => {
+        if (arraysEqual(prev[key], locales)) {
+          return prev;
+        }
+        return { ...prev, [key]: locales };
+      });
+    },
+    [setFillSelections]
   );
 
   const missingLocaleChips = useMemo<Array<{ code: string; count: number }>>(() => {
@@ -525,6 +583,51 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
   const handleValueChange = (locale: string, key: string, value: string) => {
     updateTranslationValue(locale, key, value);
   };
+
+  const liveDiffTargets = useMemo<DiffViewerTarget[]>(() => {
+    if (!activeDiff) {
+      return [];
+    }
+    return activeDiff.targets.map((target) => {
+      const rawValue = translations[target.code]?.entries?.[activeDiff.key] ?? "";
+      const currentValue = rawValue.trim();
+      return {
+        ...target,
+        currentValue,
+        isFilled: Boolean(currentValue.length),
+      };
+    });
+  }, [activeDiff, translations]);
+
+  const activeSelection = useMemo(() => {
+    if (!activeDiff) {
+      return [];
+    }
+    const allowedCodes = liveDiffTargets.filter((target) => !target.isFilled).map((target) => target.code);
+    const allowed = new Set(allowedCodes);
+    const saved = fillSelections[activeDiff.key];
+    if (saved !== undefined) {
+      const sanitized = saved.filter((code) => allowed.has(code));
+      if (!sanitized.length && saved.length > 0) {
+        return allowedCodes;
+      }
+      return sanitized;
+    }
+    return allowedCodes;
+  }, [activeDiff, fillSelections, liveDiffTargets]);
+
+  useEffect(() => {
+    if (!activeDiff) {
+      return;
+    }
+    setFillSelections((prev) => {
+      const current = prev[activeDiff.key];
+      if (arraysEqual(current, activeSelection)) {
+        return prev;
+      }
+      return { ...prev, [activeDiff.key]: activeSelection };
+    });
+  }, [activeDiff, activeSelection, setFillSelections]);
 
   return (
     <section className="translation-manager" id="translation-manager">
@@ -864,7 +967,9 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
           title={`Fill ${activeDiff.key}`}
           sourceLabel={primaryLocaleLabel ?? primaryLocale ?? "primary"}
           sourceValue={activeDiff.source}
-          targets={activeDiff.targets}
+          targets={liveDiffTargets}
+          selectedLocales={activeSelection}
+          onSelectionChange={(locales) => handleDiffSelectionChange(activeDiff.key, locales)}
           onConfirm={(locales) => handleFillMissingFromPrimary(activeDiff.key, false, locales)}
           onDismiss={() => setActiveDiff(null)}
         />
@@ -873,44 +978,60 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
   );
 }
 
-function DiffViewer({ title, sourceLabel, sourceValue, targets, onConfirm, onDismiss }: DiffViewerProps) {
+function DiffViewer({
+  title,
+  sourceLabel,
+  sourceValue,
+  targets,
+  selectedLocales,
+  onSelectionChange,
+  onConfirm,
+  onDismiss,
+}: DiffViewerProps) {
   const sortedTargets = useMemo(() => targets.slice().sort((a, b) => a.code.localeCompare(b.code)), [targets]);
-  const [selectedLocales, setSelectedLocales] = useState<Set<string>>(() => new Set(sortedTargets.map((entry) => entry.code)));
-
-  useEffect(() => {
-    setSelectedLocales(new Set(sortedTargets.map((entry) => entry.code)));
-  }, [sortedTargets]);
+  const orderedCodes = useMemo(() => sortedTargets.map((entry) => entry.code), [sortedTargets]);
+  const disabledLocales = useMemo(
+    () => new Set(sortedTargets.filter((entry) => entry.isFilled).map((entry) => entry.code)),
+    [sortedTargets]
+  );
+  const availableCodes = useMemo(
+    () => sortedTargets.filter((entry) => !entry.isFilled).map((entry) => entry.code),
+    [sortedTargets]
+  );
+  const selectionSet = useMemo(() => new Set(selectedLocales), [selectedLocales]);
 
   const toggleLocale = (code: string) => {
-    setSelectedLocales((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) {
-        next.delete(code);
-      } else {
-        next.add(code);
-      }
-      return next;
-    });
+    if (disabledLocales.has(code)) {
+      return;
+    }
+    const hasSelection = selectionSet.has(code);
+    const next = hasSelection
+      ? selectedLocales.filter((entry) => entry !== code)
+      : [...selectedLocales, code];
+    const normalized = orderedCodes.filter((locale) => next.includes(locale) && !disabledLocales.has(locale));
+    onSelectionChange(normalized);
   };
 
   const handleSelectAll = (value: boolean) => {
-    if (value) {
-      setSelectedLocales(new Set(sortedTargets.map((entry) => entry.code)));
-    } else {
-      setSelectedLocales(new Set());
-    }
+    onSelectionChange(value ? availableCodes : []);
   };
 
-  const selectedCount = selectedLocales.size;
-  const footerMessage = selectedCount === sortedTargets.length
-    ? `${selectedCount} locale${selectedCount === 1 ? "" : "s"} will be updated`
-    : `Updating ${selectedCount} of ${sortedTargets.length} locales`;
+  const selectedCount = selectedLocales.length;
+  const availableCount = availableCodes.length;
+  let footerMessage = "No locales selected";
+  if (!availableCount) {
+    footerMessage = "All listed locales already have translations";
+  } else if (selectedCount === availableCount) {
+    footerMessage = `${selectedCount} locale${selectedCount === 1 ? "" : "s"} will be updated`;
+  } else {
+    footerMessage = `Updating ${selectedCount} of ${availableCount} locale${availableCount === 1 ? "" : "s"}`;
+  }
 
   const handleConfirm = () => {
     if (!selectedCount) {
       return;
     }
-    onConfirm(Array.from(selectedLocales));
+    onConfirm(selectedLocales);
   };
 
   return (
@@ -950,32 +1071,41 @@ function DiffViewer({ title, sourceLabel, sourceValue, targets, onConfirm, onDis
             <button
               type="button"
               className="button tertiary"
-              onClick={() => handleSelectAll(selectedCount !== sortedTargets.length)}
+              onClick={() => handleSelectAll(selectedCount !== availableCount)}
+              disabled={!availableCount}
             >
-              {selectedCount === sortedTargets.length ? "Unselect all" : "Select all"}
+              {!availableCount ? "Up to date" : selectedCount === availableCount ? "Unselect all" : "Select all"}
             </button>
           </div>
           <ul className="diff-viewer__targets">
-            {sortedTargets.map(({ code, before }) => (
+            {sortedTargets.map(({ code, currentValue, isFilled }) => (
               <li key={code}>
-                <label className={`diff-viewer__target ${selectedLocales.has(code) ? "is-selected" : ""}`}>
+                <label
+                  className={[
+                    "diff-viewer__target",
+                    selectionSet.has(code) ? "is-selected" : "",
+                    isFilled ? "is-disabled" : "",
+                  ].filter(Boolean).join(" ")}
+                >
                   <input
                     type="checkbox"
-                    checked={selectedLocales.has(code)}
+                    checked={selectionSet.has(code)}
                     onChange={() => toggleLocale(code)}
+                    disabled={isFilled}
                     aria-label={`${code} locale toggle`}
                   />
                   <div className="diff-viewer__target-body">
                     <span className="diff-viewer__target-code">{code}</span>
                     <span className="diff-viewer__target-before">
-                      {before?.length ? `Existing: ${before}` : "Empty (will copy primary)"}
+                      {currentValue.length ? `Existing: ${currentValue}` : "Empty (will copy primary)"}
                     </span>
+                    {isFilled && <span className="diff-viewer__target-note">Won't overwrite existing copy.</span>}
                   </div>
                 </label>
               </li>
             ))}
           </ul>
-          <p className="field-hint">Only checked locales receive the primary copy. Existing translations remain unchanged.</p>
+          <p className="field-hint">Only checked empty locales receive the primary copy. Existing translations remain unchanged.</p>
         </section>
       </div>
     </Modal>

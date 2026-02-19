@@ -160,6 +160,63 @@ describe("TranslationManager guardrails", () => {
     expect(updateSpy).toHaveBeenCalledWith("es", "greeting", "Hello!");
   });
 
+  it("remembers locale selection for repeated previews", async () => {
+    const translations: TranslationStore = {
+      en: createLocale("English", { greeting: "Hello!" }),
+      es: createLocale("Spanish", { greeting: "" }),
+      fr: createLocale("French", { greeting: "" }),
+    };
+    mockContext = createMockContext(translations);
+
+    render(<TranslationManager issues={[]} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /Preview fill from English/i }));
+    await user.click(screen.getByLabelText("fr locale toggle"));
+    expect(screen.getByLabelText("fr locale toggle")).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByText("Fill greeting")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: /Preview fill from English/i }));
+    expect(screen.getByLabelText("fr locale toggle")).not.toBeChecked();
+  });
+
+  it("shows existing translations in the diff and skips overwriting them", async () => {
+    const translations: TranslationStore = {
+      en: createLocale("English", { greeting: "Hello!" }),
+      es: createLocale("Spanish", { greeting: "" }),
+      fr: createLocale("French", { greeting: "" }),
+    };
+    const updateSpy = vi.fn();
+    mockContext = createMockContext(translations, { updateTranslationValue: updateSpy });
+
+    const user = userEvent.setup();
+    const { rerender } = render(<TranslationManager issues={[]} />);
+
+    await user.click(screen.getByRole("button", { name: /Preview fill from English/i }));
+
+    mockContext.project = {
+      ...mockContext.project,
+      translations: {
+        ...mockContext.project.translations,
+        fr: createLocale("French", { greeting: "Salut!" }),
+      },
+    };
+
+    rerender(<TranslationManager issues={[]} />);
+
+    const frToggle = screen.getByLabelText("fr locale toggle");
+    expect(frToggle).toBeDisabled();
+    expect(screen.getByText("Existing: Salut!")).toBeInTheDocument();
+
+    const confirm = screen.getByRole("button", { name: "Fill missing locales" });
+    await user.click(confirm);
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).toHaveBeenCalledWith("es", "greeting", "Hello!");
+  });
+
   it("handles translation focus handoffs from the inspector", async () => {
     const translations: TranslationStore = {
       en: createLocale("English", { greeting: "Hello", farewell: "Later" }),
