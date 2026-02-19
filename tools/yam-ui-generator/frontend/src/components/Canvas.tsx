@@ -19,7 +19,6 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
     addWidget,
     removeWidget,
     moveWidget,
-    updateWidget,
     styleEditorSelection,
     setStyleEditorSelection,
     requestTranslationBinding,
@@ -364,19 +363,6 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
       </div>
     );
   };
-      {selectionBreadcrumbs.length > 0 && (
-        <div className="selection-breadcrumbs">
-          <span className="selection-breadcrumbs__label">Selection</span>
-          {selectionBreadcrumbs.map((crumb, index) => (
-            <Fragment key={crumb.path.join("-")}>
-              <button type="button" className="selection-breadcrumbs__chip" onClick={() => selectWidget(crumb.path)}>
-                {crumb.label}
-              </button>
-              {index < selectionBreadcrumbs.length - 1 && <span className="selection-breadcrumbs__divider">›</span>}
-            </Fragment>
-          ))}
-        </div>
-      )}
 
   const renderChildren = (children: WidgetNode[] | undefined, parentPath: WidgetPath) => {
     const list = children ?? [];
@@ -548,7 +534,7 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
           </div>
         )}
         {usesSelectedStyle && widget.style && (
-          <p className="widget-style-note">Linked to style "{widget.style}".</p>
+          <p className="widget-style-note">Linked to style &ldquo;{widget.style}&rdquo;.</p>
         )}
         {canNest && showChildren && renderChildren(widget.widgets, path)}
       </div>
@@ -560,6 +546,19 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
   return (
     <section className="panel canvas" style={style}>
       <p className="section-title">Canvas</p>
+      {selectionBreadcrumbs.length > 0 && (
+        <div className="selection-breadcrumbs">
+          <span className="selection-breadcrumbs__label">Selection</span>
+          {selectionBreadcrumbs.map((crumb, index) => (
+            <Fragment key={crumb.path.join("-")}>
+              <button type="button" className="selection-breadcrumbs__chip" onClick={() => selectWidget(crumb.path)}>
+                {crumb.label}
+              </button>
+              {index < selectionBreadcrumbs.length - 1 && <span className="selection-breadcrumbs__divider">›</span>}
+            </Fragment>
+          ))}
+        </div>
+      )}
       {styleEditorSelection && (
         <div className="style-usage-tracker">
           <div className="style-usage-tracker__meta">

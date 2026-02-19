@@ -51,7 +51,8 @@ export default function ComponentManager(): JSX.Element {
   };
 
   const handleDelete = (componentName: string) => {
-    const { [componentName]: _removed, ...rest } = project.components;
+    const rest = { ...project.components };
+    delete rest[componentName];
     setProject({ ...project, components: rest });
     if (editorTarget.type === "component" && editorTarget.id === componentName) {
       const firstScreen = Object.keys(project.screens)[0];

@@ -286,6 +286,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     updateTranslationValue,
     translationBindingRequest,
     clearTranslationBindingRequest,
+    requestTranslationFocus,
     setStyleEditorSelection,
     assetCatalog,
     assetCatalogBusy,
@@ -871,7 +872,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       trackAssetEvent("asset_filter_add", { type: "tag", value: normalized });
       return { ...prev, tags: [...prev.tags, normalized] };
     });
-  }, [trackAssetEvent]);
+  }, [setAssetFilters, trackAssetEvent]);
 
   const handleAddTargetFilter = useCallback((target: string) => {
     if (!target) {
@@ -884,7 +885,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       trackAssetEvent("asset_filter_add", { type: "target", value: target });
       return { ...prev, targets: [...prev.targets, target] };
     });
-  }, [trackAssetEvent]);
+  }, [setAssetFilters, trackAssetEvent]);
 
   const handleRemoveFilter = useCallback((group: AssetFilterGroup, value: string) => {
     setAssetFilters((prev) => {
@@ -892,7 +893,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       return { ...prev, [group]: nextGroup };
     });
     trackAssetEvent("asset_filter_remove", { group, value });
-  }, [trackAssetEvent]);
+  }, [setAssetFilters, trackAssetEvent]);
 
   const handleToggleKindFilter = useCallback((kind: AssetReference["kind"]) => {
     setAssetFilters((prev) => {
@@ -901,7 +902,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       trackAssetEvent("asset_filter_toggle", { type: "kind", value: kind, active: !exists });
       return { ...prev, kinds: nextKinds };
     });
-  }, [trackAssetEvent]);
+  }, [setAssetFilters, trackAssetEvent]);
 
   const handleClearFilters = useCallback(() => {
     resetAssetFilters();
@@ -935,12 +936,12 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   const handleAssetDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDroppingAsset(true);
-  }, []);
+  }, [setIsDroppingAsset]);
 
   const handleAssetDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDroppingAsset(false);
-  }, []);
+  }, [setIsDroppingAsset]);
 
   const handleAssetDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -949,7 +950,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     if (files.length) {
       void handleFilesUpload(files);
     }
-  }, [handleFilesUpload]);
+  }, [handleFilesUpload, setIsDroppingAsset]);
 
   const handleDismissUpload = useCallback((id: string) => {
     dismissPendingUpload(id);
@@ -970,12 +971,12 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
         setTagBusyMap((prev) => ({ ...prev, [asset.id]: false }));
       }
     },
-    [project, trackAssetEvent]
+    [project, setAssetCatalog, setAssetCatalogError, setTagBusyMap, setTagDrafts, trackAssetEvent]
   );
 
   const handleTagInputChange = useCallback((assetId: string, value: string) => {
     setTagDrafts((prev) => ({ ...prev, [assetId]: value }));
-  }, []);
+  }, [setTagDrafts]);
 
   const handleTagInputKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>, asset: AssetReference) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1077,6 +1078,22 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       setTranslationFormError(null);
     }
   }, [currentTranslationKey]);
+
+  const openTranslationBindingForm = useCallback(
+    (initialKey?: string) => {
+      if (!canConvertTextToTranslation) {
+        setTranslationFormError(primaryLocale ? "" : "Add a locale before binding text");
+        return false;
+      }
+      const trimmed = initialKey?.trim();
+      const nextKey = trimmed && trimmed.length ? trimmed : suggestTranslationKey(formState.text, translationKeySet);
+      setTranslationKeyDraft(nextKey);
+      setTranslationFormError(null);
+      setTranslationFormOpen(true);
+      return true;
+    },
+    [canConvertTextToTranslation, formState.text, primaryLocale, translationKeySet]
+  );
 
   useEffect(() => {
     if (!translationBindingRequest) {
@@ -1180,7 +1197,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       const parsed = JSON.parse(formState[field as keyof typeof formState] || "{}");
       updateWidget(selectedPath, { [field]: parsed } as Partial<WidgetNode>);
       setJsonErrors((prev) => ({ ...prev, [field]: "" }));
-    } catch (error) {
+    } catch {
       setJsonErrors((prev) => ({ ...prev, [field]: "Invalid JSON" }));
     }
   };
@@ -1229,22 +1246,6 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     }
   }, [setAssetFilters, trackAssetEvent]);
 
-  const openTranslationBindingForm = useCallback(
-    (initialKey?: string) => {
-      if (!canConvertTextToTranslation) {
-        setTranslationFormError(primaryLocale ? "" : "Add a locale before binding text");
-        return false;
-      }
-      const trimmed = initialKey?.trim();
-      const nextKey = trimmed && trimmed.length ? trimmed : suggestTranslationKey(formState.text, translationKeySet);
-      setTranslationKeyDraft(nextKey);
-      setTranslationFormError(null);
-      setTranslationFormOpen(true);
-      return true;
-    },
-    [canConvertTextToTranslation, formState.text, primaryLocale, translationKeySet]
-  );
-
   const handleStartTranslationBinding = () => {
     openTranslationBindingForm();
   };
@@ -1290,6 +1291,10 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   };
 
   const handleRevealTranslationManager = () => {
+    if (!currentTranslationKey) {
+      return;
+    }
+    requestTranslationFocus(currentTranslationKey, { origin: "inspector" });
     if (typeof window === "undefined") {
       return;
     }

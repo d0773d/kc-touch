@@ -45,6 +45,67 @@ body {
   padding: 16px;
 }
 
+.diff-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.diff-viewer__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-viewer__source {
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.04);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-viewer__targets {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.diff-viewer__target-pill {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.diff-viewer__footer {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.diff-viewer__footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.diff-viewer__count {
+  font-size: 0.85rem;
+  color: #475569;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -2520,6 +2581,16 @@ body {
   color: #475569;
 }
 
+.translation-manager__handoff-toast {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
 .translation-manager__issues {
   border: 1px solid rgba(251, 191, 36, 0.65);
   background: rgba(254, 249, 195, 0.5);
@@ -2592,6 +2663,35 @@ body {
   align-items: center;
 }
 
+.translation-manager__missing-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.missing-chip {
+  border: 1px solid rgba(234, 179, 8, 0.5);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  background: rgba(253, 230, 138, 0.3);
+  color: #92400e;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.missing-chip.is-active {
+  background: rgba(251, 191, 36, 0.25);
+  border-color: rgba(217, 119, 6, 0.7);
+  color: #7c2d12;
+}
+
+.missing-chip:focus-visible {
+  outline: 2px solid rgba(217, 119, 6, 0.6);
+  outline-offset: 1px;
+}
+
 .translation-manager__toggle {
   display: inline-flex;
   align-items: center;
@@ -2651,6 +2751,12 @@ body {
   gap: 8px;
   padding: 10px 12px;
   align-items: flex-start;
+}
+
+.translation-table__row.is-focused {
+  background: rgba(191, 219, 254, 0.3);
+  box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.35);
+  border-radius: 12px;
 }
 
 .translation-table__row:nth-child(even):not(.translation-table__row--head) {

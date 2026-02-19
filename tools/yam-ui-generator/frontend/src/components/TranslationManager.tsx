@@ -1,7 +1,9 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useProject } from "../context/ProjectContext";
 import { exportTranslations, importTranslations } from "../utils/api";
+import { getPrimaryLocale } from "../utils/translation";
 import type { ValidationIssue } from "../types/yamui";
+import Modal from "./Modal";
 
 interface LocaleStats {
   code: string;
@@ -14,10 +16,25 @@ interface TranslationManagerProps {
   issues: ValidationIssue[];
 }
 
+interface FillPreviewState {
+  key: string;
+  source: string;
+  targets: string[];
+}
+
 interface TranslationIssueDetail {
   issue: ValidationIssue;
   locale: string;
   key: string;
+}
+
+interface DiffViewerProps {
+  title: string;
+  sourceLabel: string;
+  sourceValue: string;
+  targets: string[];
+  onConfirm: () => void;
+  onDismiss: () => void;
 }
 
 const MAX_TRANSLATION_ISSUE_PREVIEW = 4;
@@ -51,6 +68,13 @@ const buildColumnsTemplate = (localeCount: number): string => {
 
 const normalizeKey = (value: string): string => value.trim();
 
+const escapeSelector = (value: string): string => {
+  if (typeof window !== "undefined" && typeof window.CSS !== "undefined" && typeof window.CSS.escape === "function") {
+    return window.CSS.escape(value);
+  }
+  return value.replace(/["\\]/g, "\\$&");
+};
+
 export default function TranslationManager({ issues }: TranslationManagerProps): JSX.Element | null {
   const {
     project,
@@ -62,17 +86,23 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
     updateTranslationValue,
     deleteTranslationKey,
     setTranslations,
+    translationFocusRequest,
+    clearTranslationFocusRequest,
   } = useProject();
-  const translations = project.translations ?? {};
+  const translations = useMemo(() => project.translations ?? {}, [project.translations]);
+  const primaryLocale = useMemo(() => getPrimaryLocale(project), [project]);
+  const primaryLocaleLabel = primaryLocale ? translations[primaryLocale]?.label ?? primaryLocale : null;
   const localeCodes = useMemo(() => Object.keys(translations).sort((a, b) => a.localeCompare(b)), [translations]);
   const [newLocaleCode, setNewLocaleCode] = useState("");
   const [newLocaleLabel, setNewLocaleLabel] = useState("");
   const [newKeyName, setNewKeyName] = useState("");
   const [filterQuery, setFilterQuery] = useState("");
   const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const [missingLocaleFilter, setMissingLocaleFilter] = useState<string | null>(null);
   const [localeLabelDrafts, setLocaleLabelDrafts] = useState<Record<string, string>>({});
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [activeDiff, setActiveDiff] = useState<FillPreviewState | null>(null);
   const [localeError, setLocaleError] = useState<string | null>(null);
   const [keyError, setKeyError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<"json" | "csv" | null>(null);
@@ -80,6 +110,9 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
   const [ioStatus, setIoStatus] = useState<string | null>(null);
   const [ioError, setIoError] = useState<string | null>(null);
   const [pendingImportFormat, setPendingImportFormat] = useState<"json" | "csv">("json");
+  const [handoffMessage, setHandoffMessage] = useState<string | null>(null);
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const translationIssues = useMemo(
     () => (issues ?? []).filter((issue) => issue.path.startsWith("/translations")),
@@ -148,11 +181,78 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
     });
   }, [allKeys, filterQuery, localeCodes, showMissingOnly, translations]);
 
+  const missingLocalesByKey = useMemo(() => {
+    const map = new Map<string, string[]>();
+    visibleKeys.forEach((key) => {
+      const missing = localeCodes.filter((code) => {
+        const value = translations[code]?.entries?.[key];
+        return !value || !value.trim().length;
+      });
+      map.set(key, missing);
+    });
+    return map;
+  }, [localeCodes, translations, visibleKeys]);
+
+  const filteredKeys = useMemo(() => {
+    if (!missingLocaleFilter) {
+      return visibleKeys;
+    }
+    return visibleKeys.filter((key) => (missingLocalesByKey.get(key) ?? []).includes(missingLocaleFilter));
+  }, [missingLocaleFilter, missingLocalesByKey, visibleKeys]);
+
+  const handleFillMissingFromPrimary = useCallback(
+    (key: string, previewOnly = false) => {
+      if (!primaryLocale) {
+        return;
+      }
+      const baseline = translations[primaryLocale]?.entries?.[key];
+      const source = baseline?.trim();
+      if (!source) {
+        return;
+      }
+      const pendingTargets = localeCodes.filter((code) => {
+        if (code === primaryLocale) {
+          return false;
+        }
+        const value = translations[code]?.entries?.[key];
+        return !value || !value.trim().length;
+      });
+      if (!pendingTargets.length) {
+        return;
+      }
+      if (previewOnly) {
+        setActiveDiff({ key, source, targets: pendingTargets });
+        return;
+      }
+      pendingTargets.forEach((code) => updateTranslationValue(code, key, source));
+      setIoError(null);
+      setIoStatus(`Filled ${pendingTargets.length} locale${pendingTargets.length === 1 ? "" : "s"} for ${key}`);
+      setActiveDiff(null);
+    },
+    [localeCodes, primaryLocale, setIoError, setIoStatus, translations, updateTranslationValue]
+  );
+
+  const missingLocaleChips = useMemo<Array<{ code: string; count: number }>>(() => {
+    if (!visibleKeys.length) {
+      return [];
+    }
+    const counts: Record<string, number> = {};
+    visibleKeys.forEach((key) => {
+      (missingLocalesByKey.get(key) ?? []).forEach((code) => {
+        counts[code] = (counts[code] ?? 0) + 1;
+      });
+    });
+    return Object.entries(counts)
+      .filter(([, count]) => count > 0)
+      .map(([code, count]) => ({ code, count }))
+      .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+  }, [missingLocalesByKey, visibleKeys]);
+
   const localeStats: LocaleStats[] = useMemo(() => {
     return localeCodes.map((code) => {
       const entry = translations[code];
       const entries = entry?.entries ?? {};
-      const missingVisible = visibleKeys.reduce((count, key) => {
+      const missingVisible = filteredKeys.reduce((count, key) => {
         const value = entries[key];
         return !value || !value.trim().length ? count + 1 : count;
       }, 0);
@@ -163,12 +263,71 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
         missingVisible,
       };
     });
-  }, [localeCodes, translations, visibleKeys]);
+  }, [filteredKeys, localeCodes, translations]);
 
   const totalMissingVisible = useMemo(
     () => localeStats.reduce((sum, stats) => sum + stats.missingVisible, 0),
     [localeStats]
   );
+
+  useEffect(() => {
+    if (!translationFocusRequest) {
+      return;
+    }
+    const { key, origin } = translationFocusRequest;
+    if (!allKeys.includes(key)) {
+      setIoError(`Translation key "${key}" not found`);
+      setHandoffMessage(null);
+      clearTranslationFocusRequest();
+      return;
+    }
+    setFilterQuery("");
+    setShowMissingOnly(false);
+    setMissingLocaleFilter(null);
+    setPendingFocusKey(key);
+    setIoError(null);
+    setHandoffMessage(origin === "inspector" ? `Jumped to ${key} from Inspector` : `Jumped to ${key}`);
+    clearTranslationFocusRequest();
+  }, [allKeys, clearTranslationFocusRequest, translationFocusRequest]);
+
+  useEffect(() => {
+    if (!handoffMessage) {
+      return;
+    }
+    const timer = window.setTimeout(() => setHandoffMessage(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [handoffMessage]);
+
+  useEffect(() => {
+    if (!pendingFocusKey || !filteredKeys.includes(pendingFocusKey)) {
+      return;
+    }
+    const scrollToRow = () => {
+      if (typeof document !== "undefined") {
+        const selector = `[data-translation-key="${escapeSelector(pendingFocusKey)}"]`;
+        const node = document.querySelector(selector);
+        if (node instanceof HTMLElement) {
+          node.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+      setFocusedKey(pendingFocusKey);
+      setPendingFocusKey(null);
+    };
+    if (typeof window === "undefined") {
+      scrollToRow();
+      return;
+    }
+    const frame = window.requestAnimationFrame(scrollToRow);
+    return () => window.cancelAnimationFrame(frame);
+  }, [filteredKeys, pendingFocusKey]);
+
+  useEffect(() => {
+    if (!focusedKey) {
+      return;
+    }
+    const timer = window.setTimeout(() => setFocusedKey(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [focusedKey]);
 
   if (localeCodes.length === 0) {
     return null;
@@ -379,6 +538,12 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
         </div>
       </div>
 
+        {handoffMessage && (
+          <p className="translation-manager__handoff-toast" aria-live="polite">
+            {handoffMessage}
+          </p>
+        )}
+
         {translationIssueDetails.length > 0 && (
           <div className="translation-manager__issues">
             <div className="translation-manager__issues-header">
@@ -512,19 +677,39 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
           />
           Show missing only
         </label>
-        {(filterQuery || showMissingOnly) && (
+        {(filterQuery || showMissingOnly || missingLocaleFilter) && (
           <button
             type="button"
             className="button tertiary"
             onClick={() => {
               setFilterQuery("");
               setShowMissingOnly(false);
+              setMissingLocaleFilter(null);
             }}
           >
             Clear filters
           </button>
         )}
       </div>
+      {missingLocaleChips.length > 0 && (
+        <div className="translation-manager__missing-chips">
+          {missingLocaleChips.map(({ code, count }) => (
+            <button
+              key={code}
+              type="button"
+              className={`missing-chip ${missingLocaleFilter === code ? "is-active" : ""}`}
+              onClick={() => setMissingLocaleFilter((current) => (current === code ? null : code))}
+            >
+              {code} · {count}
+            </button>
+          ))}
+          {missingLocaleFilter && (
+            <button type="button" className="button tertiary" onClick={() => setMissingLocaleFilter(null)}>
+              Clear locale filter
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="translation-manager__locales">
         {localeStats.map((stats) => {
@@ -575,11 +760,16 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
           ))}
           <div className="translation-table__cell translation-table__cell--actions">Actions</div>
         </div>
-        {visibleKeys.length === 0 && (
+        {filteredKeys.length === 0 && (
           <div className="translation-table__empty">No keys match the current filters.</div>
         )}
-        {visibleKeys.map((key) => (
-          <div key={key} className="translation-table__row" style={tableColumnsStyle}>
+        {filteredKeys.map((key) => (
+          <div
+            key={key}
+            data-translation-key={key}
+            className={`translation-table__row${focusedKey === key ? " is-focused" : ""}`}
+            style={tableColumnsStyle}
+          >
             <div className="translation-table__cell translation-table__cell--key">
               <input
                 className="input-field translation-table__key-input"
@@ -621,6 +811,37 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
               );
             })}
             <div className="translation-table__cell translation-table__cell--actions">
+              {(() => {
+                const missingLocales = missingLocalesByKey.get(key) ?? [];
+                const missingTitle = missingLocales.length ? `Missing locales: ${missingLocales.join(", ")}` : "All locales populated";
+                const displayList = missingLocales.slice(0, 3).join(", ");
+                const overflowCount = Math.max(0, missingLocales.length - 3);
+                const primaryValue = primaryLocale ? translations[primaryLocale]?.entries?.[key]?.trim() : "";
+                const canFill = Boolean(
+                  primaryLocale &&
+                  primaryValue &&
+                  missingLocales.some((code) => code !== primaryLocale)
+                );
+                return (
+                  <div className="translation-table__missing-tools" title={missingTitle}>
+                    <span className={`translation-table__missing-pill ${missingLocales.length ? "is-missing" : "is-complete"}`}>
+                      {missingLocales.length === 0
+                        ? "Complete"
+                        : overflowCount > 0
+                          ? `${displayList} +${overflowCount}`
+                          : displayList || missingLocales[0]}
+                    </span>
+                    <button
+                      type="button"
+                      className="button tertiary"
+                      onClick={() => handleFillMissingFromPrimary(key, true)}
+                      disabled={!canFill}
+                    >
+                      {primaryLocaleLabel ? `Preview fill from ${primaryLocaleLabel}` : "Preview fill"}
+                    </button>
+                  </div>
+                );
+              })()}
               <button type="button" className="button tertiary" onClick={() => deleteTranslationKey(key)}>
                 Delete
               </button>
@@ -628,6 +849,60 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
           </div>
         ))}
       </div>
+      {activeDiff && (
+        <DiffViewer
+          title={`Fill ${activeDiff.key}`}
+          sourceLabel={primaryLocaleLabel ?? primaryLocale ?? "primary"}
+          sourceValue={activeDiff.source}
+          targets={activeDiff.targets}
+          onConfirm={() => handleFillMissingFromPrimary(activeDiff.key)}
+          onDismiss={() => setActiveDiff(null)}
+        />
+      )}
     </section>
+  );
+}
+
+function DiffViewer({ title, sourceLabel, sourceValue, targets, onConfirm, onDismiss }: DiffViewerProps) {
+  const sortedTargets = useMemo(() => targets.slice().sort((a, b) => a.localeCompare(b)), [targets]);
+  return (
+    <Modal
+      title={title}
+      onClose={onDismiss}
+      width={560}
+      footer={
+        <div className="diff-viewer__footer">
+          <span className="diff-viewer__count">{sortedTargets.length} locale{sortedTargets.length === 1 ? "" : "s"} will be updated</span>
+          <div className="diff-viewer__footer-actions">
+            <button type="button" className="button tertiary" onClick={onDismiss}>
+              Cancel
+            </button>
+            <button type="button" className="button secondary" onClick={onConfirm}>
+              Fill missing locales
+            </button>
+          </div>
+        </div>
+      }
+    >
+      <div className="diff-viewer">
+        <section className="diff-viewer__section">
+          <p className="field-label">{sourceLabel}</p>
+          <pre className="diff-viewer__source" aria-label="Primary locale value">
+            {sourceValue}
+          </pre>
+        </section>
+        <section className="diff-viewer__section">
+          <p className="field-label">Locales missing this key</p>
+          <ul className="diff-viewer__targets">
+            {sortedTargets.map((code) => (
+              <li key={code} className="diff-viewer__target-pill">
+                {code}
+              </li>
+            ))}
+          </ul>
+          <p className="field-hint">Existing values will remain untouched; only empty translations are filled.</p>
+        </section>
+      </div>
+    </Modal>
   );
 }

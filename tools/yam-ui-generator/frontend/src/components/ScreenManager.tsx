@@ -81,7 +81,7 @@ export default function ScreenManager(): JSX.Element {
       const parsed = metadataText.trim() ? JSON.parse(metadataText) : {};
       updateScreen(currentScreen.name, { metadata: parsed });
       setMetadataError(null);
-    } catch (error) {
+    } catch {
       setMetadataError("Metadata must be valid JSON");
     }
   };

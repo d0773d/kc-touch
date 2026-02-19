@@ -236,7 +236,12 @@ export default function StyleManager(): JSX.Element {
   const selectedStyle = styleEditorSelection;
   const selectedToken = selectedStyle ? project.styles[selectedStyle] : undefined;
   const hasAnyStyles = Object.keys(project.styles).length > 0;
-  const selectedStyleUsage = selectedStyle && styleUsageMap[selectedStyle] ? styleUsageMap[selectedStyle]! : [];
+  const selectedStyleUsage = useMemo<StyleUsage[]>(() => {
+    if (!selectedStyle) {
+      return [];
+    }
+    return styleUsageMap[selectedStyle] ?? [];
+  }, [selectedStyle, styleUsageMap]);
   const selectedStyleLintIssues = selectedStyle && styleLintMap[selectedStyle] ? styleLintMap[selectedStyle]! : [];
   const availableUsageWidgetTypes = useMemo(() => {
     const types = new Set<string>();
@@ -463,7 +468,10 @@ export default function StyleManager(): JSX.Element {
     const totalIssues = entries.reduce((sum, entry) => sum + entry.issues.length, 0);
     return { errors, warnings, totalIssues };
   }, [project.styles, styleLintMap]);
-  const lintDrawerHasIssues = lintDrawerGroups.totalIssues > 0;
+  const lintDrawerErrorStyles = lintDrawerGroups.errors.length;
+  const lintDrawerWarningStyles = lintDrawerGroups.warnings.length;
+  const lintDrawerIssueTotal = lintDrawerGroups.totalIssues;
+  const lintDrawerHasIssues = lintDrawerIssueTotal > 0;
   const hasUnsavedChanges = useMemo(() => {
     const baseline = selectedToken ? tokenToForm(selectedToken) : defaultFormState();
     return (
@@ -684,30 +692,44 @@ export default function StyleManager(): JSX.Element {
     };
   }, [previewToken]);
 
-  const updateForm = (field: keyof FormState, value: string) => {
-    setFormState((prev) => ({ ...prev, [field]: value }));
-    setFormErrors((prev) => {
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-    if (field === "valueText") {
-      if (valueCopyState !== "idle") {
-        setValueCopyState("idle");
+  const updateForm = useCallback(
+    (field: keyof FormState, value: string) => {
+      setFormState((prev) => ({ ...prev, [field]: value }));
+      setFormErrors((prev) => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+      if (field === "valueText") {
+        if (valueCopyState !== "idle") {
+          setValueCopyState("idle");
+        }
+        if (valueFormatState !== "idle") {
+          setValueFormatState("idle");
+        }
       }
-      if (valueFormatState !== "idle") {
-        setValueFormatState("idle");
+      if (field === "metadataText") {
+        if (metadataCopyState !== "idle") {
+          setMetadataCopyState("idle");
+        }
+        if (metadataFormatState !== "idle") {
+          setMetadataFormatState("idle");
+        }
       }
-    }
-    if (field === "metadataText") {
-      if (metadataCopyState !== "idle") {
-        setMetadataCopyState("idle");
-      }
-      if (metadataFormatState !== "idle") {
-        setMetadataFormatState("idle");
-      }
-    }
-  };
+    },
+    [
+      metadataCopyState,
+      metadataFormatState,
+      setFormErrors,
+      setFormState,
+      setMetadataCopyState,
+      setMetadataFormatState,
+      setValueCopyState,
+      setValueFormatState,
+      valueCopyState,
+      valueFormatState,
+    ]
+  );
 
   const buildTokenFromForm = (): StyleTokenModel | null => {
     const trimmedName = formState.name.trim();
@@ -723,14 +745,14 @@ export default function StyleManager(): JSX.Element {
     let parsedValue: Record<string, unknown>;
     try {
       parsedValue = formState.valueText.trim() ? JSON.parse(formState.valueText) : {};
-    } catch (error) {
+    } catch {
       setFormErrors((prev) => ({ ...prev, valueText: "Value JSON is invalid" }));
       return null;
     }
     let parsedMetadata: Record<string, unknown>;
     try {
       parsedMetadata = formState.metadataText.trim() ? JSON.parse(formState.metadataText) : {};
-    } catch (error) {
+    } catch {
       setFormErrors((prev) => ({ ...prev, metadataText: "Metadata JSON is invalid" }));
       return null;
     }
@@ -920,14 +942,31 @@ export default function StyleManager(): JSX.Element {
     setUsageListExpanded(false);
   };
 
-  const handleToggleLintDrawer = () => {
-    setIsLintDrawerOpen((prev) => !prev);
-  };
+  const handleToggleLintDrawer = useCallback(() => {
+    setIsLintDrawerOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        emitTelemetry("styles", "style_lint_drawer_opened", {
+          totalIssues: lintDrawerIssueTotal,
+          errorStyles: lintDrawerErrorStyles,
+          warningStyles: lintDrawerWarningStyles,
+        });
+      }
+      return next;
+    });
+  }, [lintDrawerErrorStyles, lintDrawerIssueTotal, lintDrawerWarningStyles]);
 
-  const handleNavigateFromLintDrawer = (styleName: string) => {
-    setStyleEditorSelection(styleName);
-    setIsLintDrawerOpen(false);
-  };
+  const handleNavigateFromLintDrawer = useCallback(
+    (styleName: string) => {
+      setStyleEditorSelection(styleName);
+      setIsLintDrawerOpen(false);
+      emitTelemetry("styles", "style_lint_jump", {
+        style: styleName,
+        issueCount: styleLintMap[styleName]?.length ?? 0,
+      });
+    },
+    [setStyleEditorSelection, styleLintMap]
+  );
 
   const copyJsonPayload = async (payload: string): Promise<void> => {
     if (navigator?.clipboard?.writeText) {

@@ -39,6 +39,11 @@ type TranslationBindingRequest = {
   suggestedKey?: string;
 };
 
+type TranslationFocusRequest = {
+  key: string;
+  origin?: string;
+};
+
 interface ProjectContextValue {
   project: ProjectModel;
   setProject: (next: ProjectModel) => void;
@@ -84,6 +89,9 @@ interface ProjectContextValue {
   translationBindingRequest: TranslationBindingRequest | null;
   requestTranslationBinding: (path: WidgetPath, options?: { suggestedKey?: string }) => void;
   clearTranslationBindingRequest: () => void;
+  translationFocusRequest: TranslationFocusRequest | null;
+  requestTranslationFocus: (key: string, options?: { origin?: string }) => void;
+  clearTranslationFocusRequest: () => void;
   setTranslations: (next: TranslationStore) => void;
   addTranslationLocale: (locale: string, label?: string) => void;
   removeTranslationLocale: (locale: string) => void;
@@ -332,6 +340,7 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
   const [assetTagDrafts, setAssetTagDrafts] = useState<AssetTagDraftMap>({});
   const [assetTagBusyMap, setAssetTagBusyMap] = useState<AssetTagBusyMap>({});
   const [translationBindingRequest, setTranslationBindingRequest] = useState<TranslationBindingRequest | null>(null);
+  const [translationFocusRequest, setTranslationFocusRequest] = useState<TranslationFocusRequest | null>(null);
 
   useEffect(() => {
     setStyleEditorSelection((current) => {
@@ -398,6 +407,18 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
 
   const clearTranslationBindingRequest = useCallback(() => {
     setTranslationBindingRequest(null);
+  }, []);
+
+  const requestTranslationFocus = useCallback((key: string, options?: { origin?: string }) => {
+    const trimmed = key.trim();
+    if (!trimmed) {
+      return;
+    }
+    setTranslationFocusRequest({ key: trimmed, origin: options?.origin });
+  }, []);
+
+  const clearTranslationFocusRequest = useCallback(() => {
+    setTranslationFocusRequest(null);
   }, []);
 
   const mutateWidgets = useCallback(
@@ -784,6 +805,9 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       translationBindingRequest,
       requestTranslationBinding,
       clearTranslationBindingRequest,
+      translationFocusRequest,
+      requestTranslationFocus,
+      clearTranslationFocusRequest,
       setTranslations,
       addTranslationLocale,
       removeTranslationLocale,
@@ -798,7 +822,6 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       setProject,
       editorTarget,
       selectedPath,
-      selectWidget,
       addWidget,
       updateWidget,
       removeWidget,
@@ -832,6 +855,9 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       translationBindingRequest,
       requestTranslationBinding,
       clearTranslationBindingRequest,
+      translationFocusRequest,
+      requestTranslationFocus,
+      clearTranslationFocusRequest,
       setTranslations,
       addTranslationLocale,
       removeTranslationLocale,

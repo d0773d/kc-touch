@@ -127,15 +127,8 @@ describe("StyleManager guardrails", () => {
     });
     mockContext = setupContext(project, "primary");
 
-    const view = render(<StyleManager />);
+    render(<StyleManager />);
     await flushAsync();
-    const switchStyle = async (styleName: string) => {
-      await act(async () => {
-        mockContext.styleEditorSelection = styleName;
-        view.rerender(<StyleManager />);
-      });
-      await flushAsync();
-    };
 
     const deleteButton = screen.getByRole("button", { name: "Delete" });
     expect(deleteButton).toBeDisabled();
@@ -155,15 +148,8 @@ describe("StyleManager guardrails", () => {
       saveStyleToken: saveSpy,
     };
 
-    const view = render(<StyleManager />);
+    render(<StyleManager />);
     await flushAsync();
-    const switchStyle = async (styleName: string) => {
-      await act(async () => {
-        mockContext.styleEditorSelection = styleName;
-        view.rerender(<StyleManager />);
-      });
-      await flushAsync();
-    };
     const user = userEvent.setup();
     const nameInput = screen.getByLabelText("Style Name");
     await user.clear(nameInput);
@@ -192,15 +178,8 @@ describe("StyleManager guardrails", () => {
     });
     mockContext = setupContext(project, "used");
 
-    const view = render(<StyleManager />);
+    render(<StyleManager />);
     await flushAsync();
-    const switchStyle = async (styleName: string) => {
-      await act(async () => {
-        mockContext.styleEditorSelection = styleName;
-        view.rerender(<StyleManager />);
-      });
-      await flushAsync();
-    };
 
     expect(screen.getByText("1 use")).toBeInTheDocument();
     expect(screen.getByText("Unused")).toBeInTheDocument();
@@ -349,6 +328,67 @@ describe("StyleManager guardrails", () => {
     fireEvent.keyDown(window, { key: "ArrowUp", altKey: true });
     await flushAsync();
     expect(screen.getAllByTestId(/style-usage-item-/)[0]!.classList.contains("is-active")).toBe(true);
+  });
+
+  it("emits telemetry when cycling usages with keyboard shortcuts", async () => {
+    const project = createProject({
+      styles: {
+        primary: createStyle("primary"),
+      },
+      widgets: [
+        {
+          type: "label",
+          id: "hero",
+          style: "primary",
+          widgets: [],
+        },
+        {
+          type: "box",
+          id: "footer",
+          style: "primary",
+          widgets: [],
+        },
+      ],
+    });
+    mockContext = setupContext(project, "primary");
+
+    render(<StyleManager />);
+    await flushAsync();
+
+    emitTelemetryMock.mockClear();
+
+    fireEvent.keyDown(window, { key: "ArrowDown", altKey: true });
+    await flushAsync();
+    expect(emitTelemetryMock).toHaveBeenCalledWith(
+      "styles",
+      "style_usage_focus",
+      expect.objectContaining({
+        origin: "cycle",
+        usageIndex: 0,
+      })
+    );
+
+    fireEvent.keyDown(window, { key: "ArrowDown", altKey: true });
+    await flushAsync();
+    expect(emitTelemetryMock).toHaveBeenLastCalledWith(
+      "styles",
+      "style_usage_focus",
+      expect.objectContaining({
+        origin: "cycle",
+        usageIndex: 1,
+      })
+    );
+
+    fireEvent.keyDown(window, { key: "ArrowUp", altKey: true });
+    await flushAsync();
+    expect(emitTelemetryMock).toHaveBeenLastCalledWith(
+      "styles",
+      "style_usage_focus",
+      expect.objectContaining({
+        origin: "cycle_prev",
+        usageIndex: 0,
+      })
+    );
   });
 
   it("filters usage entries by owner and widget type", async () => {
@@ -731,6 +771,7 @@ describe("StyleManager guardrails", () => {
 
     render(<StyleManager />);
     await flushAsync();
+    emitTelemetryMock.mockClear();
 
     const lintSummaryButton = screen.getByTestId("style-lint-summary");
     const user = userEvent.setup();
@@ -741,6 +782,15 @@ describe("StyleManager guardrails", () => {
     expect(drawer).toBeInTheDocument();
     expect(within(drawer).getByText(/Errors/i)).toBeInTheDocument();
     expect(within(drawer).getByText(/Warnings/i)).toBeInTheDocument();
+    expect(emitTelemetryMock).toHaveBeenCalledWith(
+      "styles",
+      "style_lint_drawer_opened",
+      expect.objectContaining({
+        totalIssues: 2,
+        errorStyles: 1,
+        warningStyles: 1,
+      })
+    );
 
     const brokenButton = within(drawer).getByRole("button", { name: /broken/i });
     await user.click(brokenButton);
@@ -748,6 +798,14 @@ describe("StyleManager guardrails", () => {
 
     expect(selectSpy).toHaveBeenCalledWith("broken");
     expect(screen.queryByRole("dialog", { name: "Lint breakdown" })).not.toBeInTheDocument();
+    expect(emitTelemetryMock).toHaveBeenLastCalledWith(
+      "styles",
+      "style_lint_jump",
+      expect.objectContaining({
+        style: "broken",
+        issueCount: 1,
+      })
+    );
   });
 
   it("copies the value JSON to the clipboard", async () => {
@@ -767,7 +825,7 @@ describe("StyleManager guardrails", () => {
     await flushAsync();
 
     const copyButton = screen.getByRole("button", { name: "Copy Value JSON" });
-    const valueTextarea = screen.getByLabelText("Value JSON", { selector: "textarea" });
+    screen.getByLabelText("Value JSON", { selector: "textarea" });
     const user = userEvent.setup();
     await user.click(copyButton);
     await flushAsync();

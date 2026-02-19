@@ -29,7 +29,7 @@ export function suggestTranslationKey(source: string, existing?: Iterable<string
     .replace(/[^a-z0-9]+/g, ".")
     .replace(/^(?:\.)+|(?:\.)+$/g, "")
     .replace(/\.\.+/g, ".");
-  let base = normalized || DEFAULT_TRANSLATION_KEY;
+  const base = normalized || DEFAULT_TRANSLATION_KEY;
   if (!set.has(base)) {
     return base;
   }
