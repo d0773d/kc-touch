@@ -133,6 +133,33 @@ describe("TranslationManager guardrails", () => {
     await waitFor(() => expect(screen.queryByText("Fill greeting")).not.toBeInTheDocument());
   });
 
+  it("lets users choose which locales to fill", async () => {
+    const translations: TranslationStore = {
+      en: createLocale("English", { greeting: "Hello!" }),
+      es: createLocale("Spanish", { greeting: "" }),
+      fr: createLocale("French", { greeting: "" }),
+    };
+    const updateSpy = vi.fn();
+    mockContext = createMockContext(translations, { updateTranslationValue: updateSpy });
+
+    render(<TranslationManager issues={[]} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /Preview fill from English/i }));
+    expect(screen.getAllByText("Empty (will copy primary)")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Unselect all" }));
+    const confirm = screen.getByRole("button", { name: "Fill missing locales" });
+    expect(confirm).toBeDisabled();
+
+    await user.click(screen.getByLabelText("es locale toggle"));
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).toHaveBeenCalledWith("es", "greeting", "Hello!");
+  });
+
   it("handles translation focus handoffs from the inspector", async () => {
     const translations: TranslationStore = {
       en: createLocale("English", { greeting: "Hello", farewell: "Later" }),
