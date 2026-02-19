@@ -1,6 +1,8 @@
-import { ChangeEvent, useEffect, useMemo, useRef } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useProject } from "../context/ProjectContext";
 import type { AssetReference } from "../types/yamui";
+import AssetUploadQueue from "./AssetUploadQueue";
+import { useAssetUploads } from "../hooks/useAssetUploads";
 
 const KIND_LABELS: Record<AssetReference["kind"], string> = {
   image: "Image",
@@ -48,7 +50,14 @@ export default function AssetManager(): JSX.Element {
     assetFilters,
     setAssetFilters,
     resetAssetFilters,
+    pendingAssetUploads,
+    selectedPath,
+    updateWidget,
   } = useProject();
+  const assetFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDroppingAsset, setIsDroppingAsset] = useState(false);
+  const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
+  const { uploadFiles, dismissPendingUpload } = useAssetUploads();
 
   const initialRequestSent = useRef(false);
 
@@ -143,6 +152,65 @@ export default function AssetManager(): JSX.Element {
     [visibleAssets]
   );
 
+  const handleFilePickerClick = useCallback(() => {
+    assetFileInputRef.current?.click();
+  }, []);
+
+  const handleFileInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files ? Array.from(event.target.files) : [];
+      if (files.length) {
+        void uploadFiles(files);
+      }
+      event.target.value = "";
+    },
+    [uploadFiles]
+  );
+
+  const handleAssetDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDroppingAsset(true);
+  }, []);
+
+  const handleAssetDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDroppingAsset(false);
+  }, []);
+
+  const handleAssetDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      setIsDroppingAsset(false);
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length) {
+        void uploadFiles(files);
+      }
+    },
+    [uploadFiles]
+  );
+
+  const handleApplyToSelection = useCallback(
+    (asset: AssetReference) => {
+      if (!selectedPath) {
+        return;
+      }
+      updateWidget(selectedPath, { src: asset.path });
+    },
+    [selectedPath, updateWidget]
+  );
+
+  const handleCopyAssetPath = useCallback(async (assetId: string, path: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopiedAssetId(assetId);
+      window.setTimeout(() => {
+        setCopiedAssetId((current) => (current === assetId ? null : current));
+      }, 1200);
+    } catch (error) {
+      console.warn("Unable to copy asset path", error);
+    }
+  }, []);
+
   return (
     <section className="asset-manager" id="asset-manager">
       <div className="asset-manager__header">
@@ -186,6 +254,34 @@ export default function AssetManager(): JSX.Element {
         </span>
       </div>
       {assetCatalogError && <p className="field-hint error-text">{assetCatalogError}</p>}
+      <div
+        className={`asset-upload-dropzone ${isDroppingAsset ? "is-dragging" : ""}`}
+        onDragOver={handleAssetDragOver}
+        onDragLeave={handleAssetDragLeave}
+        onDrop={handleAssetDrop}
+      >
+        <div>
+          <strong>Drop files here</strong>
+          <p>
+            or
+            {" "}
+            <button type="button" className="button link-button" onClick={handleFilePickerClick}>
+              browse your computer
+            </button>
+            {" "}
+            to upload.
+          </p>
+        </div>
+        <span className="field-hint">Assets live alongside your project and sync into the catalog automatically.</span>
+        <input
+          ref={assetFileInputRef}
+          type="file"
+          multiple
+          className="asset-upload-input"
+          onChange={handleFileInputChange}
+        />
+      </div>
+      <AssetUploadQueue uploads={pendingAssetUploads} onDismiss={dismissPendingUpload} />
       <div className="asset-manager__chips" aria-label="Tag filters">
         {tagStats.length === 0 ? (
           <span className="field-hint">No tags yet.</span>
@@ -254,6 +350,23 @@ export default function AssetManager(): JSX.Element {
                 ) : (
                   <span className="asset-card__tags">No tags</span>
                 )}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="button tertiary"
+                  onClick={() => handleCopyAssetPath(asset.id, asset.path)}
+                >
+                  {copiedAssetId === asset.id ? "Copied" : "Copy path"}
+                </button>
+                <button
+                  type="button"
+                  className="button tertiary"
+                  onClick={() => handleApplyToSelection(asset)}
+                  disabled={!selectedPath}
+                >
+                  {selectedPath ? "Apply to widget" : "Select a widget"}
+                </button>
               </div>
             </article>
           ))

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useProject } from "../context/ProjectContext";
 import { AssetReference, ProjectModel, StyleCategory, StylePreview, StyleTokenModel, ValidationIssue, WidgetNode, WidgetPath } from "../types/yamui";
-import { previewStyle, updateAssetTags, uploadAsset } from "../utils/api";
+import { previewStyle, updateAssetTags } from "../utils/api";
+import { buildTranslationExpression, extractTranslationKey, getPrimaryLocale, suggestTranslationKey } from "../utils/translation";
 import { emitTelemetry } from "../utils/telemetry";
 import StylePreviewCard from "./StylePreviewCard";
+import AssetUploadQueue from "./AssetUploadQueue";
+import { useAssetUploads } from "../hooks/useAssetUploads";
 
 function findWidget(root: WidgetNode[], path: WidgetPath): WidgetNode | undefined {
   let current: WidgetNode | undefined;
@@ -57,13 +60,6 @@ const EVENT_TEMPLATES = [
 const RECENT_STYLES_KEY = "yamui_recent_styles_v1";
 const STYLE_CATEGORY_OPTIONS: Array<StyleCategory | "all"> = ["all", "color", "surface", "text", "spacing", "shadow"];
 
-type PendingUpload = {
-  id: string;
-  fileName: string;
-  status: "uploading" | "error";
-  error?: string;
-};
-
 const ASSET_KIND_OPTIONS: AssetReference["kind"][] = ["image", "video", "audio", "font", "binary", "unknown"];
 
 type AssetFilterGroup = "tags" | "targets" | "kinds";
@@ -92,11 +88,154 @@ const normalizeTagList = (value: string): string[] => {
     .filter(Boolean);
 };
 
-const createClientId = (): string => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+type EventsMap = Record<string, string[]>;
+type BindingsMap = Record<string, string>;
+type PropsMap = Record<string, unknown>;
+type AccessibilityMap = Record<string, string>;
+
+const parseEventsJson = (raw: string): { value: EventsMap; valid: boolean } => {
+  if (!raw.trim()) {
+    return { value: {}, valid: true };
   }
-  return Math.random().toString(36).slice(2, 10);
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { value: {}, valid: false };
+    }
+    const map: EventsMap = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([key, handlers]) => {
+      const bucket = Array.isArray(handlers)
+        ? handlers
+        : typeof handlers === "string"
+          ? [handlers]
+          : [];
+      const normalized = bucket.map((entry) => (typeof entry === "string" ? entry.trim() : ""));
+      if (!normalized.length) {
+        normalized.push("");
+      }
+      map[key] = normalized;
+    });
+    return { value: map, valid: true };
+  } catch {
+    return { value: {}, valid: false };
+  }
+};
+
+const normalizeEventsMap = (input: EventsMap): EventsMap => {
+  const next: EventsMap = {};
+  Object.entries(input).forEach(([key, handlers]) => {
+    const name = key.trim();
+    if (!name) {
+      return;
+    }
+    const list = Array.isArray(handlers) ? handlers : [];
+    const cleaned = list.map((entry) => (typeof entry === "string" ? entry : ""));
+    if (!cleaned.length) {
+      cleaned.push("");
+    }
+    next[name] = cleaned;
+  });
+  return next;
+};
+
+const parseBindingsJson = (raw: string): { value: BindingsMap; valid: boolean } => {
+  if (!raw.trim()) {
+    return { value: {}, valid: true };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { value: {}, valid: false };
+    }
+    const map: BindingsMap = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+      map[key] = typeof value === "string" ? value : JSON.stringify(value);
+    });
+    return { value: map, valid: true };
+  } catch {
+    return { value: {}, valid: false };
+  }
+};
+
+const normalizeBindingsMap = (input: BindingsMap): BindingsMap => {
+  const next: BindingsMap = {};
+  Object.entries(input).forEach(([key, value]) => {
+    const name = key.trim();
+    if (!name) {
+      return;
+    }
+    next[name] = value;
+  });
+  return next;
+};
+
+const parsePropsJson = (raw: string): { value: PropsMap; valid: boolean } => {
+  if (!raw.trim()) {
+    return { value: {}, valid: true };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { value: {}, valid: false };
+    }
+    return { value: parsed as PropsMap, valid: true };
+  } catch {
+    return { value: {}, valid: false };
+  }
+};
+
+const normalizePropsMap = (input: PropsMap): PropsMap => {
+  const next: PropsMap = {};
+  Object.entries(input).forEach(([key, value]) => {
+    const name = key.trim();
+    if (!name) {
+      return;
+    }
+    next[name] = value;
+  });
+  return next;
+};
+
+const parseAccessibilityJson = (raw: string): { value: AccessibilityMap; valid: boolean } => {
+  if (!raw.trim()) {
+    return { value: {}, valid: true };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { value: {}, valid: false };
+    }
+    const map: AccessibilityMap = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+      map[key] = typeof value === "string" ? value : JSON.stringify(value);
+    });
+    return { value: map, valid: true };
+  } catch {
+    return { value: {}, valid: false };
+  }
+};
+
+const normalizeAccessibilityMap = (input: AccessibilityMap): AccessibilityMap => {
+  const next: AccessibilityMap = {};
+  Object.entries(input).forEach(([key, value]) => {
+    const name = key.trim();
+    if (!name) {
+      return;
+    }
+    next[name] = value;
+  });
+  return next;
+};
+
+const generateUniqueKey = (base: string, existing: Set<string>): string => {
+  if (!existing.has(base)) {
+    return base;
+  }
+  let suffix = 2;
+  while (existing.has(`${base}_${suffix}`)) {
+    suffix += 1;
+  }
+  return `${base}_${suffix}`;
 };
 
 function collectAssetSuggestions(project: ProjectModel): string[] {
@@ -122,6 +261,16 @@ function getStyleColor(token: StyleTokenModel, key: "backgroundColor" | "color",
   return typeof value === "string" ? value : fallback;
 }
 
+const widgetPathsEqual = (a: WidgetPath | null | undefined, b: WidgetPath | null | undefined): boolean => {
+  if (!a || !b) {
+    return false;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => b[index] === value);
+};
+
 interface PropertyInspectorProps {
   issues: ValidationIssue[];
   style?: CSSProperties;
@@ -133,6 +282,10 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     editorTarget,
     selectedPath,
     updateWidget,
+    addTranslationKey,
+    updateTranslationValue,
+    translationBindingRequest,
+    clearTranslationBindingRequest,
     setStyleEditorSelection,
     assetCatalog,
     assetCatalogBusy,
@@ -144,6 +297,11 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     assetFilters,
     setAssetFilters,
     resetAssetFilters,
+    pendingAssetUploads: pendingUploads,
+    assetTagDrafts: tagDrafts,
+    setAssetTagDrafts: setTagDrafts,
+    assetTagBusyMap: tagBusyMap,
+    setAssetTagBusyMap: setTagBusyMap,
   } = useProject();
   const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
   const [formState, setFormState] = useState({
@@ -173,13 +331,28 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   const [stylePreviewBusy, setStylePreviewBusy] = useState(false);
   const [assetModalOpen, setAssetModalOpen] = useState(false);
   const [shortcutMessage, setShortcutMessage] = useState<string | null>(null);
-  const [assetSearch, setAssetSearch] = useState("");
-  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [isDroppingAsset, setIsDroppingAsset] = useState(false);
-  const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({});
-  const [tagBusyMap, setTagBusyMap] = useState<Record<string, boolean>>({});
+  const [translationFormOpen, setTranslationFormOpen] = useState(false);
+  const [translationKeyDraft, setTranslationKeyDraft] = useState("");
+  const [translationFormError, setTranslationFormError] = useState<string | null>(null);
+  const structuredEvents = useMemo(() => parseEventsJson(formState.events), [formState.events]);
+  const structuredBindings = useMemo(() => parseBindingsJson(formState.bindings), [formState.bindings]);
+  const structuredProps = useMemo(() => parsePropsJson(formState.props), [formState.props]);
+  const structuredAccessibility = useMemo(() => parseAccessibilityJson(formState.accessibility), [formState.accessibility]);
+  const translationKeySet = useMemo(() => {
+    const set = new Set<string>();
+    Object.values(project.translations ?? {}).forEach((locale) => {
+      Object.keys(locale?.entries ?? {}).forEach((key) => set.add(key));
+    });
+    return set;
+  }, [project.translations]);
+  const primaryLocale = useMemo(() => getPrimaryLocale(project), [project]);
+  const currentTranslationKey = useMemo(() => extractTranslationKey(formState.text), [formState.text]);
+  const canConvertTextToTranslation = Boolean(formState.text.trim().length && !currentTranslationKey);
 
   const assetFileInputRef = useRef<HTMLInputElement | null>(null);
+  const translationKeyInputRef = useRef<HTMLInputElement | null>(null);
+  const { uploadFiles, dismissPendingUpload } = useAssetUploads();
 
   const trackAssetEvent = useCallback((event: string, payload?: Record<string, unknown>) => {
     emitTelemetry("assets", event, payload);
@@ -287,7 +460,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     if (!assetCatalog.length) {
       return [] as AssetReference[];
     }
-    const query = assetSearch.trim().toLowerCase();
+    const query = assetFilters.query.trim().toLowerCase();
     return assetCatalog.filter((asset) => {
       if (assetFilters.kinds.length && !assetFilters.kinds.includes(asset.kind)) {
         return false;
@@ -311,10 +484,9 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       const haystack = `${asset.label} ${asset.path} ${asset.tags.join(" ")} ${asset.targets.join(" ")}`.toLowerCase();
       return haystack.includes(query);
     });
-  }, [assetCatalog, assetFilters, assetSearch]);
+  }, [assetCatalog, assetFilters]);
   const visibleAssetCatalog = useMemo(() => filteredAssetCatalog.slice(0, 60), [filteredAssetCatalog]);
   const filtersActive = assetFilters.tags.length + assetFilters.targets.length + assetFilters.kinds.length > 0;
-  const pendingUploadsActive = pendingUploads.length > 0;
   const assetHintOptions = useMemo(() => {
     if (assetCatalog.length) {
       return assetCatalog.map((asset) => asset.path);
@@ -374,6 +546,319 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     [selectedPath, updateWidget]
   );
 
+  const applyEventMapUpdate = useCallback(
+    (mutator: (current: EventsMap) => EventsMap) => {
+      const current = { ...parseEventsJson(formState.events).value };
+      const next = normalizeEventsMap(mutator(current));
+      const serialized = JSON.stringify(next, null, 2);
+      setFormState((prev) => ({ ...prev, events: serialized }));
+      if (selectedPath) {
+        updateWidget(selectedPath, { events: next });
+      }
+      setJsonErrors((prev) => ({ ...prev, events: "" }));
+    },
+    [formState.events, selectedPath, updateWidget]
+  );
+
+  const applyBindingMapUpdate = useCallback(
+    (mutator: (current: BindingsMap) => BindingsMap) => {
+      const current = { ...parseBindingsJson(formState.bindings).value };
+      const next = normalizeBindingsMap(mutator(current));
+      const serialized = JSON.stringify(next, null, 2);
+      setFormState((prev) => ({ ...prev, bindings: serialized }));
+      if (selectedPath) {
+        updateWidget(selectedPath, { bindings: next });
+      }
+      setJsonErrors((prev) => ({ ...prev, bindings: "" }));
+    },
+    [formState.bindings, selectedPath, updateWidget]
+  );
+
+  const applyPropsMapUpdate = useCallback(
+    (mutator: (current: PropsMap) => PropsMap) => {
+      const current = { ...parsePropsJson(formState.props).value };
+      const next = normalizePropsMap(mutator(current));
+      const serialized = JSON.stringify(next, null, 2);
+      setFormState((prev) => ({ ...prev, props: serialized }));
+      if (selectedPath) {
+        updateWidget(selectedPath, { props: next });
+      }
+      setJsonErrors((prev) => ({ ...prev, props: "" }));
+    },
+    [formState.props, selectedPath, updateWidget]
+  );
+
+  const applyAccessibilityMapUpdate = useCallback(
+    (mutator: (current: AccessibilityMap) => AccessibilityMap) => {
+      const current = { ...parseAccessibilityJson(formState.accessibility).value };
+      const next = normalizeAccessibilityMap(mutator(current));
+      const serialized = JSON.stringify(next, null, 2);
+      setFormState((prev) => ({ ...prev, accessibility: serialized }));
+      if (selectedPath) {
+        updateWidget(selectedPath, { accessibility: next });
+      }
+      setJsonErrors((prev) => ({ ...prev, accessibility: "" }));
+    },
+    [formState.accessibility, selectedPath, updateWidget]
+  );
+
+  const handleAddEventEntry = useCallback(() => {
+    applyEventMapUpdate((prev) => {
+      const existing = new Set(Object.keys(prev));
+      const key = generateUniqueKey("on_click", existing);
+      return { ...prev, [key]: [""] };
+    });
+  }, [applyEventMapUpdate]);
+
+  const handleRenameEvent = useCallback(
+    (currentName: string, nextName: string) => {
+      applyEventMapUpdate((prev) => {
+        if (!prev[currentName]) {
+          return prev;
+        }
+        const clone = { ...prev };
+        const handlers = clone[currentName];
+        delete clone[currentName];
+        const trimmed = nextName.trim();
+        if (!trimmed) {
+          return clone;
+        }
+        if (clone[trimmed]) {
+          const existing = new Set(Object.keys(clone));
+          const unique = generateUniqueKey(trimmed, existing);
+          clone[unique] = handlers;
+          return clone;
+        }
+        clone[trimmed] = handlers;
+        return clone;
+      });
+    },
+    [applyEventMapUpdate]
+  );
+
+  const handleRemoveEvent = useCallback(
+    (name: string) => {
+      applyEventMapUpdate((prev) => {
+        if (!prev[name]) {
+          return prev;
+        }
+        const clone = { ...prev };
+        delete clone[name];
+        return clone;
+      });
+    },
+    [applyEventMapUpdate]
+  );
+
+  const handleAddEventAction = useCallback(
+    (name: string) => {
+      applyEventMapUpdate((prev) => {
+        if (!prev[name]) {
+          return prev;
+        }
+        return { ...prev, [name]: [...prev[name], ""] };
+      });
+    },
+    [applyEventMapUpdate]
+  );
+
+  const handleUpdateEventAction = useCallback(
+    (name: string, index: number, value: string) => {
+      applyEventMapUpdate((prev) => {
+        if (!prev[name]) {
+          return prev;
+        }
+        const nextHandlers = [...prev[name]];
+        nextHandlers[index] = value;
+        return { ...prev, [name]: nextHandlers };
+      });
+    },
+    [applyEventMapUpdate]
+  );
+
+  const handleRemoveEventAction = useCallback(
+    (name: string, index: number) => {
+      applyEventMapUpdate((prev) => {
+        if (!prev[name]) {
+          return prev;
+        }
+        const nextHandlers = prev[name].filter((_, handlerIndex) => handlerIndex !== index);
+        if (!nextHandlers.length) {
+          const clone = { ...prev };
+          delete clone[name];
+          return clone;
+        }
+        return { ...prev, [name]: nextHandlers };
+      });
+    },
+    [applyEventMapUpdate]
+  );
+
+  const handleAddBinding = useCallback(() => {
+    applyBindingMapUpdate((prev) => {
+      const existing = new Set(Object.keys(prev));
+      const key = generateUniqueKey("data", existing);
+      return { ...prev, [key]: "" };
+    });
+  }, [applyBindingMapUpdate]);
+
+  const handleRenameBinding = useCallback(
+    (currentName: string, nextName: string) => {
+      applyBindingMapUpdate((prev) => {
+        if (!prev[currentName]) {
+          return prev;
+        }
+        const clone = { ...prev };
+        const value = clone[currentName];
+        delete clone[currentName];
+        const trimmed = nextName.trim();
+        if (!trimmed) {
+          return clone;
+        }
+        if (clone[trimmed]) {
+          const existing = new Set(Object.keys(clone));
+          const unique = generateUniqueKey(trimmed, existing);
+          clone[unique] = value;
+          return clone;
+        }
+        clone[trimmed] = value;
+        return clone;
+      });
+    },
+    [applyBindingMapUpdate]
+  );
+
+  const handleUpdateBindingValue = useCallback(
+    (name: string, value: string) => {
+      applyBindingMapUpdate((prev) => ({ ...prev, [name]: value }));
+    },
+    [applyBindingMapUpdate]
+  );
+
+  const handleRemoveBinding = useCallback(
+    (name: string) => {
+      applyBindingMapUpdate((prev) => {
+        if (!(name in prev)) {
+          return prev;
+        }
+        const clone = { ...prev };
+        delete clone[name];
+        return clone;
+      });
+    },
+    [applyBindingMapUpdate]
+  );
+
+  const handleAddProp = useCallback(() => {
+    applyPropsMapUpdate((prev) => {
+      const existing = new Set(Object.keys(prev));
+      const key = generateUniqueKey("prop", existing);
+      return { ...prev, [key]: "" };
+    });
+  }, [applyPropsMapUpdate]);
+
+  const handleRenameProp = useCallback(
+    (currentName: string, nextName: string) => {
+      applyPropsMapUpdate((prev) => {
+        if (!(currentName in prev)) {
+          return prev;
+        }
+        const clone = { ...prev };
+        const value = clone[currentName];
+        delete clone[currentName];
+        const trimmed = nextName.trim();
+        if (!trimmed) {
+          return clone;
+        }
+        if (clone[trimmed] !== undefined) {
+          const existing = new Set(Object.keys(clone));
+          const unique = generateUniqueKey(trimmed, existing);
+          clone[unique] = value;
+          return clone;
+        }
+        clone[trimmed] = value;
+        return clone;
+      });
+    },
+    [applyPropsMapUpdate]
+  );
+
+  const handleUpdatePropValue = useCallback(
+    (name: string, value: unknown) => {
+      applyPropsMapUpdate((prev) => ({ ...prev, [name]: value }));
+    },
+    [applyPropsMapUpdate]
+  );
+
+  const handleRemoveProp = useCallback(
+    (name: string) => {
+      applyPropsMapUpdate((prev) => {
+        if (!(name in prev)) {
+          return prev;
+        }
+        const clone = { ...prev };
+        delete clone[name];
+        return clone;
+      });
+    },
+    [applyPropsMapUpdate]
+  );
+
+  const handleAddAccessibilityEntry = useCallback(() => {
+    applyAccessibilityMapUpdate((prev) => {
+      const existing = new Set(Object.keys(prev));
+      const key = generateUniqueKey("aria_label", existing);
+      return { ...prev, [key]: "" };
+    });
+  }, [applyAccessibilityMapUpdate]);
+
+  const handleRenameAccessibilityEntry = useCallback(
+    (currentName: string, nextName: string) => {
+      applyAccessibilityMapUpdate((prev) => {
+        if (!(currentName in prev)) {
+          return prev;
+        }
+        const clone = { ...prev };
+        const value = clone[currentName];
+        delete clone[currentName];
+        const trimmed = nextName.trim();
+        if (!trimmed) {
+          return clone;
+        }
+        if (clone[trimmed] !== undefined) {
+          const existing = new Set(Object.keys(clone));
+          const unique = generateUniqueKey(trimmed, existing);
+          clone[unique] = value;
+          return clone;
+        }
+        clone[trimmed] = value;
+        return clone;
+      });
+    },
+    [applyAccessibilityMapUpdate]
+  );
+
+  const handleUpdateAccessibilityValue = useCallback(
+    (name: string, value: string) => {
+      applyAccessibilityMapUpdate((prev) => ({ ...prev, [name]: value }));
+    },
+    [applyAccessibilityMapUpdate]
+  );
+
+  const handleRemoveAccessibilityEntry = useCallback(
+    (name: string) => {
+      applyAccessibilityMapUpdate((prev) => {
+        if (!(name in prev)) {
+          return prev;
+        }
+        const clone = { ...prev };
+        delete clone[name];
+        return clone;
+      });
+    },
+    [applyAccessibilityMapUpdate]
+  );
+
   const handleAddFilterTag = useCallback((tag: string) => {
     const normalized = tag.trim().toLowerCase();
     if (!normalized) {
@@ -423,32 +908,16 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     trackAssetEvent("asset_filters_cleared");
   }, [resetAssetFilters, trackAssetEvent]);
 
-  const uploadSingleAsset = useCallback(async (file: File) => {
-    const pendingId = createClientId();
-    setPendingUploads((prev) => [...prev, { id: pendingId, fileName: file.name, status: "uploading" }]);
-    try {
-      trackAssetEvent("asset_upload_start", { fileName: file.name, size: file.size });
-      const uploaded = await uploadAsset(file);
-      setAssetCatalog((prev) => [uploaded, ...prev.filter((item) => item.id !== uploaded.id)]);
-      setTagDrafts((prev) => ({ ...prev, [uploaded.id]: uploaded.tags.join(", ") }));
-      trackAssetEvent("asset_upload_success", { assetId: uploaded.id, kind: uploaded.kind });
-      setPendingUploads((prev) => prev.filter((item) => item.id !== pendingId));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to upload asset";
-      setPendingUploads((prev) => prev.map((item) => (item.id === pendingId ? { ...item, status: "error", error: message } : item)));
-      trackAssetEvent("asset_upload_failure", { fileName: file.name, message });
-    }
-  }, [trackAssetEvent]);
+  const handleSearchQueryChange = useCallback((value: string) => {
+    setAssetFilters((prev) => ({ ...prev, query: value }));
+  }, [setAssetFilters]);
 
   const handleFilesUpload = useCallback(async (files: File[]) => {
     if (!files.length) {
       return;
     }
-    trackAssetEvent("asset_upload_batch_start", { count: files.length });
-    await Promise.all(files.map((file) => uploadSingleAsset(file)));
-    await loadAssetCatalog({ force: true });
-    trackAssetEvent("asset_upload_batch_complete", { count: files.length });
-  }, [loadAssetCatalog, trackAssetEvent, uploadSingleAsset]);
+    await uploadFiles(files);
+  }, [uploadFiles]);
 
   const handleFilePickerClick = useCallback(() => {
     trackAssetEvent("asset_upload_picker_opened");
@@ -483,8 +952,8 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   }, [handleFilesUpload]);
 
   const handleDismissUpload = useCallback((id: string) => {
-    setPendingUploads((prev) => prev.filter((item) => item.id !== id));
-  }, []);
+    dismissPendingUpload(id);
+  }, [dismissPendingUpload]);
 
   const commitAssetTags = useCallback(
     async (asset: AssetReference, rawValue: string) => {
@@ -582,6 +1051,9 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   useEffect(() => {
     if (!selectedWidget) {
       setFormState({ id: "", text: "", style: "", src: "", props: "{}", events: "{}", bindings: "{}", accessibility: "{}" });
+      setTranslationFormOpen(false);
+      setTranslationKeyDraft("");
+      setTranslationFormError(null);
       return;
     }
     setFormState({
@@ -594,7 +1066,44 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       bindings: JSON.stringify(selectedWidget.bindings ?? {}, null, 2),
       accessibility: JSON.stringify(selectedWidget.accessibility ?? {}, null, 2),
     });
+    setTranslationFormOpen(false);
+    setTranslationKeyDraft("");
+    setTranslationFormError(null);
   }, [selectedWidget]);
+
+  useEffect(() => {
+    if (currentTranslationKey) {
+      setTranslationFormOpen(false);
+      setTranslationFormError(null);
+    }
+  }, [currentTranslationKey]);
+
+  useEffect(() => {
+    if (!translationBindingRequest) {
+      return;
+    }
+    if (!selectedPath || !widgetPathsEqual(selectedPath, translationBindingRequest.path)) {
+      return;
+    }
+    openTranslationBindingForm(translationBindingRequest.suggestedKey);
+    clearTranslationBindingRequest();
+  }, [clearTranslationBindingRequest, openTranslationBindingForm, selectedPath, translationBindingRequest]);
+
+  useEffect(() => {
+    if (!translationFormOpen) {
+      return;
+    }
+    const focusInput = () => {
+      translationKeyInputRef.current?.focus();
+      translationKeyInputRef.current?.select();
+    };
+    if (typeof window === "undefined") {
+      focusInput();
+      return;
+    }
+    const frame = window.requestAnimationFrame(focusInput);
+    return () => window.cancelAnimationFrame(frame);
+  }, [translationFormOpen]);
 
   useEffect(() => {
     if (assetModalOpen) {
@@ -692,7 +1201,6 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
 
   const handleCloseAssetModal = useCallback(() => {
     setAssetModalOpen(false);
-    setAssetSearch("");
     trackAssetEvent("asset_modal_closed");
   }, [trackAssetEvent]);
 
@@ -708,6 +1216,100 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
       handlePickAsset(assetPath);
     }
   }, [handlePickAsset]);
+
+  const handleOpenAssetManager = useCallback((asset: AssetReference) => {
+    setAssetFilters((prev) => ({ ...prev, query: asset.path }));
+    setAssetModalOpen(false);
+    trackAssetEvent("asset_open_manager_jump", { assetId: asset.id, path: asset.path });
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        const node = document.getElementById("asset-manager");
+        node?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, [setAssetFilters, trackAssetEvent]);
+
+  const openTranslationBindingForm = useCallback(
+    (initialKey?: string) => {
+      if (!canConvertTextToTranslation) {
+        setTranslationFormError(primaryLocale ? "" : "Add a locale before binding text");
+        return false;
+      }
+      const trimmed = initialKey?.trim();
+      const nextKey = trimmed && trimmed.length ? trimmed : suggestTranslationKey(formState.text, translationKeySet);
+      setTranslationKeyDraft(nextKey);
+      setTranslationFormError(null);
+      setTranslationFormOpen(true);
+      return true;
+    },
+    [canConvertTextToTranslation, formState.text, primaryLocale, translationKeySet]
+  );
+
+  const handleStartTranslationBinding = () => {
+    openTranslationBindingForm();
+  };
+
+  const handleCancelTranslationBinding = () => {
+    setTranslationFormOpen(false);
+    setTranslationKeyDraft("");
+    setTranslationFormError(null);
+  };
+
+  const handleCommitTranslationBinding = () => {
+    if (!translationFormOpen || !selectedPath) {
+      return;
+    }
+    const key = translationKeyDraft.trim();
+    if (!key) {
+      setTranslationFormError("Enter a translation key");
+      return;
+    }
+    setTranslationFormError(null);
+    addTranslationKey(key);
+    if (primaryLocale) {
+      const existingValue = project.translations?.[primaryLocale]?.entries?.[key];
+      if (!existingValue || !existingValue.trim().length) {
+        updateTranslationValue(primaryLocale, key, formState.text.trim());
+      }
+    }
+    handleFieldChange("text", buildTranslationExpression(key));
+    setTranslationFormOpen(false);
+    setTranslationKeyDraft("");
+    setShortcutMessage(`Bound text to ${key}`);
+  };
+
+  const handleDetachTranslationBinding = () => {
+    if (!currentTranslationKey) {
+      return;
+    }
+    const fallback = primaryLocale
+      ? project.translations?.[primaryLocale]?.entries?.[currentTranslationKey] ?? currentTranslationKey
+      : currentTranslationKey;
+    handleFieldChange("text", fallback);
+    setShortcutMessage(`Detached ${currentTranslationKey}`);
+  };
+
+  const handleRevealTranslationManager = () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      const node = document.getElementById("translation-manager");
+      node?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const handleCopyTranslationBinding = async () => {
+    if (!currentTranslationKey) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(buildTranslationExpression(currentTranslationKey));
+      setShortcutMessage("Copied translation reference");
+    } catch (error) {
+      console.warn("Unable to copy translation reference", error);
+    }
+  };
 
   if (!selectedWidget) {
     return (
@@ -738,6 +1340,64 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
         <label className={`inspector-field ${fieldSeverity("text") ?? ""}`}>
           {renderFieldLabel("Text", "text")}
           <input className="input-field" value={formState.text} onChange={(event) => handleFieldChange("text", event.target.value)} />
+          <div className="translation-text-tools">
+            {currentTranslationKey ? (
+              <>
+                <div className="translation-text-tools__status">
+                  <span>
+                    Bound to <code>{currentTranslationKey}</code>
+                  </span>
+                  {primaryLocale && (
+                    <span className="translation-text-tools__preview">
+                      {primaryLocale}: {project.translations?.[primaryLocale]?.entries?.[currentTranslationKey] ?? "—"}
+                    </span>
+                  )}
+                </div>
+                <div className="translation-text-tools__actions">
+                  <button type="button" className="button tertiary" onClick={handleCopyTranslationBinding}>
+                    Copy reference
+                  </button>
+                  <button type="button" className="button tertiary" onClick={handleRevealTranslationManager}>
+                    Open translations
+                  </button>
+                  <button type="button" className="button tertiary" onClick={handleDetachTranslationBinding}>
+                    Detach
+                  </button>
+                </div>
+              </>
+            ) : translationFormOpen ? (
+              <div className="translation-text-tools__form">
+                <input
+                  ref={translationKeyInputRef}
+                  className="input-field translation-text-tools__input"
+                  value={translationKeyDraft}
+                  onChange={(event) => setTranslationKeyDraft(event.target.value)}
+                  placeholder="example.section.label"
+                />
+                <div className="translation-text-tools__actions">
+                  <button type="button" className="button primary" onClick={handleCommitTranslationBinding}>
+                    Convert
+                  </button>
+                  <button type="button" className="button tertiary" onClick={handleCancelTranslationBinding}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="button tertiary"
+                onClick={handleStartTranslationBinding}
+                disabled={!canConvertTextToTranslation || !primaryLocale}
+              >
+                Convert text to translation key
+              </button>
+            )}
+            {translationFormError && <span className="field-hint error-text">{translationFormError}</span>}
+            {!primaryLocale && (
+              <span className="field-hint warning-text">Add a locale before binding text.</span>
+            )}
+          </div>
         </label>
         <label className={`inspector-field ${fieldSeverity("src") ?? ""}`}>
           {renderFieldLabel("Source / Asset", "src")}
@@ -881,18 +1541,234 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
               onBlur={() => handleJsonBlur(field)}
             />
             {jsonErrors[field] && <span style={{ color: "#f43f5e", fontSize: "0.8rem" }}>{jsonErrors[field]}</span>}
-            {field === "events" && (
-              <div className="helper-actions">
-                {EVENT_TEMPLATES.map((template) => (
+            {field === "props" && (
+              <div className="structured-editor">
+                <div className="structured-editor__header">
+                  <span>Guided props</span>
                   <button
                     type="button"
-                    key={template.label}
                     className="button tertiary"
-                    onClick={() => applyJsonTemplate("events", template.value)}
+                    onClick={handleAddProp}
+                    disabled={!structuredProps.valid}
                   >
-                    {template.label}
+                    Add prop
                   </button>
-                ))}
+                </div>
+                {!structuredProps.valid ? (
+                  <span className="field-hint warning-text">Fix the JSON above to use the guided editor.</span>
+                ) : Object.keys(structuredProps.value).length === 0 ? (
+                  <span className="field-hint">No props defined yet.</span>
+                ) : (
+                  Object.entries(structuredProps.value).map(([propName, propValue]) => (
+                    <div key={`prop-${propName}`} className="structured-row">
+                      <div className="structured-row__body">
+                        <div className="structured-row__item">
+                          <input
+                            className="input-field input-field--dense"
+                            defaultValue={propName}
+                            aria-label="Prop name"
+                            onBlur={(event) => handleRenameProp(propName, event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.currentTarget.blur();
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="structured-row__item structured-row__item--grow">
+                          <input
+                            className="input-field input-field--dense"
+                            value={typeof propValue === "string" ? propValue : JSON.stringify(propValue)}
+                            aria-label={`${propName} value`}
+                            onChange={(event) => handleUpdatePropValue(propName, event.target.value)}
+                          />
+                        </div>
+                        <button type="button" className="button tertiary" onClick={() => handleRemoveProp(propName)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+            {field === "events" && (
+              <>
+                <div className="helper-actions">
+                  {EVENT_TEMPLATES.map((template) => (
+                    <button
+                      type="button"
+                      key={template.label}
+                      className="button tertiary"
+                      onClick={() => applyJsonTemplate("events", template.value)}
+                    >
+                      {template.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="structured-editor">
+                  <div className="structured-editor__header">
+                    <span>Guided events</span>
+                    <button
+                      type="button"
+                      className="button tertiary"
+                      onClick={handleAddEventEntry}
+                      disabled={!structuredEvents.valid}
+                    >
+                      Add event
+                    </button>
+                  </div>
+                  {!structuredEvents.valid ? (
+                    <span className="field-hint warning-text">Fix the JSON above to use the guided editor.</span>
+                  ) : Object.keys(structuredEvents.value).length === 0 ? (
+                    <span className="field-hint">No events defined yet.</span>
+                  ) : (
+                    Object.entries(structuredEvents.value).map(([eventName, handlers]) => (
+                      <div key={`event-${eventName}`} className="structured-row">
+                        <div className="structured-row__header">
+                          <input
+                            className="input-field input-field--dense"
+                            defaultValue={eventName}
+                            aria-label="Event name"
+                            onBlur={(event) => handleRenameEvent(eventName, event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.currentTarget.blur();
+                              }
+                            }}
+                          />
+                          <button type="button" className="button tertiary" onClick={() => handleRemoveEvent(eventName)}>
+                            Remove
+                          </button>
+                        </div>
+                        <div className="structured-row__body">
+                          {handlers.map((handler, index) => (
+                            <div key={`${eventName}-handler-${index}`} className="structured-row__item">
+                              <input
+                                className="input-field input-field--dense"
+                                value={handler}
+                                aria-label={`${eventName} action ${index + 1}`}
+                                onChange={(event) => handleUpdateEventAction(eventName, index, event.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="button tertiary"
+                                onClick={() => handleRemoveEventAction(eventName, index)}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <button type="button" className="button tertiary" onClick={() => handleAddEventAction(eventName)}>
+                          Add action
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+            {field === "bindings" && (
+              <div className="structured-editor">
+                <div className="structured-editor__header">
+                  <span>Guided bindings</span>
+                  <button
+                    type="button"
+                    className="button tertiary"
+                    onClick={handleAddBinding}
+                    disabled={!structuredBindings.valid}
+                  >
+                    Add binding
+                  </button>
+                </div>
+                {!structuredBindings.valid ? (
+                  <span className="field-hint warning-text">Fix the JSON above to use the guided editor.</span>
+                ) : Object.keys(structuredBindings.value).length === 0 ? (
+                  <span className="field-hint">No bindings defined yet.</span>
+                ) : (
+                  Object.entries(structuredBindings.value).map(([bindingName, expression]) => (
+                    <div key={`binding-${bindingName}`} className="structured-row">
+                      <div className="structured-row__body">
+                        <div className="structured-row__item">
+                          <input
+                            className="input-field input-field--dense"
+                            defaultValue={bindingName}
+                            aria-label="Binding name"
+                            onBlur={(event) => handleRenameBinding(bindingName, event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.currentTarget.blur();
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="structured-row__item structured-row__item--grow">
+                          <input
+                            className="input-field input-field--dense"
+                            value={expression}
+                            aria-label={`${bindingName} expression`}
+                            onChange={(event) => handleUpdateBindingValue(bindingName, event.target.value)}
+                          />
+                        </div>
+                        <button type="button" className="button tertiary" onClick={() => handleRemoveBinding(bindingName)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+            {field === "accessibility" && (
+              <div className="structured-editor">
+                <div className="structured-editor__header">
+                  <span>Guided accessibility</span>
+                  <button
+                    type="button"
+                    className="button tertiary"
+                    onClick={handleAddAccessibilityEntry}
+                    disabled={!structuredAccessibility.valid}
+                  >
+                    Add entry
+                  </button>
+                </div>
+                {!structuredAccessibility.valid ? (
+                  <span className="field-hint warning-text">Fix the JSON above to use the guided editor.</span>
+                ) : Object.keys(structuredAccessibility.value).length === 0 ? (
+                  <span className="field-hint">No accessibility hints yet.</span>
+                ) : (
+                  Object.entries(structuredAccessibility.value).map(([name, value]) => (
+                    <div key={`accessibility-${name}`} className="structured-row">
+                      <div className="structured-row__body">
+                        <div className="structured-row__item">
+                          <input
+                            className="input-field input-field--dense"
+                            defaultValue={name}
+                            aria-label="Accessibility key"
+                            onBlur={(event) => handleRenameAccessibilityEntry(name, event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.currentTarget.blur();
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="structured-row__item structured-row__item--grow">
+                          <input
+                            className="input-field input-field--dense"
+                            value={value}
+                            aria-label={`${name} value`}
+                            onChange={(event) => handleUpdateAccessibilityValue(name, event.target.value)}
+                          />
+                        </div>
+                        <button type="button" className="button tertiary" onClick={() => handleRemoveAccessibilityEntry(name)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </label>
@@ -934,9 +1810,9 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
                     type="search"
                     className="input-field"
                     placeholder={assetCatalog.length ? "Search by filename, tags, or targets" : "Search activates once assets sync"}
-                    value={assetSearch}
+                    value={assetFilters.query}
                     disabled={!assetCatalog.length && !assetCatalogBusy}
-                    onChange={(event) => setAssetSearch(event.target.value)}
+                    onChange={(event) => handleSearchQueryChange(event.target.value)}
                   />
                   <button type="button" className="button tertiary" onClick={handleAssetModalRefresh} disabled={assetCatalogBusy}>
                     {assetCatalogBusy ? "Scanning…" : assetCatalogLoadedAt ? "Refresh catalog" : "Scan project"}
@@ -970,25 +1846,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
                   />
                 </div>
               </div>
-              {pendingUploadsActive && (
-                <div className="asset-upload-pending">
-                  {pendingUploads.map((upload) => (
-                    <div key={upload.id} className={`asset-upload-pill asset-upload-pill--${upload.status}`}>
-                      <div className="asset-upload-pill__meta">
-                        <strong>{upload.fileName}</strong>
-                        <span>{upload.status === "uploading" ? "Uploading…" : upload.error}</span>
-                      </div>
-                      {upload.status === "error" ? (
-                        <button type="button" className="button tertiary" onClick={() => handleDismissUpload(upload.id)}>
-                          Dismiss
-                        </button>
-                      ) : (
-                        <span className="asset-upload-pill__spinner" aria-hidden="true" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <AssetUploadQueue uploads={pendingUploads} onDismiss={handleDismissUpload} />
               {assetCatalogBusy && <span className="field-hint">Scanning project for asset references…</span>}
               {assetCatalogError && <span className="field-hint warning-text">{assetCatalogError}</span>}
               <div className="asset-filter-bar">
@@ -1123,6 +1981,16 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
                             />
                             {tagBusyMap[asset.id] && <span className="asset-tag-spinner">Saving…</span>}
                           </div>
+                          <button
+                            type="button"
+                            className="button tertiary asset-card__jump"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenAssetManager(asset);
+                            }}
+                          >
+                            Open in Asset Manager
+                          </button>
                           <span className="asset-card__action">Use asset</span>
                         </div>
                       );
@@ -1130,7 +1998,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
                   </div>
                 ) : (
                   <div className="asset-catalog-empty">
-                    <span>No assets match “{assetSearch}”.</span>
+                    <span>No assets match “{assetFilters.query}”.</span>
                   </div>
                 )
               ) : (

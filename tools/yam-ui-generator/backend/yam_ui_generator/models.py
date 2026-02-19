@@ -142,11 +142,20 @@ class StyleToken(BaseModel):
         if not value_cls:
             return self
         if isinstance(self.value, value_cls):
-            object.__setattr__(self, "value", self.value.model_dump())
+            object.__setattr__(self, "value", self.value.model_dump(exclude_none=True))
             return self
-        parsed = value_cls.model_validate(self.value or {}).model_dump()
+        parsed = value_cls.model_validate(self.value or {}).model_dump(exclude_none=True)
         object.__setattr__(self, "value", parsed)
         return self
+
+
+class TranslationLocale(BaseModel):
+    """Represents a locale-specific translation dictionary."""
+
+    label: Optional[str] = None
+    description: Optional[str] = None
+    entries: Dict[str, str] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class Project(BaseModel):
@@ -154,6 +163,7 @@ class Project(BaseModel):
 
     app: Dict[str, Any] = Field(default_factory=dict)
     state: Dict[str, Any] = Field(default_factory=dict)
+    translations: Dict[str, TranslationLocale] = Field(default_factory=dict)
     styles: Dict[str, StyleToken] = Field(default_factory=dict)
     components: Dict[str, ComponentDefinition] = Field(default_factory=dict)
     screens: Dict[str, Screen] = Field(default_factory=dict)
@@ -221,6 +231,29 @@ class ProjectExportResponse(BaseModel):
 
 class ProjectValidateResponse(BaseModel):
     valid: bool
+    issues: List[ValidationIssue] = Field(default_factory=list)
+
+
+class TranslationExportRequest(BaseModel):
+    project: Project
+    format: Literal["json", "csv"] = Field(default="json")
+
+
+class TranslationExportResponse(BaseModel):
+    filename: str
+    mime_type: str
+    content: str
+    issues: List[ValidationIssue] = Field(default_factory=list)
+
+
+class TranslationImportRequest(BaseModel):
+    project: Project
+    content: str
+    format: Literal["json", "csv"] = Field(default="json")
+
+
+class TranslationImportResponse(BaseModel):
+    translations: Dict[str, TranslationLocale] = Field(default_factory=dict)
     issues: List[ValidationIssue] = Field(default_factory=list)
 
 

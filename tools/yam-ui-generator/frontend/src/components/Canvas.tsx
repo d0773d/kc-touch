@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useProject } from "../context/ProjectContext";
 import { ValidationIssue, WidgetNode, WidgetPath, WidgetType } from "../types/yamui";
+import { buildTranslationExpression, extractTranslationKey, suggestTranslationKey } from "../utils/translation";
 
 const CONTAINER_TYPES: WidgetType[] = ["row", "column", "panel", "list"];
 
@@ -18,14 +19,22 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
     addWidget,
     removeWidget,
     moveWidget,
+    updateWidget,
     styleEditorSelection,
     setStyleEditorSelection,
+    requestTranslationBinding,
   } = useProject();
   const [activeDrop, setActiveDrop] = useState<string | null>(null);
   const [expandedState, setExpandedState] = useState<Record<string, boolean>>({});
   const [styleUsageIndex, setStyleUsageIndex] = useState(0);
   const widgetRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
-
+  const translationKeySet = useMemo(() => {
+    const set = new Set<string>();
+    Object.values(project.translations ?? {}).forEach((locale) => {
+      Object.keys(locale?.entries ?? {}).forEach((key) => set.add(key));
+    });
+    return set;
+  }, [project.translations]);
   const focusStyleToken = (styleName: string) => {
     setStyleEditorSelection(styleName);
     const target = document.getElementById("style-manager");
@@ -193,10 +202,17 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
     setStyleUsageIndex(0);
   }, [styleEditorSelection, styleUsageMatches.length]);
 
+  const lastSelectedPathRef = useRef<WidgetPath | null>(null);
+
   useEffect(() => {
     if (!selectedPath) {
+      lastSelectedPathRef.current = null;
       return;
     }
+    if (lastSelectedPathRef.current === selectedPath) {
+      return;
+    }
+    lastSelectedPathRef.current = selectedPath;
     ensurePathVisible(selectedPath);
     const key = pathToKey(selectedPath);
     const node = widgetRefs.current.get(key);
@@ -304,6 +320,36 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
     moveWidget(path, parentPath, nextIndex);
   };
 
+  const handleConvertWidgetText = useCallback(
+    (widget: WidgetNode, path: WidgetPath) => {
+      if (!widget.text) {
+        return;
+      }
+      const suggestion = suggestTranslationKey(widget.text, translationKeySet);
+      selectWidget(path);
+      requestTranslationBinding(path, { suggestedKey: suggestion });
+    },
+    [requestTranslationBinding, selectWidget, translationKeySet]
+  );
+
+  const handleCopyTranslationExpression = useCallback(async (event: React.MouseEvent, key: string) => {
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(buildTranslationExpression(key));
+    } catch (error) {
+      console.warn("Unable to copy translation reference", error);
+    }
+  }, []);
+
+  const handleRevealTranslations = useCallback((event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (typeof window === "undefined") {
+      return;
+    }
+    const target = document.getElementById("translation-manager");
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   const renderDropZone = (parentPath: WidgetPath, index: number, large = false) => {
     const key = `${pathToKey(parentPath)}-${index}`;
     return (
@@ -385,6 +431,7 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
     if (isSelectionAncestor) {
       nodeClasses.push("is-ancestor");
     }
+    const translationKey = widget.text ? extractTranslationKey(widget.text) : null;
 
     return (
       <div
@@ -467,7 +514,39 @@ export default function Canvas({ issues, style }: CanvasProps): JSX.Element {
             </button>
           </div>
         </header>
-        {widget.text && <p className="widget-node__text">{widget.text}</p>}
+        {widget.text && (
+          <div className="widget-node__text-block">
+            <p className="widget-node__text">{widget.text}</p>
+            <div className="widget-node__translation">
+              {translationKey ? (
+                <>
+                  <span className="widget-node__translation-label">
+                    Key <code>{translationKey}</code>
+                  </span>
+                  <div className="widget-node__translation-actions">
+                    <button type="button" className="button tertiary" onClick={(event) => handleCopyTranslationExpression(event, translationKey)}>
+                      Copy
+                    </button>
+                    <button type="button" className="button tertiary" onClick={(event) => handleRevealTranslations(event)}>
+                      Open translations
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="button tertiary"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleConvertWidgetText(widget, path);
+                  }}
+                >
+                  Convert text to translation
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {usesSelectedStyle && widget.style && (
           <p className="widget-style-note">Linked to style "{widget.style}".</p>
         )}

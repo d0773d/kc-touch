@@ -1,5 +1,14 @@
 import { createContext, Dispatch, ReactNode, SetStateAction, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { AssetReference, ProjectModel, StyleTokenModel, ValidationIssue, WidgetNode, WidgetPath } from "../types/yamui";
+import {
+  AssetReference,
+  ProjectModel,
+  StyleTokenModel,
+  TranslationLocaleModel,
+  TranslationStore,
+  ValidationIssue,
+  WidgetNode,
+  WidgetPath,
+} from "../types/yamui";
 import { createWidget } from "../utils/widgetTemplates";
 import { fetchAssetCatalog, fetchTemplateProject } from "../utils/api";
 
@@ -13,6 +22,21 @@ export type AssetFilterState = {
   tags: string[];
   targets: string[];
   kinds: AssetReference["kind"][];
+};
+
+export type PendingAssetUpload = {
+  id: string;
+  fileName: string;
+  status: "uploading" | "error";
+  error?: string;
+};
+
+export type AssetTagDraftMap = Record<string, string>;
+export type AssetTagBusyMap = Record<string, boolean>;
+
+type TranslationBindingRequest = {
+  path: WidgetPath;
+  suggestedKey?: string;
 };
 
 interface ProjectContextValue {
@@ -51,6 +75,23 @@ interface ProjectContextValue {
   assetFilters: AssetFilterState;
   setAssetFilters: Dispatch<SetStateAction<AssetFilterState>>;
   resetAssetFilters: () => void;
+  pendingAssetUploads: PendingAssetUpload[];
+  setPendingAssetUploads: Dispatch<SetStateAction<PendingAssetUpload[]>>;
+  assetTagDrafts: AssetTagDraftMap;
+  setAssetTagDrafts: Dispatch<SetStateAction<AssetTagDraftMap>>;
+  assetTagBusyMap: AssetTagBusyMap;
+  setAssetTagBusyMap: Dispatch<SetStateAction<AssetTagBusyMap>>;
+  translationBindingRequest: TranslationBindingRequest | null;
+  requestTranslationBinding: (path: WidgetPath, options?: { suggestedKey?: string }) => void;
+  clearTranslationBindingRequest: () => void;
+  setTranslations: (next: TranslationStore) => void;
+  addTranslationLocale: (locale: string, label?: string) => void;
+  removeTranslationLocale: (locale: string) => void;
+  setTranslationLocaleLabel: (locale: string, label: string) => void;
+  addTranslationKey: (key: string) => void;
+  renameTranslationKey: (currentKey: string, nextKey: string) => boolean;
+  deleteTranslationKey: (key: string) => void;
+  updateTranslationValue: (locale: string, key: string, value: string) => void;
 }
 
 const DEFAULT_ASSET_FILTERS: AssetFilterState = {
@@ -60,9 +101,23 @@ const DEFAULT_ASSET_FILTERS: AssetFilterState = {
   kinds: [],
 };
 
+const ASSET_FILTERS_STORAGE_KEY = "yamui_asset_filters_v1";
+const DEFAULT_LOCALE_CODE = "en";
+
+const DEFAULT_LOCALE_LABELS: Record<string, string> = {
+  en: "English",
+};
+
 const DEFAULT_PROJECT: ProjectModel = {
   app: {},
   state: {},
+  translations: {
+    [DEFAULT_LOCALE_CODE]: {
+      label: DEFAULT_LOCALE_LABELS[DEFAULT_LOCALE_CODE],
+      entries: {},
+      metadata: {},
+    },
+  },
   styles: {},
   components: {},
   screens: {
@@ -105,7 +160,33 @@ function normalizeProjectInPlace(project: ProjectModel): ProjectModel {
 
   Object.values(project.screens).forEach((screen) => normalizeList(screen.widgets));
   Object.values(project.components).forEach((component) => normalizeList(component.widgets));
+  normalizeTranslations(project);
   return project;
+}
+
+function ensureTranslationLocale(project: ProjectModel, locale: string): TranslationLocaleModel {
+  if (!project.translations[locale]) {
+    project.translations[locale] = {
+      label: DEFAULT_LOCALE_LABELS[locale] ?? locale,
+      entries: {},
+      metadata: {},
+    };
+  } else {
+    const bucket = project.translations[locale]!;
+    bucket.entries = bucket.entries ?? {};
+    bucket.metadata = bucket.metadata ?? {};
+  }
+  return project.translations[locale]!;
+}
+
+function normalizeTranslations(project: ProjectModel): void {
+  if (!project.translations || typeof project.translations !== "object") {
+    project.translations = {};
+  }
+  Object.keys(project.translations).forEach((locale) => ensureTranslationLocale(project, locale));
+  if (Object.keys(project.translations).length === 0) {
+    ensureTranslationLocale(project, DEFAULT_LOCALE_CODE);
+  }
 }
 
 function pathsEqual(a: WidgetPath, b: WidgetPath): boolean {
@@ -216,7 +297,41 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
   const [assetCatalogBusy, setAssetCatalogBusy] = useState(false);
   const [assetCatalogError, setAssetCatalogError] = useState<string | null>(null);
   const [assetCatalogLoadedAt, setAssetCatalogLoadedAt] = useState<number | null>(null);
-  const [assetFilters, setAssetFilters] = useState<AssetFilterState>(DEFAULT_ASSET_FILTERS);
+  const [assetFilters, setAssetFilters] = useState<AssetFilterState>(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_ASSET_FILTERS;
+    }
+    try {
+      const stored = window.localStorage.getItem(ASSET_FILTERS_STORAGE_KEY);
+      if (!stored) {
+        return DEFAULT_ASSET_FILTERS;
+      }
+      const parsed = JSON.parse(stored) as Partial<AssetFilterState>;
+      return {
+        query: typeof parsed.query === "string" ? parsed.query : DEFAULT_ASSET_FILTERS.query,
+        tags: Array.isArray(parsed.tags) ? parsed.tags : DEFAULT_ASSET_FILTERS.tags,
+        targets: Array.isArray(parsed.targets) ? parsed.targets : DEFAULT_ASSET_FILTERS.targets,
+        kinds: Array.isArray(parsed.kinds) ? parsed.kinds : DEFAULT_ASSET_FILTERS.kinds,
+      };
+    } catch (error) {
+      console.warn("Unable to parse stored asset filters", error);
+      return DEFAULT_ASSET_FILTERS;
+    }
+  });
+    useEffect(() => {
+      if (typeof window === "undefined") {
+        return;
+      }
+      try {
+        window.localStorage.setItem(ASSET_FILTERS_STORAGE_KEY, JSON.stringify(assetFilters));
+      } catch (error) {
+        console.warn("Unable to persist asset filters", error);
+      }
+    }, [assetFilters]);
+  const [pendingAssetUploads, setPendingAssetUploads] = useState<PendingAssetUpload[]>([]);
+  const [assetTagDrafts, setAssetTagDrafts] = useState<AssetTagDraftMap>({});
+  const [assetTagBusyMap, setAssetTagBusyMap] = useState<AssetTagBusyMap>({});
+  const [translationBindingRequest, setTranslationBindingRequest] = useState<TranslationBindingRequest | null>(null);
 
   useEffect(() => {
     setStyleEditorSelection((current) => {
@@ -272,6 +387,17 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
 
   const selectWidget = useCallback((path: WidgetPath | null) => {
     setSelectedPath(path);
+  }, []);
+
+  const requestTranslationBinding = useCallback(
+    (path: WidgetPath, options?: { suggestedKey?: string }) => {
+      setTranslationBindingRequest({ path: [...path], suggestedKey: options?.suggestedKey });
+    },
+    []
+  );
+
+  const clearTranslationBindingRequest = useCallback(() => {
+    setTranslationBindingRequest(null);
   }, []);
 
   const mutateWidgets = useCallback(
@@ -466,6 +592,157 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
     });
   }, [setStyleEditorSelection]);
 
+  const setTranslations = useCallback((nextTranslations: TranslationStore) => {
+    setProjectState((prev) => {
+      const next = cloneProject(prev);
+      next.translations = deepClone(nextTranslations);
+      return normalizeProjectInPlace(next);
+    });
+  }, []);
+
+  const addTranslationLocale = useCallback((locale: string, label?: string) => {
+    const code = locale.trim();
+    if (!code) {
+      return;
+    }
+    setProjectState((prev) => {
+      if (prev.translations[code]) {
+        return prev;
+      }
+      const next = cloneProject(prev);
+      const bucket = ensureTranslationLocale(next, code);
+      const trimmedLabel = label?.trim();
+      bucket.label = trimmedLabel && trimmedLabel.length ? trimmedLabel : bucket.label;
+      return normalizeProjectInPlace(next);
+    });
+  }, []);
+
+  const removeTranslationLocale = useCallback((locale: string) => {
+    const code = locale.trim();
+    if (!code) {
+      return;
+    }
+    setProjectState((prev) => {
+      if (!prev.translations[code] || Object.keys(prev.translations).length <= 1) {
+        return prev;
+      }
+      const next = cloneProject(prev);
+      delete next.translations[code];
+      return normalizeProjectInPlace(next);
+    });
+  }, []);
+
+  const setTranslationLocaleLabel = useCallback((locale: string, label: string) => {
+    const code = locale.trim();
+    if (!code) {
+      return;
+    }
+    setProjectState((prev) => {
+      if (!prev.translations[code]) {
+        return prev;
+      }
+      const next = cloneProject(prev);
+      const bucket = ensureTranslationLocale(next, code);
+      const trimmed = label.trim();
+      bucket.label = trimmed.length ? trimmed : undefined;
+      return normalizeProjectInPlace(next);
+    });
+  }, []);
+
+  const addTranslationKey = useCallback((key: string) => {
+    const name = key.trim();
+    if (!name) {
+      return;
+    }
+    setProjectState((prev) => {
+      if (!Object.keys(prev.translations).length) {
+        return prev;
+      }
+      const next = cloneProject(prev);
+      Object.keys(next.translations).forEach((locale) => {
+        const bucket = ensureTranslationLocale(next, locale);
+        if (!(name in bucket.entries)) {
+          bucket.entries[name] = "";
+        }
+      });
+      return normalizeProjectInPlace(next);
+    });
+  }, []);
+
+  const deleteTranslationKey = useCallback((key: string) => {
+    const name = key.trim();
+    if (!name) {
+      return;
+    }
+    setProjectState((prev) => {
+      const next = cloneProject(prev);
+      let mutated = false;
+      Object.values(next.translations).forEach((bucket) => {
+        if (!bucket?.entries) {
+          return;
+        }
+        if (bucket.entries[name] !== undefined) {
+          delete bucket.entries[name];
+          mutated = true;
+        }
+      });
+      if (!mutated) {
+        return prev;
+      }
+      return normalizeProjectInPlace(next);
+    });
+  }, []);
+
+  const updateTranslationValue = useCallback((locale: string, key: string, value: string) => {
+    const code = locale.trim();
+    const name = key.trim();
+    if (!code || !name) {
+      return;
+    }
+    setProjectState((prev) => {
+      if (!prev.translations[code]) {
+        return prev;
+      }
+      const next = cloneProject(prev);
+      const bucket = ensureTranslationLocale(next, code);
+      bucket.entries[name] = value;
+      return normalizeProjectInPlace(next);
+    });
+  }, []);
+
+  const renameTranslationKey = useCallback((currentKey: string, nextKey: string) => {
+    const current = currentKey.trim();
+    const target = nextKey.trim();
+    if (!current || !target || current === target) {
+      return false;
+    }
+    let renamed = false;
+    setProjectState((prev) => {
+      if (Object.values(prev.translations).some((bucket) => bucket?.entries && target in bucket.entries)) {
+        return prev;
+      }
+      const next = cloneProject(prev);
+      let mutated = false;
+      Object.values(next.translations).forEach((bucket) => {
+        if (!bucket?.entries) {
+          return;
+        }
+        if (!(current in bucket.entries)) {
+          return;
+        }
+        bucket.entries[target] = bucket.entries[current]!;
+        delete bucket.entries[current];
+        mutated = true;
+      });
+      if (!mutated) {
+        return prev;
+      }
+      renamed = true;
+      return normalizeProjectInPlace(next);
+    });
+    return renamed;
+  }, []);
+
   const value = useMemo<ProjectContextValue>(
     () => ({
       project,
@@ -498,6 +775,23 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       assetFilters,
       setAssetFilters,
       resetAssetFilters,
+      pendingAssetUploads,
+      setPendingAssetUploads,
+      assetTagDrafts,
+      setAssetTagDrafts,
+      assetTagBusyMap,
+      setAssetTagBusyMap,
+      translationBindingRequest,
+      requestTranslationBinding,
+      clearTranslationBindingRequest,
+      setTranslations,
+      addTranslationLocale,
+      removeTranslationLocale,
+      setTranslationLocaleLabel,
+      addTranslationKey,
+      renameTranslationKey,
+      deleteTranslationKey,
+      updateTranslationValue,
     }),
     [
       project,
@@ -529,6 +823,23 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       assetFilters,
       setAssetFilters,
       resetAssetFilters,
+      pendingAssetUploads,
+      setPendingAssetUploads,
+      assetTagDrafts,
+      setAssetTagDrafts,
+      assetTagBusyMap,
+      setAssetTagBusyMap,
+      translationBindingRequest,
+      requestTranslationBinding,
+      clearTranslationBindingRequest,
+      setTranslations,
+      addTranslationLocale,
+      removeTranslationLocale,
+      setTranslationLocaleLabel,
+      addTranslationKey,
+      renameTranslationKey,
+      deleteTranslationKey,
+      updateTranslationValue,
     ]
   );
 

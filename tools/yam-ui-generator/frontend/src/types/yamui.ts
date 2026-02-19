@@ -59,9 +59,31 @@ export interface StylePreview {
   widget?: WidgetNode | null;
 }
 
+export interface TranslationLocaleModel {
+  label?: string;
+  description?: string;
+  entries: Record<string, string>;
+  metadata?: Record<string, unknown>;
+}
+
+export type TranslationStore = Record<string, TranslationLocaleModel>;
+
+export interface TranslationImportResult {
+  translations: TranslationStore;
+  issues: ValidationIssue[];
+}
+
+export interface TranslationExportResult {
+  filename: string;
+  mime_type: string;
+  content: string;
+  issues: ValidationIssue[];
+}
+
 export interface ProjectModel {
   app: Record<string, unknown>;
   state: Record<string, unknown>;
+  translations: TranslationStore;
   styles: Record<string, StyleTokenModel>;
   components: Record<string, ComponentModel>;
   screens: Record<string, ScreenModel>;

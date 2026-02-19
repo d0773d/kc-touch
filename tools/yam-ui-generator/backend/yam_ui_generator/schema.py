@@ -159,6 +159,22 @@ STYLE_TOKEN_SCHEMA: Dict[str, Any] = {
     "additionalProperties": False,
 }
 
+TRANSLATION_LOCALE_SCHEMA: Dict[str, Any] = {
+    "$id": "https://yamui.spec/translation-locale.schema.json",
+    "type": "object",
+    "properties": {
+        "label": {"type": "string"},
+        "description": {"type": "string"},
+        "entries": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "default": {},
+        },
+        "metadata": {"type": "object", "default": {}},
+    },
+    "additionalProperties": False,
+}
+
 PROJECT_SCHEMA: Dict[str, Any] = {
     "$id": "https://yamui.spec/project.schema.json",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -166,6 +182,11 @@ PROJECT_SCHEMA: Dict[str, Any] = {
     "properties": {
         "app": {"type": "object", "default": {}},
         "state": {"type": "object", "default": {}},
+        "translations": {
+            "type": "object",
+            "additionalProperties": {"$ref": "https://yamui.spec/translation-locale.schema.json"},
+            "default": {},
+        },
         "styles": {
             "type": "object",
             "additionalProperties": {"$ref": "https://yamui.spec/style-token.schema.json"},
@@ -241,6 +262,7 @@ PROJECT_SCHEMA: Dict[str, Any] = {
         "textStyle": TEXT_STYLE_SCHEMA,
         "spacingStyle": SPACING_STYLE_SCHEMA,
         "shadowStyle": SHADOW_STYLE_SCHEMA,
+        "translationLocale": TRANSLATION_LOCALE_SCHEMA,
     },
 }
 

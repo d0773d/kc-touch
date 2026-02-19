@@ -8,6 +8,7 @@ import PropertyInspector from "./components/PropertyInspector";
 import YamlPanel from "./components/YamlPanel";
 import StyleManager from "./components/StyleManager";
 import AssetManager from "./components/AssetManager";
+import TranslationManager from "./components/TranslationManager";
 import IssueAccelerators from "./components/IssueAccelerators";
 import { useProject } from "./context/ProjectContext";
 import { ValidationIssue } from "./types/yamui";
@@ -88,6 +89,7 @@ export default function App(): JSX.Element {
           <ComponentManager />
           <StyleManager />
           <AssetManager />
+          <TranslationManager issues={issues} />
         </section>
         <div
           className="resize-handle resize-handle--vertical"

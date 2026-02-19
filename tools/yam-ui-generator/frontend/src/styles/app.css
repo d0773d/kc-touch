@@ -396,6 +396,69 @@ body {
   color: #0ea5e9;
 }
 
+.asset-card__jump {
+  align-self: flex-start;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+
+.structured-editor {
+  border: 1px dashed rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.structured-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.structured-row {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.structured-row__header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.structured-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.structured-row__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.structured-row__item--grow {
+  flex: 1;
+}
+
+.input-field--dense {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
 .asset-card:focus-visible {
   outline: 2px solid #0ea5e9;
   outline-offset: 2px;
@@ -2430,6 +2493,227 @@ body {
 .style-manager__error {
   font-size: 0.8rem;
   color: #b91c1c;
+}
+
+.translation-manager {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px dashed rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.translation-manager__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.translation-manager__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.translation-manager__issues {
+  border: 1px solid rgba(251, 191, 36, 0.65);
+  background: rgba(254, 249, 195, 0.5);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #92400e;
+}
+
+.translation-manager__issues-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.translation-manager__issue-summary {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #b45309;
+}
+
+.translation-manager__issue-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.translation-manager__issue-list li {
+  list-style: disc;
+}
+
+.translation-manager__issue-footnote {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #b45309;
+}
+
+.translation-manager__io {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.translation-manager__io-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.translation-manager__form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.translation-manager__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.translation-manager__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.translation-manager__locales {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.translation-locale-card {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 14px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.translation-locale-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.translation-locale-card__code {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.translation-locale-card__label {
+  font-size: 0.85rem;
+}
+
+.translation-locale-card__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.translation-table {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 16px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.translation-table__row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  align-items: flex-start;
+}
+
+.translation-table__row:nth-child(even):not(.translation-table__row--head) {
+  background: rgba(248, 250, 252, 0.5);
+}
+
+.translation-table__row--head {
+  background: rgba(15, 23, 42, 0.05);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: #475569;
+}
+
+.translation-table__cell {
+  min-width: 0;
+}
+
+.translation-table__cell--actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.translation-table__cell--locale.is-missing {
+  background: rgba(254, 249, 195, 0.35);
+  border-radius: 10px;
+}
+
+.translation-table__cell--locale.has-issue {
+  border: 1px solid rgba(248, 113, 113, 0.7);
+  border-radius: 12px;
+  padding: 6px;
+  background: rgba(254, 226, 226, 0.6);
+}
+
+.translation-table__cell--locale.has-issue .translation-table__textarea {
+  border-color: rgba(248, 113, 113, 0.85);
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.15);
+}
+
+.translation-table__key-input,
+.translation-table__textarea {
+  width: 100%;
+}
+
+.translation-table__textarea {
+  min-height: 48px;
+  resize: vertical;
+}
+
+.translation-table__issue-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: #b91c1c;
+}
+
+.translation-table__empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: #475569;
 }
 
 .asset-manager {

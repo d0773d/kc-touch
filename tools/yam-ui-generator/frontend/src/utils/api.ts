@@ -1,4 +1,13 @@
-import { AssetReference, ProjectModel, StylePreview, StyleTokenModel, ValidationIssue, WidgetMetadata } from "../types/yamui";
+import {
+  AssetReference,
+  ProjectModel,
+  StylePreview,
+  StyleTokenModel,
+  TranslationExportResult,
+  TranslationImportResult,
+  ValidationIssue,
+  WidgetMetadata,
+} from "../types/yamui";
 
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
 
@@ -190,4 +199,25 @@ export async function updateAssetTags(path: string, tags: string[], project: Pro
     body: JSON.stringify({ path, tags, project }),
   });
   return mapAssetReference(response.asset);
+}
+
+export async function exportTranslations(
+  project: ProjectModel,
+  format: "json" | "csv"
+): Promise<TranslationExportResult> {
+  return request("/translations/export", {
+    method: "POST",
+    body: JSON.stringify({ project, format }),
+  });
+}
+
+export async function importTranslations(
+  project: ProjectModel,
+  format: "json" | "csv",
+  content: string
+): Promise<TranslationImportResult> {
+  return request("/translations/import", {
+    method: "POST",
+    body: JSON.stringify({ project, format, content }),
+  });
 }

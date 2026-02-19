@@ -17,6 +17,26 @@ TEMPLATE_PROJECT_DATA = {
             "active": 3,
         },
     },
+    "translations": {
+        "en": {
+            "label": "English",
+            "entries": {
+                "app.device_overview": "Device Overview",
+                "panels.recent_activity": "Recent Activity",
+                "panels.online_devices": "Online Devices",
+                "panels.total_devices": "Total Devices",
+                "actions.trigger_sync": "Trigger Sync",
+            },
+        },
+        "es": {
+            "label": "Español",
+            "entries": {
+                "app.device_overview": "Panel de dispositivos",
+                "panels.recent_activity": "Actividad reciente",
+                "actions.trigger_sync": "Iniciar sincronización",
+            },
+        },
+    },
     "styles": {
         "card": {
             "name": "Card Surface",

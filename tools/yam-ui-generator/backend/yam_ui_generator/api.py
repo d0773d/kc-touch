@@ -27,10 +27,20 @@ from .models import (
     StyleLintResponse,
     StylePreviewRequest,
     StylePreviewResponse,
+    TranslationExportRequest,
+    TranslationExportResponse,
+    TranslationImportRequest,
+    TranslationImportResponse,
     ValidationIssue,
 )
 from .palette import PALETTE
-from .project_service import export_project_to_yaml, import_project_from_yaml, validate_payload
+from .project_service import (
+    export_project_to_yaml,
+    export_translations_payload,
+    import_project_from_yaml,
+    import_translations_payload,
+    validate_payload,
+)
 from .schema import PROJECT_SCHEMA
 from .template_project import get_template_project
 
@@ -190,3 +200,21 @@ def validate_project(payload: ProjectValidateRequest) -> ProjectValidateResponse
     issues = validate_payload(payload.project, payload.yaml)
     is_valid = not any(issue.severity == "error" for issue in issues)
     return ProjectValidateResponse(valid=is_valid, issues=issues)
+
+
+@app.post("/translations/export", response_model=TranslationExportResponse)
+def export_translations(payload: TranslationExportRequest) -> TranslationExportResponse:
+    try:
+        content, filename, mime_type, issues = export_translations_payload(payload.project, payload.format)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TranslationExportResponse(content=content, filename=filename, mime_type=mime_type, issues=issues)
+
+
+@app.post("/translations/import", response_model=TranslationImportResponse)
+def import_translations(payload: TranslationImportRequest) -> TranslationImportResponse:
+    try:
+        translations, issues = import_translations_payload(payload.project, payload.format, payload.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TranslationImportResponse(translations=translations, issues=issues)
