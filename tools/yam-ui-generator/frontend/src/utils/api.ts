@@ -1,6 +1,8 @@
 import {
   AssetReference,
   ProjectModel,
+  ProjectSettingsResult,
+  ProjectSettingsUpdateResult,
   StylePreview,
   StyleTokenModel,
   TranslationExportResult,
@@ -102,6 +104,20 @@ export async function exportProject(project: ProjectModel): Promise<{ yaml: stri
 
 export async function fetchTemplateProject(): Promise<ProjectModel> {
   return request<ProjectModel>("/projects/template");
+}
+
+export async function fetchProjectSettings(): Promise<ProjectSettingsResult> {
+  return request<ProjectSettingsResult>("/project/settings");
+}
+
+export async function updateProjectSettings(
+  project: ProjectModel,
+  settings: Record<string, unknown>
+): Promise<ProjectSettingsUpdateResult> {
+  return request<ProjectSettingsUpdateResult>("/project/settings", {
+    method: "PUT",
+    body: JSON.stringify({ project, settings }),
+  });
 }
 
 export async function validateProject(payload: { project?: ProjectModel; yaml?: string }): Promise<{

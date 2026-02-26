@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 
 import ProjectToolbar from "./components/ProjectToolbar";
 import WidgetPalette from "./components/WidgetPalette";
 import ScreenManager from "./components/ScreenManager";
+import ProjectSettings from "./components/ProjectSettings";
 import ComponentManager from "./components/ComponentManager";
 import Canvas from "./components/Canvas";
 import PropertyInspector from "./components/PropertyInspector";
@@ -86,6 +87,7 @@ export default function App(): JSX.Element {
         >
           <WidgetPalette />
           <ScreenManager />
+          <ProjectSettings />
           <ComponentManager />
           <StyleManager />
           <AssetManager />

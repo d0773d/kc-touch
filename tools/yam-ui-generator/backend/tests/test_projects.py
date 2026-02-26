@@ -102,6 +102,45 @@ def test_style_lint_endpoint_detects_missing_values() -> None:
     assert any("backgroundColor" in issue["message"] for issue in issues)
 
 
+def test_project_settings_get_endpoint_returns_template_app_settings() -> None:
+    client = _client()
+    response = client.get("/project/settings")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["settings"]["name"] == "YamUI Sample Application"
+    assert body["settings"]["initial_screen"] == "main"
+    assert body["settings"]["locale"] == "en"
+
+
+def test_project_settings_put_endpoint_normalizes_project_state() -> None:
+    client = _client()
+    project = get_template_project().model_copy(deep=True)
+    project.screens["secondary"] = project.screens["main"].model_copy(deep=True)
+    project.screens["secondary"].name = "secondary"
+    project.screens["secondary"].initial = False
+
+    response = client.put(
+        "/project/settings",
+        json={
+            "project": project.model_dump(mode="json"),
+            "settings": {
+                "name": "Hydro Console",
+                "initial_screen": "secondary",
+                "locale": "fr",
+                "supported_locales": ["en", "fr"],
+            },
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project"]["app"]["name"] == "Hydro Console"
+    assert body["project"]["app"]["initial_screen"] == "secondary"
+    assert body["project"]["app"]["locale"] == "fr"
+    assert "fr" in body["project"]["translations"]
+    assert body["project"]["screens"]["secondary"]["initial"] is True
+    assert body["project"]["screens"]["main"]["initial"] is False
+
+
 def test_translation_export_endpoints_return_content() -> None:
     client = _client()
     project = get_template_project()

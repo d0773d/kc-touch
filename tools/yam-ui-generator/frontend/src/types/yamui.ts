@@ -80,6 +80,16 @@ export interface TranslationExportResult {
   issues: ValidationIssue[];
 }
 
+export interface ProjectSettingsResult {
+  settings: Record<string, unknown>;
+}
+
+export interface ProjectSettingsUpdateResult {
+  project: ProjectModel;
+  settings: Record<string, unknown>;
+  issues: ValidationIssue[];
+}
+
 export interface ProjectModel {
   app: Record<string, unknown>;
   state: Record<string, unknown>;

@@ -23,8 +23,10 @@ The service listens on `http://0.0.0.0:8000` by default.
 
 - `GET /health` — simple readiness probe
 - `GET /widgets/palette` — list of supported widgets and their capabilities
-- `GET /schema` — JSON schema for YamUI projects
-- `POST /projects/import` — accepts YamUI YAML and returns the JSON model
+- `GET /schema` – JSON schema for YamUI projects
+- `GET /project/settings` – returns current app-level settings template
+- `PUT /project/settings` – applies app-level settings to a project and returns normalized project + issues
+- `POST /projects/import` – accepts YamUI YAML and returns the JSON model
 - `POST /projects/export` — accepts the JSON project and returns YAML
 - `POST /projects/validate` — validates YAML or JSON payloads and reports structured errors
 

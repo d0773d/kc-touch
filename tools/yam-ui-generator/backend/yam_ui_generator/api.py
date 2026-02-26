@@ -21,6 +21,9 @@ from .models import (
     ProjectExportResponse,
     ProjectImportRequest,
     ProjectImportResponse,
+    ProjectSettingsResponse,
+    ProjectSettingsUpdateRequest,
+    ProjectSettingsUpdateResponse,
     ProjectValidateRequest,
     ProjectValidateResponse,
     StyleLintRequest,
@@ -37,6 +40,7 @@ from .palette import PALETTE
 from .project_service import (
     export_project_to_yaml,
     export_translations_payload,
+    apply_project_settings,
     import_project_from_yaml,
     import_translations_payload,
     validate_payload,
@@ -73,6 +77,23 @@ def get_schema() -> dict[str, object]:
 @app.get("/projects/template", response_model=Project)
 def get_project_template() -> Project:
     return get_template_project()
+
+
+@app.get("/project/settings", response_model=ProjectSettingsResponse)
+def get_project_settings() -> ProjectSettingsResponse:
+    template = get_template_project()
+    return ProjectSettingsResponse(settings=dict(template.app or {}))
+
+
+@app.put("/project/settings", response_model=ProjectSettingsUpdateResponse)
+def put_project_settings(payload: ProjectSettingsUpdateRequest) -> ProjectSettingsUpdateResponse:
+    updated_project, issues = apply_project_settings(payload.project, payload.settings)
+    issues.extend(validate_payload(updated_project, None))
+    return ProjectSettingsUpdateResponse(
+        project=updated_project,
+        settings=dict(updated_project.app or {}),
+        issues=issues,
+    )
 
 
 @app.post("/styles/preview", response_model=StylePreviewResponse)

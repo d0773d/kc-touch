@@ -40,6 +40,63 @@ def validate_payload(project: Project | None, yaml_text: str | None) -> List[Val
     return [ValidationIssue(path="/", message="No payload to validate", severity="error")]
 
 
+def apply_project_settings(project: Project, settings: Dict[str, object]) -> Tuple[Project, List[ValidationIssue]]:
+    """Apply app-level settings and normalize dependent state."""
+
+    next_project = project.model_copy(deep=True)
+    next_app = dict(next_project.app or {})
+    issues: List[ValidationIssue] = []
+
+    for key, value in (settings or {}).items():
+        next_app[key] = value
+
+    requested_initial = str(next_app.get("initial_screen", "") or "").strip()
+    if requested_initial:
+        if requested_initial in next_project.screens:
+            for name, screen in next_project.screens.items():
+                screen.initial = name == requested_initial
+        else:
+            issues.append(
+                ValidationIssue(
+                    path="/app/initial_screen",
+                    message=f"Initial screen '{requested_initial}' does not exist",
+                    severity="warning",
+                )
+            )
+
+    locale = str(next_app.get("locale", "") or "").strip()
+    if locale and locale not in next_project.translations:
+        next_project.translations[locale] = TranslationLocale(
+            label=locale,
+            entries={},
+            metadata={},
+        )
+
+    raw_supported = next_app.get("supported_locales")
+    supported_locales: List[str] = []
+    if isinstance(raw_supported, list):
+        supported_locales = [str(item).strip() for item in raw_supported if str(item).strip()]
+    elif isinstance(raw_supported, str) and raw_supported.strip():
+        supported_locales = [item.strip() for item in raw_supported.split(",") if item.strip()]
+
+    if locale and locale not in supported_locales:
+        supported_locales.append(locale)
+
+    for code in supported_locales:
+        if code not in next_project.translations:
+            next_project.translations[code] = TranslationLocale(
+                label=code,
+                entries={},
+                metadata={},
+            )
+
+    if supported_locales:
+        next_app["supported_locales"] = supported_locales
+
+    next_project.app = next_app
+    return next_project, issues
+
+
 TranslationFormat = Literal["json", "csv"]
 
 

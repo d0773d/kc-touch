@@ -234,6 +234,21 @@ class ProjectValidateResponse(BaseModel):
     issues: List[ValidationIssue] = Field(default_factory=list)
 
 
+class ProjectSettingsResponse(BaseModel):
+    settings: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectSettingsUpdateRequest(BaseModel):
+    project: Project
+    settings: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectSettingsUpdateResponse(BaseModel):
+    project: Project
+    settings: Dict[str, Any] = Field(default_factory=dict)
+    issues: List[ValidationIssue] = Field(default_factory=list)
+
+
 class TranslationExportRequest(BaseModel):
     project: Project
     format: Literal["json", "csv"] = Field(default="json")

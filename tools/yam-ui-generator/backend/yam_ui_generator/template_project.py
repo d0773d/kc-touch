@@ -9,6 +9,9 @@ TEMPLATE_PROJECT_DATA = {
         "name": "YamUI Sample Application",
         "version": "0.1.0",
         "author": "YamUI",
+        "initial_screen": "main",
+        "locale": "en",
+        "supported_locales": ["en", "es"],
     },
     "state": {
         "welcome_message": "Welcome to YamUI",
