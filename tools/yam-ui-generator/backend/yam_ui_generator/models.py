@@ -205,6 +205,7 @@ class ProjectExportRequest(BaseModel):
     """Request payload for exporting YAML."""
 
     project: Project
+    options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ProjectValidateRequest(BaseModel):

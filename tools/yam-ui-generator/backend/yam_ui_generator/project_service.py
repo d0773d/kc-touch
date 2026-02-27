@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import io
 import json
-from typing import Dict, List, Tuple, Literal
+from typing import Any, Dict, List, Tuple, Literal, Set
 
 from .models import Project, TranslationLocale, ValidationIssue
 from .schema import validate_project
 from .yaml_io import ensure_project_dict, project_from_yaml, project_to_yaml
+from .asset_service import collect_asset_catalog
 
 
 def import_project_from_yaml(text: str) -> Tuple[Project, List[ValidationIssue]]:
@@ -20,11 +22,98 @@ def import_project_from_yaml(text: str) -> Tuple[Project, List[ValidationIssue]]
     return project, issues
 
 
-def export_project_to_yaml(project: Project) -> Tuple[str, List[ValidationIssue]]:
+def _iter_widgets(widgets: List[Dict[str, Any]] | None):
+    if not widgets:
+        return
+    for widget in widgets:
+        if not isinstance(widget, dict):
+            continue
+        yield widget
+        child_widgets = widget.get("widgets")
+        if isinstance(child_widgets, list):
+            yield from _iter_widgets(child_widgets)
+
+
+def _collect_used_styles(project_dict: Dict[str, Any]) -> Set[str]:
+    used: Set[str] = set()
+    screens = project_dict.get("screens")
+    if isinstance(screens, dict):
+        for screen in screens.values():
+            if not isinstance(screen, dict):
+                continue
+            widgets = screen.get("widgets")
+            if isinstance(widgets, list):
+                for widget in _iter_widgets(widgets):
+                    style_name = widget.get("style")
+                    if isinstance(style_name, str) and style_name.strip():
+                        used.add(style_name)
+    components = project_dict.get("components")
+    if isinstance(components, dict):
+        for component in components.values():
+            if not isinstance(component, dict):
+                continue
+            widgets = component.get("widgets")
+            if isinstance(widgets, list):
+                for widget in _iter_widgets(widgets):
+                    style_name = widget.get("style")
+                    if isinstance(style_name, str) and style_name.strip():
+                        used.add(style_name)
+    return used
+
+
+def _apply_export_options(project: Project, options: Dict[str, Any] | None) -> Tuple[Project, List[ValidationIssue]]:
+    options = options or {}
+    next_project = project.model_copy(deep=True)
+    issues: List[ValidationIssue] = []
+    project_dict = ensure_project_dict(next_project)
+
+    if options.get("prune_unused_styles"):
+        styles = project_dict.get("styles")
+        if isinstance(styles, dict):
+            used_styles = _collect_used_styles(project_dict)
+            pruned = [name for name in list(styles.keys()) if name not in used_styles]
+            if pruned:
+                for name in pruned:
+                    styles.pop(name, None)
+                issues.append(
+                    ValidationIssue(
+                        path="/styles",
+                        message=f"Pruned {len(pruned)} unused style(s): {', '.join(sorted(pruned))}",
+                        severity="warning",
+                    )
+                )
+
+    if options.get("include_asset_manifest"):
+        current_project = Project.model_validate(project_dict)
+        assets = [asset for asset in collect_asset_catalog(current_project) if asset.usage_count > 0]
+        manifest = {
+            "generated_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "asset_count": len(assets),
+            "assets": [
+                {
+                    "path": asset.path,
+                    "kind": asset.kind,
+                    "usage_count": asset.usage_count,
+                }
+                for asset in assets
+            ],
+        }
+        app = project_dict.get("app")
+        if not isinstance(app, dict):
+            app = {}
+            project_dict["app"] = app
+        app["asset_manifest"] = manifest
+
+    next_project = Project.model_validate(project_dict)
+    return next_project, issues
+
+
+def export_project_to_yaml(project: Project, options: Dict[str, Any] | None = None) -> Tuple[str, List[ValidationIssue]]:
     """Serialize a project and validate the result for determinism."""
 
-    issues = validate_project(ensure_project_dict(project))
-    yaml_text = project_to_yaml(project)
+    transformed_project, transform_issues = _apply_export_options(project, options)
+    issues = transform_issues + validate_project(ensure_project_dict(transformed_project))
+    yaml_text = project_to_yaml(transformed_project)
     return yaml_text, issues
 
 

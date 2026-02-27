@@ -208,7 +208,7 @@ def import_project(payload: ProjectImportRequest) -> ProjectImportResponse:
 
 @app.post("/projects/export", response_model=ProjectExportResponse)
 def export_project(payload: ProjectExportRequest) -> ProjectExportResponse:
-    yaml_text, issues = export_project_to_yaml(payload.project)
+    yaml_text, issues = export_project_to_yaml(payload.project, payload.options)
     return ProjectExportResponse(yaml=yaml_text, issues=issues)
 
 

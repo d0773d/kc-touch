@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
 from jsonschema import Draft202012Validator, ValidationError
@@ -267,6 +268,154 @@ PROJECT_SCHEMA: Dict[str, Any] = {
 }
 
 _VALIDATOR = Draft202012Validator(PROJECT_SCHEMA)
+_TRANSLATION_EXPRESSION_PATTERN = re.compile(
+    r"^(?:\{\{\s*)?t\(\s*[\"']([^\"'()]+)[\"']\s*(?:,[^)]*)?\)\s*(?:\}\})?$",
+    re.IGNORECASE,
+)
+
+
+def _extract_translation_key(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = _TRANSLATION_EXPRESSION_PATTERN.match(value.strip())
+    if not match:
+        return None
+    key = (match.group(1) or "").strip()
+    return key or None
+
+
+def _iter_widgets(widgets: Any, prefix: str):
+    if not isinstance(widgets, list):
+        return
+    for index, widget in enumerate(widgets):
+        if not isinstance(widget, dict):
+            continue
+        widget_path = f"{prefix}/{index}"
+        yield widget_path, widget
+        child_widgets = widget.get("widgets")
+        if isinstance(child_widgets, list):
+            yield from _iter_widgets(child_widgets, f"{widget_path}/widgets")
+
+
+def _validate_semantic_rules(raw: Dict[str, Any]) -> List[ValidationIssue]:
+    issues: List[ValidationIssue] = []
+    app = raw.get("app") if isinstance(raw.get("app"), dict) else {}
+    screens = raw.get("screens") if isinstance(raw.get("screens"), dict) else {}
+    styles = raw.get("styles") if isinstance(raw.get("styles"), dict) else {}
+    components = raw.get("components") if isinstance(raw.get("components"), dict) else {}
+    translations = raw.get("translations") if isinstance(raw.get("translations"), dict) else {}
+
+    # App settings cross-reference checks.
+    initial_screen = app.get("initial_screen")
+    if isinstance(initial_screen, str) and initial_screen.strip() and initial_screen not in screens:
+        issues.append(
+            ValidationIssue(
+                path="/app/initial_screen",
+                message=f"Initial screen '{initial_screen}' is not defined under screens",
+                severity="warning",
+            )
+        )
+
+    locale = app.get("locale")
+    if isinstance(locale, str) and locale.strip() and locale not in translations:
+        issues.append(
+            ValidationIssue(
+                path="/app/locale",
+                message=f"Default locale '{locale}' is missing in translations",
+                severity="warning",
+            )
+        )
+
+    supported_locales = app.get("supported_locales")
+    if isinstance(supported_locales, list):
+        for idx, entry in enumerate(supported_locales):
+            if not isinstance(entry, str) or not entry.strip():
+                issues.append(
+                    ValidationIssue(
+                        path=f"/app/supported_locales/{idx}",
+                        message="Supported locale values must be non-empty strings",
+                        severity="warning",
+                    )
+                )
+                continue
+            if entry not in translations:
+                issues.append(
+                    ValidationIssue(
+                        path=f"/app/supported_locales/{idx}",
+                        message=f"Supported locale '{entry}' is missing in translations",
+                        severity="warning",
+                    )
+                )
+
+    translation_keys: set[str] = set()
+    for locale_payload in translations.values():
+        if not isinstance(locale_payload, dict):
+            continue
+        entries = locale_payload.get("entries")
+        if not isinstance(entries, dict):
+            continue
+        for key in entries.keys():
+            if isinstance(key, str) and key.strip():
+                translation_keys.add(key)
+
+    def validate_widget_tree(widgets: Any, base_path: str) -> None:
+        for widget_path, widget in _iter_widgets(widgets, base_path):
+            style_name = widget.get("style")
+            if isinstance(style_name, str) and style_name.strip() and style_name not in styles:
+                issues.append(
+                    ValidationIssue(
+                        path=f"{widget_path}/style",
+                        message=f"Style '{style_name}' is not defined",
+                        severity="warning",
+                    )
+                )
+
+            if widget.get("type") == "component":
+                props = widget.get("props")
+                component_name = props.get("component") if isinstance(props, dict) else None
+                if isinstance(component_name, str) and component_name.strip() and component_name not in components:
+                    issues.append(
+                        ValidationIssue(
+                            path=f"{widget_path}/props/component",
+                            message=f"Component '{component_name}' is not defined",
+                            severity="warning",
+                        )
+                    )
+
+            text_key = _extract_translation_key(widget.get("text"))
+            if text_key and text_key not in translation_keys:
+                issues.append(
+                    ValidationIssue(
+                        path=f"{widget_path}/text",
+                        message=f"Translation key '{text_key}' is not defined",
+                        severity="warning",
+                    )
+                )
+
+            bindings = widget.get("bindings")
+            if isinstance(bindings, dict):
+                for binding_name, binding_value in bindings.items():
+                    key = _extract_translation_key(binding_value)
+                    if key and key not in translation_keys:
+                        issues.append(
+                            ValidationIssue(
+                                path=f"{widget_path}/bindings/{binding_name}",
+                                message=f"Translation key '{key}' is not defined",
+                                severity="warning",
+                            )
+                        )
+
+    for screen_name, screen in screens.items():
+        if not isinstance(screen, dict):
+            continue
+        validate_widget_tree(screen.get("widgets"), f"/screens/{screen_name}/widgets")
+
+    for component_name, component in components.items():
+        if not isinstance(component, dict):
+            continue
+        validate_widget_tree(component.get("widgets"), f"/components/{component_name}/widgets")
+
+    return issues
 
 
 def validate_project(raw: Dict[str, Any]) -> List[ValidationIssue]:
@@ -281,4 +430,5 @@ def validate_project(raw: Dict[str, Any]) -> List[ValidationIssue]:
                 severity="error" if error.validator == "required" else "warning",
             )
         )
+    issues.extend(_validate_semantic_rules(raw))
     return issues

@@ -1,4 +1,5 @@
 import json
+import yaml
 
 from fastapi.testclient import TestClient
 
@@ -36,6 +37,76 @@ def test_export_endpoint_returns_yaml_and_no_issues() -> None:
     body = response.json()
     assert body["issues"] == []
     assert "screens:" in body["yaml"]
+
+
+def test_export_endpoint_can_prune_unused_styles() -> None:
+    client = _client()
+    project = {
+        "app": {},
+        "state": {},
+        "translations": {"en": {"label": "English", "entries": {}}},
+        "styles": {
+            "used_style": {
+                "name": "Used",
+                "category": "surface",
+                "value": {"backgroundColor": "#ffffff"},
+            },
+            "unused_style": {
+                "name": "Unused",
+                "category": "surface",
+                "value": {"backgroundColor": "#000000"},
+            },
+        },
+        "components": {},
+        "screens": {
+            "main": {
+                "name": "main",
+                "initial": True,
+                "widgets": [{"type": "label", "id": "hero", "text": "Hello", "style": "used_style"}],
+            }
+        },
+    }
+    response = client.post(
+        "/projects/export",
+        json={"project": project, "options": {"prune_unused_styles": True}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    exported = yaml.safe_load(body["yaml"])
+    assert "used_style" in exported["styles"]
+    assert "unused_style" not in exported["styles"]
+    assert any("Pruned" in issue["message"] for issue in body["issues"])
+
+
+def test_export_endpoint_can_include_asset_manifest() -> None:
+    client = _client()
+    project = {
+        "app": {},
+        "state": {},
+        "translations": {"en": {"label": "English", "entries": {}}},
+        "styles": {},
+        "components": {},
+        "screens": {
+            "main": {
+                "name": "main",
+                "initial": True,
+                "widgets": [{"type": "img", "id": "hero", "src": "media/hero.png"}],
+            }
+        },
+    }
+    response = client.post(
+        "/projects/export",
+        json={"project": project, "options": {"include_asset_manifest": True}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    exported = yaml.safe_load(body["yaml"])
+    manifest = exported["app"]["asset_manifest"]
+    assets = manifest["assets"]
+    assert manifest["asset_count"] == len(assets)
+    assert any(asset["path"] == "media/hero.png" for asset in assets)
+    hero = next(asset for asset in assets if asset["path"] == "media/hero.png")
+    assert hero["usage_count"] >= 1
 
 
 def test_import_endpoint_round_trips_yaml() -> None:
@@ -211,3 +282,50 @@ def test_translation_import_csv_updates_entries() -> None:
     body = response.json()
     assert body["translations"]["en"]["entries"]["status.banner"] == "Online"
     assert body["translations"]["es"]["entries"]["status.banner"] == "En linea"
+
+
+def test_validate_reports_semantic_cross_reference_warnings() -> None:
+    client = _client()
+    project = {
+        "app": {
+            "initial_screen": "missing_screen",
+            "locale": "fr",
+            "supported_locales": ["en", "fr"],
+        },
+        "state": {},
+        "translations": {
+            "en": {
+                "label": "English",
+                "entries": {
+                    "known.key": "Known",
+                },
+            }
+        },
+        "styles": {},
+        "components": {},
+        "screens": {
+            "main": {
+                "name": "main",
+                "initial": True,
+                "widgets": [
+                    {
+                        "type": "label",
+                        "id": "label-1",
+                        "text": "{{ t('missing.key') }}",
+                        "style": "missing-style",
+                    }
+                ],
+            }
+        },
+    }
+
+    response = client.post("/projects/validate", json={"project": project})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True  # semantic findings are warnings
+    issues = body["issues"]
+    assert any(issue["path"] == "/app/initial_screen" and "not defined under screens" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/app/locale" and "missing in translations" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/app/supported_locales/1" and "missing in translations" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/style" and "not defined" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/text" and "Translation key" in issue["message"] for issue in issues)
