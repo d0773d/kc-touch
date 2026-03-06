@@ -14,7 +14,7 @@ interface Props {
 }
 
 export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
-  const { project, setProject, lastExport, setLastExport, loadTemplateProject } = useProject();
+  const { project, setProject, lastExport, setLastExport, loadTemplateProject, snapshotHistory, restoreSnapshot } = useProject();
   const [busy, setBusy] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -31,6 +31,9 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
   const [styleLintIssues, setStyleLintIssues] = useState<ValidationIssue[]>([]);
   const [styleLintBusy, setStyleLintBusy] = useState(false);
   const [styleLintError, setStyleLintError] = useState<string | null>(null);
+  const [showRestore, setShowRestore] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [confirmRestoreSnapshotId, setConfirmRestoreSnapshotId] = useState<string | null>(null);
 
   const handleValidate = async () => {
     setBusy(true);
@@ -159,6 +162,43 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
     const warnings = styleLintIssues.length - errors;
     return `${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}`;
   }, [styleLintBusy, styleLintError, styleLintIssues]);
+  const snapshotEntries = useMemo(() => {
+    return [...snapshotHistory].sort((a, b) => b.savedAt - a.savedAt).slice(0, 20);
+  }, [snapshotHistory]);
+
+  const formatSnapshotTime = useCallback((value: number) => {
+    return new Date(value).toLocaleString();
+  }, []);
+  const confirmRestoreSnapshot = useMemo(
+    () => snapshotEntries.find((entry) => entry.id === confirmRestoreSnapshotId) ?? null,
+    [confirmRestoreSnapshotId, snapshotEntries]
+  );
+
+  const openRestoreModal = useCallback(() => {
+    setRestoreError(null);
+    setConfirmRestoreSnapshotId(null);
+    setShowRestore(true);
+  }, []);
+
+  const requestRestoreSnapshot = useCallback((snapshotId: string) => {
+    setRestoreError(null);
+    setConfirmRestoreSnapshotId(snapshotId);
+  }, []);
+
+  const handleRestoreSnapshot = useCallback(() => {
+    if (!confirmRestoreSnapshotId) {
+      return;
+    }
+    const restored = restoreSnapshot(confirmRestoreSnapshotId);
+    if (!restored) {
+      setRestoreError("Unable to restore snapshot. It may no longer be available.");
+      return;
+    }
+    setRestoreError(null);
+    setConfirmRestoreSnapshotId(null);
+    setShowRestore(false);
+    onIssues([]);
+  }, [confirmRestoreSnapshotId, onIssues, restoreSnapshot]);
 
   const renderIssues = useCallback(
     (issues: ValidationIssue[]) => (
@@ -196,6 +236,9 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
         <button className="button secondary" onClick={handleLoadSample} disabled={busy || sampleBusy}>
           {sampleBusy ? "Loading sample..." : "Load Sample"}
         </button>
+        <button className="button secondary" onClick={openRestoreModal} disabled={busy || snapshotEntries.length === 0}>
+          Restore Snapshot
+        </button>
         <button className="button secondary" onClick={openImportModal} disabled={busy}>
           Import YAML
         </button>
@@ -207,6 +250,72 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
         </button>
       </div>
       <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Version {__APP_VERSION__}</span>
+      {showRestore && (
+        <Modal
+          title="Restore Snapshot"
+          onClose={() => {
+                  setConfirmRestoreSnapshotId(null);
+      setShowRestore(false);
+            setRestoreError(null);
+          }}
+          width={700}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {snapshotEntries.map((entry) => (
+              <div
+                key={entry.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                  border: "1px solid rgba(15, 23, 42, 0.12)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  background: "#fff",
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <strong>{formatSnapshotTime(entry.savedAt)}</strong>
+                  <span className="field-hint">{entry.editorTarget.type}:{entry.editorTarget.id}</span>
+                </div>
+                <button className="button secondary" onClick={() => requestRestoreSnapshot(entry.id)}>
+                  Restore
+                </button>
+              </div>
+            ))}
+            {!snapshotEntries.length && <p className="field-hint">No snapshots available yet.</p>}
+            {restoreError && <p className="field-hint warning-text">{restoreError}</p>}
+          </div>
+        </Modal>
+      )}
+      {confirmRestoreSnapshot && (
+        <Modal
+          title="Confirm Snapshot Restore"
+          onClose={() => setConfirmRestoreSnapshotId(null)}
+          width={520}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p style={{ margin: 0 }}>
+              Restore this snapshot and replace the current in-memory project state?
+            </p>
+            <div style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(15, 23, 42, 0.12)", background: "#fff" }}>
+              <strong>{formatSnapshotTime(confirmRestoreSnapshot.savedAt)}</strong>
+              <p className="field-hint" style={{ margin: "6px 0 0" }}>
+                {confirmRestoreSnapshot.editorTarget.type}:{confirmRestoreSnapshot.editorTarget.id}
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="button secondary" onClick={() => setConfirmRestoreSnapshotId(null)}>
+                Cancel
+              </button>
+              <button className="button primary" onClick={handleRestoreSnapshot}>
+                Restore now
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {showImport && (
         <Modal
           title="Import YamUI YAML"
@@ -279,3 +388,18 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
     </section>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../utils/api", () => ({
@@ -11,10 +11,13 @@ import { ProjectModel } from "../types/yamui";
 import { ProjectProvider, useProject } from "./ProjectContext";
 
 describe("ProjectContext", () => {
+  const PROJECT_SNAPSHOT_STORAGE_KEY = "yamui_project_snapshot_v1";
+  const PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY = "yamui_project_snapshot_history_v1";
   const wrapper = ({ children }: { children: ReactNode }) => <ProjectProvider>{children}</ProjectProvider>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
   });
 
   it("provides a default project with an initial main screen", () => {
@@ -187,4 +190,100 @@ describe("ProjectContext", () => {
     expect(result.current.project.screens.main.widgets[0]?.style).toBeUndefined();
     expect(result.current.styleEditorSelection).toBeNull();
   });
+  it("restores project state from local storage snapshot", () => {
+    window.localStorage.setItem(
+      PROJECT_SNAPSHOT_STORAGE_KEY,
+      JSON.stringify({
+        project: {
+          app: {},
+          state: {},
+          translations: {
+            en: {
+              label: "English",
+              entries: {},
+              metadata: {},
+            },
+          },
+          styles: {},
+          components: {},
+          screens: {
+            saved: {
+              name: "saved",
+              title: "Saved Screen",
+              initial: true,
+              metadata: {},
+              widgets: [],
+            },
+          },
+        },
+        editorTarget: { type: "screen", id: "saved" },
+      })
+    );
+
+    const { result } = renderHook(() => useProject(), { wrapper });
+
+    expect(result.current.project.screens.saved).toBeDefined();
+    expect(result.current.editorTarget).toEqual({ type: "screen", id: "saved" });
+  });
+
+  it("persists project snapshot when project state changes", async () => {
+    const { result } = renderHook(() => useProject(), { wrapper });
+
+    act(() => {
+      result.current.addScreen("autosave");
+      result.current.setEditorTarget({ type: "screen", id: "autosave" });
+    });
+
+    await waitFor(() => {
+      const raw = window.localStorage.getItem(PROJECT_SNAPSHOT_STORAGE_KEY);
+      expect(raw).toBeTruthy();
+      const parsed = JSON.parse(raw ?? "{}") as {
+        project?: ProjectModel;
+        editorTarget?: { type: string; id: string };
+      };
+      expect(parsed.project?.screens?.autosave).toBeDefined();
+      expect(parsed.editorTarget).toEqual({ type: "screen", id: "autosave" });
+      const historyRaw = window.localStorage.getItem(PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY);
+      expect(historyRaw).toBeTruthy();
+      const history = JSON.parse(historyRaw ?? "[]") as Array<{ id: string }>;
+      expect(history.length).toBeGreaterThan(0);
+    });
+  });
+  it("restores a selected snapshot from history", async () => {
+    const { result } = renderHook(() => useProject(), { wrapper });
+
+    act(() => {
+      result.current.addScreen("alpha");
+      result.current.setEditorTarget({ type: "screen", id: "alpha" });
+    });
+
+    await waitFor(() => {
+      expect(result.current.snapshotHistory.some((entry) => entry.editorTarget.id === "alpha")).toBe(true);
+    });
+
+    act(() => {
+      result.current.addScreen("beta");
+      result.current.setEditorTarget({ type: "screen", id: "beta" });
+    });
+
+    await waitFor(() => {
+      expect(result.current.editorTarget.id).toBe("beta");
+    });
+
+    const alphaSnapshot = result.current.snapshotHistory
+      .slice()
+      .reverse()
+      .find((entry) => entry.editorTarget.id === "alpha");
+
+    expect(alphaSnapshot).toBeDefined();
+
+    act(() => {
+      const restored = result.current.restoreSnapshot(alphaSnapshot!.id);
+      expect(restored).toBe(true);
+    });
+
+    expect(result.current.editorTarget.id).toBe("alpha");
+    expect(result.current.project.screens.beta).toBeUndefined();
+  });
 });
+

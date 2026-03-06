@@ -1,4 +1,4 @@
-import { createContext, Dispatch, ReactNode, SetStateAction, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, Dispatch, ReactNode, SetStateAction, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   AssetReference,
   ProjectModel,
@@ -44,9 +44,17 @@ type TranslationFocusRequest = {
   origin?: string;
 };
 
+export type ProjectSnapshotEntry = {
+  id: string;
+  savedAt: number;
+  project: ProjectModel;
+  editorTarget: EditorTarget;
+};
 interface ProjectContextValue {
   project: ProjectModel;
   setProject: (next: ProjectModel) => void;
+  snapshotHistory: ProjectSnapshotEntry[];
+  restoreSnapshot: (snapshotId: string) => boolean;
   editorTarget: EditorTarget;
   setEditorTarget: (target: EditorTarget) => void;
   selectedPath: WidgetPath | null;
@@ -110,6 +118,9 @@ const DEFAULT_ASSET_FILTERS: AssetFilterState = {
 };
 
 const ASSET_FILTERS_STORAGE_KEY = "yamui_asset_filters_v1";
+const PROJECT_SNAPSHOT_STORAGE_KEY = "yamui_project_snapshot_v1";
+const PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY = "yamui_project_snapshot_history_v1";
+const SNAPSHOT_HISTORY_LIMIT = 30;
 const DEFAULT_LOCALE_CODE = "en";
 
 const DEFAULT_LOCALE_LABELS: Record<string, string> = {
@@ -215,6 +226,114 @@ function cloneProject(project: ProjectModel): ProjectModel {
   return deepClone(project);
 }
 
+function resolveEditorTarget(project: ProjectModel, target: EditorTarget | null | undefined): EditorTarget {
+  if (target?.type === "screen" && project.screens[target.id]) {
+    return target;
+  }
+  if (target?.type === "component" && project.components[target.id]) {
+    return target;
+  }
+  const fallbackScreen = Object.keys(project.screens)[0];
+  if (fallbackScreen) {
+    return { type: "screen", id: fallbackScreen };
+  }
+  return DEFAULT_TARGET;
+}
+
+function readStoredProjectSnapshot(): { project: ProjectModel; editorTarget: EditorTarget } | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(PROJECT_SNAPSHOT_STORAGE_KEY);
+    if (!raw) {
+      const history = readStoredProjectSnapshotHistory();
+      const latest = history[history.length - 1];
+      if (!latest) {
+        return null;
+      }
+      return {
+        project: normalizeProjectInPlace(cloneProject(latest.project)),
+        editorTarget: resolveEditorTarget(latest.project, latest.editorTarget),
+      };
+    }
+    const parsed = JSON.parse(raw) as { project?: ProjectModel; editorTarget?: EditorTarget };
+    if (!parsed.project || typeof parsed.project !== "object") {
+      return null;
+    }
+    const normalizedProject = normalizeProjectInPlace(cloneProject(parsed.project));
+    return {
+      project: normalizedProject,
+      editorTarget: resolveEditorTarget(normalizedProject, parsed.editorTarget),
+    };
+  } catch (error) {
+    console.warn("Unable to parse stored project snapshot", error);
+    return null;
+  }
+}
+
+function serializeSnapshotSignature(project: ProjectModel, editorTarget: EditorTarget): string {
+  try {
+    return JSON.stringify({ project, editorTarget });
+  } catch {
+    return "";
+  }
+}
+
+function createSnapshotEntry(project: ProjectModel, editorTarget: EditorTarget, savedAt?: number): ProjectSnapshotEntry {
+  const timestamp = typeof savedAt === "number" && Number.isFinite(savedAt) ? savedAt : Date.now();
+  const normalizedProject = normalizeProjectInPlace(cloneProject(project));
+  return {
+    id: `snapshot_${timestamp}_${Math.random().toString(36).slice(2, 8)}`,
+    savedAt: timestamp,
+    project: normalizedProject,
+    editorTarget: resolveEditorTarget(normalizedProject, editorTarget),
+  };
+}
+
+function readStoredProjectSnapshotHistory(): ProjectSnapshotEntry[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const project = (entry as { project?: ProjectModel }).project;
+        const editorTarget = (entry as { editorTarget?: EditorTarget }).editorTarget;
+        if (!project || !editorTarget) {
+          return null;
+        }
+        const normalizedProject = normalizeProjectInPlace(cloneProject(project));
+        const resolvedTarget = resolveEditorTarget(normalizedProject, editorTarget);
+        const rawSavedAt = (entry as { savedAt?: number }).savedAt;
+        const savedAt = typeof rawSavedAt === "number" && Number.isFinite(rawSavedAt) ? rawSavedAt : Date.now();
+        const rawId = (entry as { id?: string }).id;
+        return {
+          id: typeof rawId === "string" && rawId.length ? rawId : `snapshot_${savedAt}_${Math.random().toString(36).slice(2, 8)}`,
+          savedAt,
+          project: normalizedProject,
+          editorTarget: resolvedTarget,
+        } satisfies ProjectSnapshotEntry;
+      })
+      .filter((entry): entry is ProjectSnapshotEntry => Boolean(entry))
+      .slice(-SNAPSHOT_HISTORY_LIMIT);
+  } catch (error) {
+    console.warn("Unable to parse stored project snapshot history", error);
+    return [];
+  }
+}
+
 function visitAllWidgets(project: ProjectModel, visitor: (widget: WidgetNode) => void): void {
   const visit = (widgets?: WidgetNode[]) => {
     if (!widgets) {
@@ -296,8 +415,24 @@ function accessByPath(root: WidgetNode[], path: WidgetPath): {
 }
 
 export function ProjectProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [project, setProjectState] = useState<ProjectModel>(() => normalizeProjectInPlace(cloneProject(DEFAULT_PROJECT)));
-  const [editorTarget, setEditorTargetState] = useState<EditorTarget>(DEFAULT_TARGET);
+  const restoredSnapshotHistory = useMemo(() => readStoredProjectSnapshotHistory(), []);
+  const restoredSnapshot = useMemo(() => readStoredProjectSnapshot(), []);
+  const [project, setProjectState] = useState<ProjectModel>(
+    () => restoredSnapshot?.project ?? normalizeProjectInPlace(cloneProject(DEFAULT_PROJECT))
+  );
+  const [editorTarget, setEditorTargetState] = useState<EditorTarget>(
+    () => restoredSnapshot?.editorTarget ?? DEFAULT_TARGET
+  );
+  const [snapshotHistory, setSnapshotHistory] = useState<ProjectSnapshotEntry[]>(() => {
+    if (restoredSnapshotHistory.length) {
+      return restoredSnapshotHistory;
+    }
+    if (restoredSnapshot) {
+      return [createSnapshotEntry(restoredSnapshot.project, restoredSnapshot.editorTarget)];
+    }
+    return [createSnapshotEntry(DEFAULT_PROJECT, DEFAULT_TARGET)];
+  });
+  const lastSnapshotSignatureRef = useRef<string>(serializeSnapshotSignature(project, editorTarget));
   const [selectedPath, setSelectedPath] = useState<WidgetPath | null>(null);
   const [lastExport, setLastExportState] = useState<{ yaml: string; issues: ValidationIssue[] } | undefined>(undefined);
   const [styleEditorSelection, setStyleEditorSelection] = useState<string | null>(null);
@@ -326,16 +461,16 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       return DEFAULT_ASSET_FILTERS;
     }
   });
-    useEffect(() => {
-      if (typeof window === "undefined") {
-        return;
-      }
-      try {
-        window.localStorage.setItem(ASSET_FILTERS_STORAGE_KEY, JSON.stringify(assetFilters));
-      } catch (error) {
-        console.warn("Unable to persist asset filters", error);
-      }
-    }, [assetFilters]);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(ASSET_FILTERS_STORAGE_KEY, JSON.stringify(assetFilters));
+    } catch (error) {
+      console.warn("Unable to persist asset filters", error);
+    }
+  }, [assetFilters]);
   const [pendingAssetUploads, setPendingAssetUploads] = useState<PendingAssetUpload[]>([]);
   const [assetTagDrafts, setAssetTagDrafts] = useState<AssetTagDraftMap>({});
   const [assetTagBusyMap, setAssetTagBusyMap] = useState<AssetTagBusyMap>({});
@@ -351,6 +486,29 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       return fallback ?? null;
     });
   }, [project.styles, setStyleEditorSelection]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const signature = serializeSnapshotSignature(project, editorTarget);
+    if (!signature || signature === lastSnapshotSignatureRef.current) {
+      return;
+    }
+    lastSnapshotSignatureRef.current = signature;
+
+    const snapshot = createSnapshotEntry(project, editorTarget);
+    setSnapshotHistory((prev) => {
+      const next = [...prev, snapshot].slice(-SNAPSHOT_HISTORY_LIMIT);
+      try {
+        window.localStorage.setItem(PROJECT_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+        window.localStorage.setItem(PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY, JSON.stringify(next));
+      } catch (error) {
+        console.warn("Unable to persist project snapshot history", error);
+      }
+      return next;
+    });
+  }, [editorTarget, project]);
 
   const loadAssetCatalog = useCallback(
     async ({ force }: { force?: boolean } = {}) => {
@@ -393,6 +551,22 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       return current;
     });
   }, []);
+  const restoreSnapshot = useCallback(
+    (snapshotId: string) => {
+      const target = snapshotHistory.find((entry) => entry.id === snapshotId);
+      if (!target) {
+        return false;
+      }
+      const normalizedProject = normalizeProjectInPlace(cloneProject(target.project));
+      const resolvedTarget = resolveEditorTarget(normalizedProject, target.editorTarget);
+      lastSnapshotSignatureRef.current = serializeSnapshotSignature(normalizedProject, resolvedTarget);
+      setProjectState(normalizedProject);
+      setEditorTargetState(resolvedTarget);
+      setSelectedPath(null);
+      return true;
+    },
+    [snapshotHistory]
+  );
 
   const selectWidget = useCallback((path: WidgetPath | null) => {
     setSelectedPath(path);
@@ -768,6 +942,8 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
     () => ({
       project,
       setProject,
+      snapshotHistory,
+      restoreSnapshot,
       editorTarget,
       setEditorTarget: setEditorTargetState,
       selectedPath,
@@ -820,6 +996,8 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
     [
       project,
       setProject,
+      snapshotHistory,
+      restoreSnapshot,
       editorTarget,
       selectedPath,
       addWidget,
@@ -868,7 +1046,6 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       updateTranslationValue,
     ]
   );
-
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;
 }
 
@@ -879,3 +1056,24 @@ export function useProject(): ProjectContextValue {
   }
   return ctx;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
