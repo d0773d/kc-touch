@@ -6,10 +6,10 @@ The Yam UI Generator is a companion app for building LVGL layouts that comply wi
 
 ```
 tools/yam-ui-generator/
-├── backend          # FastAPI service for YAML import/export/validation
-├── frontend         # React + Vite application for the visual editor
-├── docs             # Product specifications and design notes
-└── README.md
+â”œâ”€â”€ backend          # FastAPI service for YAML import/export/validation
+â”œâ”€â”€ frontend         # React + Vite application for the visual editor
+â”œâ”€â”€ docs             # Product specifications and design notes
+â””â”€â”€ README.md
 ```
 
 ## Getting Started
@@ -27,4 +27,8 @@ The frontend expects the backend to be available at `http://localhost:8000`. You
 
 ## Documentation
 
-See [docs/phase1-core-features.md](docs/phase1-core-features.md) for the detailed Phase 1 feature breakdown. Additional specifications can be added in the `docs` directory as the project evolves.
+See [docs/phase1-core-features.md](docs/phase1-core-features.md) for the detailed Phase 1 feature breakdown.
+
+For execution planning to final release readiness, see [docs/finish-checklist.md](docs/finish-checklist.md).
+
+Additional specifications can be added in the `docs` directory as the project evolves.

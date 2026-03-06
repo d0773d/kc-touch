@@ -26,7 +26,7 @@ def test_template_endpoint_returns_default_project() -> None:
     assert body["styles"]["stat-value"]["value"]["fontSize"] == 32
     assert "translations" in body
     assert body["translations"]["en"]["entries"]["app.device_overview"] == "Device Overview"
-    assert body["translations"]["es"]["entries"]["actions.trigger_sync"] == "Iniciar sincronización"
+    assert body["translations"]["es"]["entries"]["actions.trigger_sync"] == "Iniciar sincronizaciÃ³n"
 
 
 def test_export_endpoint_returns_yaml_and_no_issues() -> None:
@@ -329,3 +329,41 @@ def test_validate_reports_semantic_cross_reference_warnings() -> None:
     assert any(issue["path"] == "/app/supported_locales/1" and "missing in translations" in issue["message"] for issue in issues)
     assert any(issue["path"] == "/screens/main/widgets/0/style" and "not defined" in issue["message"] for issue in issues)
     assert any(issue["path"] == "/screens/main/widgets/0/text" and "Translation key" in issue["message"] for issue in issues)
+
+def test_preview_render_endpoint_returns_summary_and_findings() -> None:
+    client = _client()
+    project = {
+        "app": {
+            "initial_screen": "missing",
+        },
+        "state": {},
+        "translations": {
+            "en": {
+                "label": "English",
+                "entries": {},
+            }
+        },
+        "styles": {},
+        "components": {},
+        "screens": {
+            "main": {
+                "name": "main",
+                "initial": True,
+                "widgets": [
+                    {
+                        "type": "label",
+                        "id": "label-1",
+                        "style": "missing-style",
+                    }
+                ],
+            }
+        },
+    }
+
+    response = client.post("/preview/render", json={"project": project, "mode": "local"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "issues"
+    assert body["summary"]["screen_count"] == 1
+    assert body["summary"]["finding_count"] >= 1
+    assert any(finding["path"] == "/screens/main/widgets/0/style" for finding in body["findings"])

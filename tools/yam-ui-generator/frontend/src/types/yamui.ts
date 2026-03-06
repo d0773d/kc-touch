@@ -112,6 +112,12 @@ export interface ValidationIssue {
   severity: "error" | "warning";
 }
 
+export interface PreviewRenderResult {
+  status: "ok" | "issues";
+  summary: Record<string, unknown>;
+  findings: ValidationIssue[];
+}
+
 export interface WidgetMetadata {
   type: WidgetType;
   category: "layout" | "ui" | "component";

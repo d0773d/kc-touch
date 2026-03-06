@@ -290,6 +290,17 @@ class StyleLintResponse(BaseModel):
     issues: List[ValidationIssue] = Field(default_factory=list)
 
 
+class PreviewRenderRequest(BaseModel):
+    project: Project
+    mode: Literal["local", "remote"] = Field(default="local")
+
+
+class PreviewRenderResponse(BaseModel):
+    status: Literal["ok", "issues"] = Field(default="ok")
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    findings: List[ValidationIssue] = Field(default_factory=list)
+
+
 class AssetReference(BaseModel):
     """Represents a unique asset discovered inside a project."""
 

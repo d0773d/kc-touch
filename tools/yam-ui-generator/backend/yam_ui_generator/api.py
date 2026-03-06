@@ -22,6 +22,8 @@ from .models import (
     ProjectImportRequest,
     ProjectImportResponse,
     ProjectSettingsResponse,
+    PreviewRenderRequest,
+    PreviewRenderResponse,
     ProjectSettingsUpdateRequest,
     ProjectSettingsUpdateResponse,
     ProjectValidateRequest,
@@ -142,6 +144,29 @@ def lint_styles(payload: StyleLintRequest) -> StyleLintResponse:
                 )
             )
     return StyleLintResponse(issues=issues)
+
+
+
+@app.post("/preview/render", response_model=PreviewRenderResponse)
+def render_preview(payload: PreviewRenderRequest) -> PreviewRenderResponse:
+    issues = validate_payload(payload.project, None)
+    findings = [
+        issue
+        for issue in issues
+        if issue.path.startswith("/screens") or issue.path.startswith("/components") or issue.path.startswith("/app")
+    ]
+    summary = {
+        "mode": payload.mode,
+        "screen_count": len(payload.project.screens),
+        "component_count": len(payload.project.components),
+        "style_count": len(payload.project.styles),
+        "finding_count": len(findings),
+        "error_count": sum(1 for issue in findings if issue.severity == "error"),
+        "warning_count": sum(1 for issue in findings if issue.severity != "error"),
+        "initial_screen": payload.project.initial_screen,
+    }
+    status = "issues" if findings else "ok"
+    return PreviewRenderResponse(status=status, summary=summary, findings=findings)
 
 
 @app.post("/assets/catalog", response_model=AssetCatalogResponse)

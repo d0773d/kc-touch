@@ -2,6 +2,7 @@ import {
   AssetReference,
   ProjectModel,
   ProjectSettingsResult,
+  PreviewRenderResult,
   ProjectSettingsUpdateResult,
   StylePreview,
   StyleTokenModel,
@@ -117,6 +118,13 @@ export async function updateProjectSettings(
   return request<ProjectSettingsUpdateResult>("/project/settings", {
     method: "PUT",
     body: JSON.stringify({ project, settings }),
+  });
+}
+
+export async function renderPreviewContract(project: ProjectModel): Promise<PreviewRenderResult> {
+  return request<PreviewRenderResult>("/preview/render", {
+    method: "POST",
+    body: JSON.stringify({ project, mode: "local" }),
   });
 }
 
