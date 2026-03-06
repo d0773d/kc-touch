@@ -26,7 +26,7 @@ def test_template_endpoint_returns_default_project() -> None:
     assert body["styles"]["stat-value"]["value"]["fontSize"] == 32
     assert "translations" in body
     assert body["translations"]["en"]["entries"]["app.device_overview"] == "Device Overview"
-    assert body["translations"]["es"]["entries"]["actions.trigger_sync"] == "Iniciar sincronizaciÃ³n"
+    assert body["translations"]["es"]["entries"]["actions.trigger_sync"] == "Iniciar sincronización"
 
 
 def test_export_endpoint_returns_yaml_and_no_issues() -> None:

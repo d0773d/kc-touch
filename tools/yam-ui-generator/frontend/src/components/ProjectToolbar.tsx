@@ -14,7 +14,17 @@ interface Props {
 }
 
 export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
-  const { project, setProject, lastExport, setLastExport, loadTemplateProject, snapshotHistory, restoreSnapshot } = useProject();
+  const {
+    project,
+    setProject,
+    lastExport,
+    setLastExport,
+    loadTemplateProject,
+    snapshotHistory,
+    restoreSnapshot,
+    updateSnapshotMetadata,
+    setSnapshotPinned,
+  } = useProject();
   const [busy, setBusy] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -276,12 +286,39 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
                 }}
               >
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <strong>{formatSnapshotTime(entry.savedAt)}</strong>
+                  <strong>{entry.label?.trim() || formatSnapshotTime(entry.savedAt)}</strong>
                   <span className="field-hint">{entry.editorTarget.type}:{entry.editorTarget.id}</span>
+                  {entry.note && <span className="field-hint">{entry.note}</span>}
                 </div>
-                <button className="button secondary" onClick={() => requestRestoreSnapshot(entry.id)}>
-                  Restore
-                </button>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button
+                    className="button secondary"
+                    onClick={() => {
+                      setSnapshotPinned(entry.id, !entry.pinned);
+                    }}
+                  >
+                    {entry.pinned ? "Unpin" : "Pin"}
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => {
+                      const nextLabel = window.prompt("Snapshot label (optional)", entry.label ?? "");
+                      if (nextLabel === null) {
+                        return;
+                      }
+                      const nextNote = window.prompt("Snapshot note (optional)", entry.note ?? "");
+                      if (nextNote === null) {
+                        return;
+                      }
+                      updateSnapshotMetadata(entry.id, { label: nextLabel, note: nextNote });
+                    }}
+                  >
+                    Label/Note
+                  </button>
+                  <button className="button secondary" onClick={() => requestRestoreSnapshot(entry.id)}>
+                    Restore
+                  </button>
+                </div>
               </div>
             ))}
             {!snapshotEntries.length && <p className="field-hint">No snapshots available yet.</p>}

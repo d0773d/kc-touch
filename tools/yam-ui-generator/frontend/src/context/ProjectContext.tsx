@@ -49,12 +49,17 @@ export type ProjectSnapshotEntry = {
   savedAt: number;
   project: ProjectModel;
   editorTarget: EditorTarget;
+  label?: string;
+  note?: string;
+  pinned?: boolean;
 };
 interface ProjectContextValue {
   project: ProjectModel;
   setProject: (next: ProjectModel) => void;
   snapshotHistory: ProjectSnapshotEntry[];
   restoreSnapshot: (snapshotId: string) => boolean;
+  updateSnapshotMetadata: (snapshotId: string, updates: { label?: string; note?: string }) => boolean;
+  setSnapshotPinned: (snapshotId: string, pinned: boolean) => boolean;
   editorTarget: EditorTarget;
   setEditorTarget: (target: EditorTarget) => void;
   selectedPath: WidgetPath | null;
@@ -288,7 +293,21 @@ function createSnapshotEntry(project: ProjectModel, editorTarget: EditorTarget, 
     savedAt: timestamp,
     project: normalizedProject,
     editorTarget: resolveEditorTarget(normalizedProject, editorTarget),
+    pinned: false,
   };
+}
+
+function pruneSnapshotHistory(entries: ProjectSnapshotEntry[]): ProjectSnapshotEntry[] {
+  const unpinnedIndexes = entries
+    .map((entry, index) => ({ index, pinned: Boolean(entry.pinned) }))
+    .filter((entry) => !entry.pinned)
+    .map((entry) => entry.index);
+  const overflow = unpinnedIndexes.length - SNAPSHOT_HISTORY_LIMIT;
+  if (overflow <= 0) {
+    return entries;
+  }
+  const dropIndexes = new Set(unpinnedIndexes.slice(0, overflow));
+  return entries.filter((_, index) => !dropIndexes.has(index));
 }
 
 function readStoredProjectSnapshotHistory(): ProjectSnapshotEntry[] {
@@ -304,7 +323,7 @@ function readStoredProjectSnapshotHistory(): ProjectSnapshotEntry[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed
+    const entries = parsed
       .map((entry) => {
         if (!entry || typeof entry !== "object") {
           return null;
@@ -324,10 +343,14 @@ function readStoredProjectSnapshotHistory(): ProjectSnapshotEntry[] {
           savedAt,
           project: normalizedProject,
           editorTarget: resolvedTarget,
+          label: typeof (entry as { label?: unknown }).label === "string" ? (entry as { label: string }).label : undefined,
+          note: typeof (entry as { note?: unknown }).note === "string" ? (entry as { note: string }).note : undefined,
+          pinned: Boolean((entry as { pinned?: unknown }).pinned),
         } satisfies ProjectSnapshotEntry;
       })
       .filter((entry): entry is ProjectSnapshotEntry => Boolean(entry))
-      .slice(-SNAPSHOT_HISTORY_LIMIT);
+      .sort((a, b) => a.savedAt - b.savedAt);
+    return pruneSnapshotHistory(entries);
   } catch (error) {
     console.warn("Unable to parse stored project snapshot history", error);
     return [];
@@ -499,7 +522,7 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
 
     const snapshot = createSnapshotEntry(project, editorTarget);
     setSnapshotHistory((prev) => {
-      const next = [...prev, snapshot].slice(-SNAPSHOT_HISTORY_LIMIT);
+      const next = pruneSnapshotHistory([...prev, snapshot]);
       try {
         window.localStorage.setItem(PROJECT_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
         window.localStorage.setItem(PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY, JSON.stringify(next));
@@ -567,6 +590,56 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
     },
     [snapshotHistory]
   );
+
+  const updateSnapshotMetadata = useCallback((snapshotId: string, updates: { label?: string; note?: string }) => {
+    let updated = false;
+    setSnapshotHistory((prev) => {
+      const next = prev.map((entry) => {
+        if (entry.id !== snapshotId) {
+          return entry;
+        }
+        updated = true;
+        const label = typeof updates.label === "string" ? updates.label.trim() : entry.label;
+        const note = typeof updates.note === "string" ? updates.note.trim() : entry.note;
+        return {
+          ...entry,
+          label: label ? label : undefined,
+          note: note ? note : undefined,
+        };
+      });
+      if (updated && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY, JSON.stringify(next));
+        } catch (error) {
+          console.warn("Unable to persist project snapshot history", error);
+        }
+      }
+      return next;
+    });
+    return updated;
+  }, []);
+
+  const setSnapshotPinned = useCallback((snapshotId: string, pinned: boolean) => {
+    let updated = false;
+    setSnapshotHistory((prev) => {
+      const next = prev.map((entry) => {
+        if (entry.id !== snapshotId) {
+          return entry;
+        }
+        updated = true;
+        return { ...entry, pinned };
+      });
+      if (updated && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY, JSON.stringify(next));
+        } catch (error) {
+          console.warn("Unable to persist project snapshot history", error);
+        }
+      }
+      return next;
+    });
+    return updated;
+  }, []);
 
   const selectWidget = useCallback((path: WidgetPath | null) => {
     setSelectedPath(path);
@@ -944,6 +1017,8 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       setProject,
       snapshotHistory,
       restoreSnapshot,
+      updateSnapshotMetadata,
+      setSnapshotPinned,
       editorTarget,
       setEditorTarget: setEditorTargetState,
       selectedPath,
@@ -998,6 +1073,8 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       setProject,
       snapshotHistory,
       restoreSnapshot,
+      updateSnapshotMetadata,
+      setSnapshotPinned,
       editorTarget,
       selectedPath,
       addWidget,

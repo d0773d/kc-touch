@@ -285,5 +285,53 @@ describe("ProjectContext", () => {
     expect(result.current.editorTarget.id).toBe("alpha");
     expect(result.current.project.screens.beta).toBeUndefined();
   });
+
+  it("updates snapshot metadata and persists it", async () => {
+    const { result } = renderHook(() => useProject(), { wrapper });
+    const target = result.current.snapshotHistory[result.current.snapshotHistory.length - 1];
+    expect(target).toBeDefined();
+
+    act(() => {
+      const updated = result.current.updateSnapshotMetadata(target!.id, {
+        label: "Checkpoint A",
+        note: "Before import",
+      });
+      expect(updated).toBe(true);
+    });
+
+    await waitFor(() => {
+      const snapshot = result.current.snapshotHistory.find((entry) => entry.id === target!.id);
+      expect(snapshot?.label).toBe("Checkpoint A");
+      expect(snapshot?.note).toBe("Before import");
+      const historyRaw = window.localStorage.getItem(PROJECT_SNAPSHOT_HISTORY_STORAGE_KEY);
+      expect(historyRaw).toContain("Checkpoint A");
+    });
+  });
+
+  it("retains pinned snapshots when non-pinned history rolls over", async () => {
+    const { result } = renderHook(() => useProject(), { wrapper });
+    const pinnedTarget = result.current.snapshotHistory[0];
+    expect(pinnedTarget).toBeDefined();
+
+    act(() => {
+      const pinned = result.current.setSnapshotPinned(pinnedTarget!.id, true);
+      expect(pinned).toBe(true);
+    });
+
+    act(() => {
+      for (let i = 0; i < 40; i += 1) {
+        const screenName = `overflow_${i}`;
+        result.current.addScreen(screenName);
+        result.current.setEditorTarget({ type: "screen", id: screenName });
+      }
+    });
+
+    await waitFor(() => {
+      const pinnedEntry = result.current.snapshotHistory.find((entry) => entry.id === pinnedTarget!.id);
+      expect(pinnedEntry?.pinned).toBe(true);
+      const unpinnedCount = result.current.snapshotHistory.filter((entry) => !entry.pinned).length;
+      expect(unpinnedCount).toBeLessThanOrEqual(30);
+    });
+  });
 });
 
