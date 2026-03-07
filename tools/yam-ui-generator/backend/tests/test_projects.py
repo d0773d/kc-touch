@@ -583,3 +583,66 @@ def test_roundtrip_preserves_semantic_state_for_complex_project_fixture() -> Non
     assert imported["screens"]["main"]["widgets"][0]["widgets"][1]["bindings"]["value"] == "{{ state.dashboard.title }}"
     assert imported["screens"]["main"]["widgets"][0]["widgets"][2]["events"]["on_click"][0] == "push(settings)"
     assert imported["screens"]["main"]["widgets"][0]["widgets"][2]["events"]["on_click"][1] == "modal(sync_modal)"
+
+
+def test_import_migrates_legacy_screen_list_and_translation_map() -> None:
+    client = _client()
+    legacy_yaml = """
+initial_screen: main
+locale: en
+state:
+  counter: 1
+translations:
+  en:
+    app.title: Legacy Title
+screens:
+  - name: main
+    initial: true
+    widgets:
+      - type: label
+        id: label-1
+        text: "{{ t('app.title') }}"
+"""
+
+    response = client.post("/projects/import", json={"yaml": legacy_yaml})
+    assert response.status_code == 200
+    body = response.json()
+    project = body["project"]
+    issues = body["issues"]
+
+    assert project["app"]["initial_screen"] == "main"
+    assert project["app"]["locale"] == "en"
+    assert "main" in project["screens"]
+    assert project["translations"]["en"]["entries"]["app.title"] == "Legacy Title"
+    assert any("Migrated legacy screen list" in issue["message"] for issue in issues)
+    assert any("Migrated legacy translation buckets" in issue["message"] for issue in issues)
+
+
+def test_import_migrates_legacy_translation_values_array() -> None:
+    client = _client()
+    legacy_yaml = """
+app:
+  initial_screen: main
+state: {}
+translations:
+  en:
+    values:
+      - key: app.title
+        value: Legacy Values API
+components: {}
+styles: {}
+screens:
+  main:
+    name: main
+    initial: true
+    widgets: []
+"""
+
+    response = client.post("/projects/import", json={"yaml": legacy_yaml})
+    assert response.status_code == 200
+    body = response.json()
+    project = body["project"]
+    issues = body["issues"]
+
+    assert project["translations"]["en"]["entries"]["app.title"] == "Legacy Values API"
+    assert any("Migrated legacy translation buckets" in issue["message"] for issue in issues)

@@ -8,17 +8,24 @@ import io
 import json
 from typing import Any, Dict, List, Tuple, Literal, Set
 
+import yaml
+
+from .migration import migrate_project_payload
 from .models import Project, TranslationLocale, ValidationIssue
 from .schema import validate_project
-from .yaml_io import ensure_project_dict, project_from_yaml, project_to_yaml
+from .yaml_io import ensure_project_dict, project_to_yaml
 from .asset_service import collect_asset_catalog
 
 
 def import_project_from_yaml(text: str) -> Tuple[Project, List[ValidationIssue]]:
     """Parse YAML and run schema validation."""
 
-    project = project_from_yaml(text)
-    issues = validate_project(ensure_project_dict(project))
+    loaded = yaml.safe_load(text) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError("YamUI YAML must contain a mapping at the top level")
+    migrated, migration_issues = migrate_project_payload(loaded)
+    project = Project.model_validate(migrated)
+    issues = migration_issues + validate_project(ensure_project_dict(project))
     return project, issues
 
 
