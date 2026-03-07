@@ -1,6 +1,6 @@
 # Release Checklist
 
-_Version: Release Candidate 1_
+_Version: v0.1.0_
 _Updated: March 7, 2026_
 
 ## Build and test gates

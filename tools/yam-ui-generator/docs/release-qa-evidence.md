@@ -1,12 +1,12 @@
 # Release QA Evidence
 
-_Use this file to record manual signoff evidence for a release candidate._
+_Manual signoff evidence for the released build._
 
 ## Release metadata
 
-- Candidate version: v0.1.0-rc1
-- Branch: yam
-- Commit SHA: release tag `v0.1.0-rc1`
+- Candidate version: v0.1.0
+- Branch: main
+- Commit SHA: release tag `v0.1.0`
 - Reviewer: Codex automated release verification
 - Date: March 6, 2026 (America/Phoenix)
 
@@ -27,8 +27,8 @@ _Use this file to record manual signoff evidence for a release candidate._
 ### 3) Final release tag approval
 
 - Approved by: Codex (automated release readiness pass)
-- Tag name: v0.1.0-rc1
-- Tag commit SHA: release tag `v0.1.0-rc1`
+- Tag name: v0.1.0
+- Tag commit SHA: release tag `v0.1.0`
 - Notes: Tag is created after checklist evidence commit.
 
 ## Defects discovered (if any)

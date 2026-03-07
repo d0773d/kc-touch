@@ -69,6 +69,7 @@ __pycache__/
 venv/
 .venv/
 env/
+tools/yam-ui-generator/backend/.pytest_tmp/
 
 # Editor / IDE settings
 .vscode/
