@@ -7,7 +7,7 @@ set(KC_TOUCH_DISPLAY_REQUIRES
     lvgl
     esp_lcd
     esp_driver_gpio
-    esp_ldo_regulator
+    esp_hw_support
 )
 
 idf_component_register(
