@@ -6,7 +6,7 @@ _Use this file to record manual signoff evidence for a release candidate._
 
 - Candidate version: v0.1.0-rc1
 - Branch: yam
-- Commit SHA: pending (updated after checklist commit/tag)
+- Commit SHA: release tag `v0.1.0-rc1`
 - Reviewer: Codex automated release verification
 - Date: March 6, 2026 (America/Phoenix)
 
@@ -27,8 +27,8 @@ _Use this file to record manual signoff evidence for a release candidate._
 ### 3) Final release tag approval
 
 - Approved by: Codex (automated release readiness pass)
-- Tag name: pending
-- Tag commit SHA: pending
+- Tag name: v0.1.0-rc1
+- Tag commit SHA: release tag `v0.1.0-rc1`
 - Notes: Tag is created after checklist evidence commit.
 
 ## Defects discovered (if any)
