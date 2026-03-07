@@ -32,3 +32,18 @@ See [docs/phase1-core-features.md](docs/phase1-core-features.md) for the detaile
 For execution planning to final release readiness, see [docs/finish-checklist.md](docs/finish-checklist.md).
 
 Additional specifications can be added in the `docs` directory as the project evolves.
+
+## CI Command Parity
+
+Use the same commands locally that run in CI:
+
+1. Frontend
+   - `cd tools/yam-ui-generator/frontend`
+   - `npm ci`
+   - `npm test`
+   - `npm run build`
+
+2. Backend
+   - `cd tools/yam-ui-generator/backend`
+   - `poetry install --no-interaction`
+   - `poetry run pytest -q --basetemp .pytest_tmp`
