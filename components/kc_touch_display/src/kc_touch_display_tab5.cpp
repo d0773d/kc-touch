@@ -3,9 +3,9 @@
 
 #include "sdkconfig.h"
 
-#if CONFIG_KC_TOUCH_DISPLAY_ENABLE
+#if CONFIG_KC_TOUCH_DISPLAY_ENABLE && CONFIG_KC_TOUCH_DISPLAY_BACKEND_TAB5
 
-#include "kc_touch_display_tab5.h"
+#include "kc_touch_display_backend.h"
 
 #include "esp_log.h"
 #include "M5Unified.hpp"
@@ -25,7 +25,7 @@ static inline uint16_t clamp_coord(int32_t value, int32_t max_value)
     return (uint16_t)value;
 }
 
-esp_err_t kc_touch_tab5_init_hw(void)
+esp_err_t kc_touch_display_backend_init_hw(void)
 {
     if (s_tab5_ready) {
         return ESP_OK;
@@ -64,7 +64,7 @@ esp_err_t kc_touch_tab5_init_hw(void)
     return ESP_OK;
 }
 
-esp_err_t kc_touch_tab5_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const void *color_data)
+esp_err_t kc_touch_display_backend_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const void *color_data)
 {
     if (!s_tab5_ready) {
         return ESP_ERR_INVALID_STATE;
@@ -86,7 +86,7 @@ esp_err_t kc_touch_tab5_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, co
     return ESP_OK;
 }
 
-bool kc_touch_tab5_touch_sample(uint16_t *x, uint16_t *y)
+bool kc_touch_display_backend_touch_sample(uint16_t *x, uint16_t *y)
 {
     if (!s_tab5_ready || !x || !y) {
         return false;
@@ -103,7 +103,7 @@ bool kc_touch_tab5_touch_sample(uint16_t *x, uint16_t *y)
     return false;
 }
 
-esp_err_t kc_touch_tab5_backlight_set(bool enable)
+esp_err_t kc_touch_display_backend_backlight_set(bool enable)
 {
     if (!s_tab5_ready) {
         return ESP_ERR_INVALID_STATE;
@@ -121,4 +121,4 @@ esp_err_t kc_touch_tab5_backlight_set(bool enable)
     return ESP_OK;
 }
 
-#endif // CONFIG_KC_TOUCH_DISPLAY_ENABLE
+#endif // CONFIG_KC_TOUCH_DISPLAY_ENABLE && CONFIG_KC_TOUCH_DISPLAY_BACKEND_TAB5

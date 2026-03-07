@@ -6,7 +6,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
-#include "kc_touch_display_tab5.h"
+#include "kc_touch_display_backend.h"
 #include "kc_touch_gui.h"
 #include "lvgl.h"
 #include "sdkconfig.h"
@@ -68,7 +68,7 @@ static void kc_touch_display_flush_cb(lv_display_t *disp, const lv_area_t *area,
     // Swap RGB565 byte order for the Tab5 panel (replacement for deprecated LV_COLOR_16_SWAP)
     lv_draw_sw_rgb565_swap(color_p, lv_area_get_size(area));
 #endif
-    esp_err_t err = kc_touch_tab5_flush(area->x1, area->y1, area->x2, area->y2, color_p);
+    esp_err_t err = kc_touch_display_backend_flush(area->x1, area->y1, area->x2, area->y2, color_p);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Panel flush failed (%s)", esp_err_to_name(err));
     }
@@ -109,7 +109,7 @@ static bool kc_touch_touch_sample(uint16_t *x, uint16_t *y)
     if (!x || !y) {
         return false;
     }
-    return kc_touch_tab5_touch_sample(x, y);
+    return kc_touch_display_backend_touch_sample(x, y);
 }
 
 static void kc_touch_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
@@ -165,7 +165,7 @@ esp_err_t kc_touch_display_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_RETURN_ON_ERROR(kc_touch_tab5_init_hw(), TAG, "tab5 init");
+    ESP_RETURN_ON_ERROR(kc_touch_display_backend_init_hw(), TAG, "display backend init");
     ESP_RETURN_ON_ERROR(kc_touch_gui_dispatch(kc_touch_display_register_lvgl, NULL, pdMS_TO_TICKS(200)), TAG, "lvgl disp");
 
 #if CONFIG_KC_TOUCH_TOUCH_ENABLE
@@ -182,7 +182,7 @@ esp_err_t kc_touch_display_init(void)
 
 esp_err_t kc_touch_display_backlight_set(bool enable)
 {
-    return kc_touch_tab5_backlight_set(enable);
+    return kc_touch_display_backend_backlight_set(enable);
 }
 
 esp_err_t kc_touch_display_set_provisioning_cb(kc_touch_display_prov_cb_t cb, void *ctx)

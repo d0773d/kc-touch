@@ -4,10 +4,28 @@ config KC_TOUCH_DISPLAY_ENABLE
     bool "Enable KC Touch display driver"
     default n
     help
-        Enable the KC Touch display component that targets the native
-        M5Stack Tab5 hardware via the M5Unified + M5GFX drivers.
+        Enable the KC Touch display component used by the YamUI LVGL runtime.
 
 if KC_TOUCH_DISPLAY_ENABLE
+
+choice KC_TOUCH_DISPLAY_BACKEND
+    prompt "Display backend"
+    default KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4
+    help
+        Select which board-specific display backend to compile.
+
+config KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4
+    bool "Waveshare ESP32-P4 module dev kit (scaffold)"
+    help
+        Uses the Waveshare backend scaffold. Intended for ESP32-P4 targets.
+        Panel/touch wiring still needs to be configured for your exact screen.
+
+config KC_TOUCH_DISPLAY_BACKEND_TAB5
+    bool "M5Stack Tab5"
+    help
+        Uses M5Unified/M5GFX based display and touch backend.
+
+endchoice
 
 config KC_TOUCH_DISPLAY_WIDTH
     int "Display width (pixels)"
