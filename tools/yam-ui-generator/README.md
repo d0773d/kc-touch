@@ -41,6 +41,7 @@ Operational docs:
 - [docs/release-checklist.md](docs/release-checklist.md)
 - [docs/release-qa-evidence.md](docs/release-qa-evidence.md)
 - [docs/release-notes-template.md](docs/release-notes-template.md)
+- [docs/release-notes-v0.1.0.md](docs/release-notes-v0.1.0.md)
 
 Additional specifications can be added in the `docs` directory as the project evolves.
 
