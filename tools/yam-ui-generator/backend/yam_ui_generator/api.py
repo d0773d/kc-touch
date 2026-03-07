@@ -16,6 +16,7 @@ from .models import (
     AssetTagUpdateRequest,
     AssetTagUpdateResponse,
     AssetUploadResponse,
+    ContractVersionResponse,
     PreviewRenderRequest,
     PreviewRenderResponse,
     Project,
@@ -51,6 +52,8 @@ from .schema import PROJECT_SCHEMA
 from .template_project import get_template_project
 
 app = FastAPI(title="Yam UI Generator API", version="0.1.0")
+API_CONTRACT_VERSION = "1.0"
+SCHEMA_VERSION = "2020-12"
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,6 +67,20 @@ app.add_middleware(
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/contract", response_model=ContractVersionResponse)
+def get_contract_version() -> ContractVersionResponse:
+    return ContractVersionResponse(
+        api_version=API_CONTRACT_VERSION,
+        schema_version=SCHEMA_VERSION,
+        migration_support=[
+            "legacy_top_level_app_settings",
+            "legacy_screen_list",
+            "legacy_translation_maps",
+            "legacy_translation_values_array",
+        ],
+    )
 
 
 @app.get("/widgets/palette")

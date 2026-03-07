@@ -22,6 +22,7 @@ The service listens on `http://0.0.0.0:8000` by default.
 ## Endpoints
 
 - `GET /health` — simple readiness probe
+- `GET /contract` — API/schema contract version metadata and supported legacy migrations
 - `GET /widgets/palette` — list of supported widgets and their capabilities
 - `GET /schema` – JSON schema for YamUI projects
 - `GET /project/settings` – returns current app-level settings template

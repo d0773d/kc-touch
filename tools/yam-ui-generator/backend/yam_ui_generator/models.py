@@ -352,3 +352,9 @@ class AssetTagUpdateResponse(BaseModel):
 
 class AssetUploadResponse(BaseModel):
     asset: AssetReference
+
+
+class ContractVersionResponse(BaseModel):
+    api_version: str
+    schema_version: str
+    migration_support: List[str] = Field(default_factory=list)
