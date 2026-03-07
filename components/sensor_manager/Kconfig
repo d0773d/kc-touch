@@ -1,0 +1,20 @@
+menu "Sensor Manager"
+
+config SENSOR_MANAGER_ENABLE_FAKE_DATA
+    bool "Enable simulated sensors when no hardware is detected"
+    default y
+    help
+        Provide a small set of simulated Atlas Scientific EZO sensors when
+        the runtime cannot discover any devices on the I2C bus. This keeps
+        the YAML-driven UI usable on desktops and during CI without physical
+        hardware. Disable this when running exclusively on production rigs.
+
+config SENSOR_MANAGER_FORCE_FAKE_ONLY
+    bool "Always use simulated sensors"
+    depends on SENSOR_MANAGER_ENABLE_FAKE_DATA
+    help
+        Force the sensor manager to skip I2C probing entirely and rely solely
+        on the built-in simulated dataset. This is useful for unit tests or
+        UI development on devices without sensors attached.
+
+endmenu

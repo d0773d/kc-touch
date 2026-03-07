@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/queue.h"
@@ -56,9 +57,48 @@ typedef struct {
     TaskHandle_t task;
     esp_timer_handle_t tick_timer;
     bool ready;
+    volatile bool scanning;
+    bool camera_ready;
+    kc_touch_gui_prov_cb_t prov_cb;
+    void *prov_ctx;
 } kc_touch_gui_runtime_t;
 
 static kc_touch_gui_runtime_t s_gui = {0};
+
+void kc_touch_gui_set_provisioning_cb(kc_touch_gui_prov_cb_t cb, void *ctx)
+{
+    s_gui.prov_cb = cb;
+    s_gui.prov_ctx = ctx;
+}
+
+void kc_touch_gui_trigger_provisioning(void)
+{
+    if (s_gui.prov_cb) {
+        s_gui.prov_cb(s_gui.prov_ctx);
+    } else {
+        ESP_LOGW(TAG, "Provisioning triggered but no callback registered");
+    }
+}
+
+void kc_touch_gui_set_scanning(bool scanning)
+{
+    s_gui.scanning = scanning;
+}
+
+bool kc_touch_gui_is_scanning(void)
+{
+    return s_gui.scanning;
+}
+
+void kc_touch_gui_set_camera_ready(bool ready)
+{
+    s_gui.camera_ready = ready;
+}
+
+bool kc_touch_gui_camera_ready(void)
+{
+    return s_gui.camera_ready;
+}
 
 static bool kc_touch_gui_validate_config(const kc_touch_gui_config_t *cfg)
 {
@@ -110,21 +150,7 @@ static void kc_touch_gui_cleanup_partial(void)
     s_gui.ready = false;
 }
 
-#if CONFIG_KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN
-static void kc_touch_gui_build_placeholder(void *ctx)
-{
-    (void)ctx;
-    lv_obj_t *screen = lv_scr_act();
-    if (!screen) {
-        return;
-    }
-
-    lv_obj_clean(screen);
-    lv_obj_t *label = lv_label_create(screen);
-    lv_label_set_text(label, "KC Touch UI ready");
-    lv_obj_center(label);
-}
-#endif
+#include "lvgl_yaml_gui.h"
 
 esp_err_t kc_touch_gui_init(const kc_touch_gui_config_t *config)
 {
@@ -179,10 +205,6 @@ esp_err_t kc_touch_gui_init(const kc_touch_gui_config_t *config)
     ESP_LOGI(TAG, "LVGL core initialized (stack=%" PRIu32 ", period=%" PRIu32 " ms)",
              s_gui.cfg.task_stack_size, s_gui.cfg.task_period_ms);
 
-#if CONFIG_KC_TOUCH_GUI_CREATE_PLACEHOLDER_SCREEN
-    (void)kc_touch_gui_dispatch(kc_touch_gui_build_placeholder, NULL, 0);
-#endif
-
     return ESP_OK;
 }
 
@@ -207,6 +229,20 @@ esp_err_t kc_touch_gui_dispatch(kc_touch_gui_work_cb_t cb, void *ctx, TickType_t
     return ESP_OK;
 }
 
+static void kc_touch_gui_build_ui(void *ctx)
+{
+    (void)ctx;
+    esp_err_t err = lvgl_yaml_gui_load_default();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load YamUI bundle (%s)", esp_err_to_name(err));
+    }
+}
+
+void kc_touch_gui_show_root(void)
+{
+    kc_touch_gui_dispatch(kc_touch_gui_build_ui, NULL, 0);
+}
+
 bool kc_touch_gui_is_ready(void)
 {
     return s_gui.ready;
@@ -229,6 +265,16 @@ esp_err_t kc_touch_gui_dispatch(kc_touch_gui_work_cb_t cb, void *ctx, TickType_t
 }
 
 bool kc_touch_gui_is_ready(void)
+{
+    return false;
+}
+
+void kc_touch_gui_set_camera_ready(bool ready)
+{
+    (void)ready;
+}
+
+bool kc_touch_gui_camera_ready(void)
 {
     return false;
 }

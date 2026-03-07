@@ -1,0 +1,127 @@
+version: 2
+app:
+  initial_screen: home
+  locale: en-US
+state:
+  provisioning.stage: "welcome"
+  wifi.selected_ssid: "none"
+styles:
+  hero_label:
+    text_color: "#FFFFFF"
+    text_font: "montserrat_24"
+  body_text:
+    text_color: "#A0A6C3"
+  primary_button:
+    bg_color: "#4C7DFF"
+    text_color: "#FFFFFF"
+    radius: 18
+    padding: 16
+  ghost_button:
+    bg_color: "#2F3347"
+    text_color: "#FFFFFF"
+    radius: 16
+    padding: 12
+  card_panel:
+    bg_color: "#1F2334"
+    text_color: "#FFFFFF"
+    radius: 18
+    padding: 18
+    spacing: 8
+components:
+  InfoCard:
+    props: [title, subtitle]
+    layout:
+      type: column
+      gap: 6
+    widgets:
+      - type: label
+        text: "{{title}}"
+        style: hero_label
+      - type: label
+        text: "{{subtitle}}"
+        style: body_text
+  ProvisionDialog:
+    layout:
+      type: column
+      gap: 14
+      align: center
+    widgets:
+      - type: img
+        src: "symbol:wifi"
+        align: center
+      - type: label
+        text: "Start Wi-Fi Provisioning?"
+        align: center
+        style: hero_label
+      - type: label
+        text: "This will walk you through Wi-Fi setup."
+        align: center
+        style: body_text
+      - type: row
+        layout:
+          gap: 10
+          align: center
+        widgets:
+          - type: button
+            text: "Close"
+            style: ghost_button
+            on_click: close_modal()
+          - type: button
+            text: "Start"
+            style: primary_button
+            on_click:
+              - push(provision)
+              - close_modal()
+screens:
+  home:
+    layout:
+      type: column
+      gap: 18
+    widgets:
+      - type: img
+        src: "symbol:wifi"
+        align: center
+      - type: label
+        text: "YamUI Starter App"
+        style: hero_label
+        align: center
+      - type: panel
+        style: card_panel
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: InfoCard
+            title: "Current SSID"
+            subtitle: "{{wifi.selected_ssid}}"
+          - type: InfoCard
+            title: "Provisioning Stage"
+            subtitle: "{{provisioning.stage}}"
+      - type: button
+        text: "Provision Wi-Fi"
+        style: primary_button
+        on_click: push(provision)
+      - type: button
+        text: "Open Modal"
+        style: primary_button
+        on_click: modal(ProvisionDialog)
+  provision:
+    layout:
+      type: column
+      gap: 12
+    widgets:
+      - type: label
+        text: "Provisioning Stage: {{provisioning.stage}}"
+        style: hero_label
+      - type: button
+        text: "Set Credentials Stage"
+        style: primary_button
+        on_click:
+          - set(provisioning.stage, "credentials")
+          - pop()
+      - type: button
+        text: "Mark Complete"
+        on_click:
+          - set(wifi.selected_ssid, "YamUI-Guest")
+          - set(provisioning.stage, "done")
+          - pop()
