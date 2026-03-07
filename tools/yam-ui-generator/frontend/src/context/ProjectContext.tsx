@@ -324,7 +324,7 @@ function readStoredProjectSnapshotHistory(): ProjectSnapshotEntry[] {
       return [];
     }
     const entries = parsed
-      .map((entry) => {
+      .map((entry): ProjectSnapshotEntry | null => {
         if (!entry || typeof entry !== "object") {
           return null;
         }
@@ -338,17 +338,20 @@ function readStoredProjectSnapshotHistory(): ProjectSnapshotEntry[] {
         const rawSavedAt = (entry as { savedAt?: number }).savedAt;
         const savedAt = typeof rawSavedAt === "number" && Number.isFinite(rawSavedAt) ? rawSavedAt : Date.now();
         const rawId = (entry as { id?: string }).id;
+        const label = typeof (entry as { label?: unknown }).label === "string" ? (entry as { label: string }).label : undefined;
+        const note = typeof (entry as { note?: unknown }).note === "string" ? (entry as { note: string }).note : undefined;
+        const pinned = Boolean((entry as { pinned?: unknown }).pinned);
         return {
           id: typeof rawId === "string" && rawId.length ? rawId : `snapshot_${savedAt}_${Math.random().toString(36).slice(2, 8)}`,
           savedAt,
           project: normalizedProject,
           editorTarget: resolvedTarget,
-          label: typeof (entry as { label?: unknown }).label === "string" ? (entry as { label: string }).label : undefined,
-          note: typeof (entry as { note?: unknown }).note === "string" ? (entry as { note: string }).note : undefined,
-          pinned: Boolean((entry as { pinned?: unknown }).pinned),
-        } satisfies ProjectSnapshotEntry;
+          ...(label ? { label } : {}),
+          ...(note ? { note } : {}),
+          pinned,
+        };
       })
-      .filter((entry): entry is ProjectSnapshotEntry => Boolean(entry))
+      .filter((entry): entry is ProjectSnapshotEntry => entry !== null)
       .sort((a, b) => a.savedAt - b.savedAt);
     return pruneSnapshotHistory(entries);
   } catch (error) {

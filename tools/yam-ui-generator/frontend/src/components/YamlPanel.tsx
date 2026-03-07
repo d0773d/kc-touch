@@ -53,6 +53,10 @@ function toCssValue(value: unknown): string | number | undefined {
   return undefined;
 }
 
+function toCssStringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 function styleFromToken(project: ProjectModel, tokenName?: string): CSSProperties {
   if (!tokenName) {
     return {};
@@ -63,14 +67,14 @@ function styleFromToken(project: ProjectModel, tokenName?: string): CSSPropertie
   }
   const source = token.value as Record<string, unknown>;
   return {
-    backgroundColor: toCssValue(source.backgroundColor),
-    color: toCssValue(source.color),
+    backgroundColor: toCssStringValue(source.backgroundColor),
+    color: toCssStringValue(source.color),
     fontSize: toCssValue(source.fontSize),
     fontWeight: toCssValue(source.fontWeight),
     borderRadius: toCssValue(source.borderRadius),
-    borderColor: toCssValue(source.borderColor),
+    borderColor: toCssStringValue(source.borderColor),
     borderWidth: toCssValue(source.borderWidth),
-    borderStyle: toCssValue(source.borderStyle),
+    borderStyle: toCssStringValue(source.borderStyle),
     padding: toCssValue(source.padding),
     gap: toCssValue(source.gap),
     width: toCssValue(source.width),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useProject } from "../context/ProjectContext";
 import { AssetReference, ProjectModel, StyleCategory, StylePreview, StyleTokenModel, ValidationIssue, WidgetNode, WidgetPath } from "../types/yamui";
 import { previewStyle, updateAssetTags } from "../utils/api";
@@ -41,6 +41,12 @@ const JSON_FIELDS: Array<keyof Pick<WidgetNode, "props" | "events" | "bindings" 
   "bindings",
   "accessibility",
 ];
+
+type FormField = "id" | "text" | "style" | "src" | "props" | "events" | "bindings" | "accessibility";
+
+const isJsonField = (field: FormField): field is typeof JSON_FIELDS[number] => {
+  return (JSON_FIELDS as string[]).includes(field as string);
+};
 
 const EVENT_TEMPLATES = [
   {
@@ -978,7 +984,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     setTagDrafts((prev) => ({ ...prev, [assetId]: value }));
   }, [setTagDrafts]);
 
-  const handleTagInputKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>, asset: AssetReference) => {
+  const handleTagInputKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>, asset: AssetReference) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       event.stopPropagation();
@@ -1018,7 +1024,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
   };
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) {
         return;
       }
@@ -1183,7 +1189,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     if (!selectedPath || !selectedWidget) {
       return;
     }
-    if (JSON_FIELDS.includes(field as keyof WidgetNode)) {
+    if (isJsonField(field)) {
       return;
     }
     updateWidget(selectedPath, { [field]: value } as Partial<WidgetNode>);
@@ -1227,7 +1233,7 @@ export default function PropertyInspector({ issues, style }: PropertyInspectorPr
     trackAssetEvent("asset_selected", { path: asset });
   }, [applyAssetValue, trackAssetEvent]);
 
-  const handleAssetCardKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>, assetPath: string) => {
+  const handleAssetCardKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>, assetPath: string) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       handlePickAsset(assetPath);

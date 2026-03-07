@@ -1,10 +1,12 @@
-# YamUI Companion App — Finish Checklist
+ï»¿# YamUI Companion App â€” Finish Checklist
 
-_Last updated: March 6, 2026_
+_Last updated: March 7, 2026_
 
 This checklist is the execution plan to bring the Yam UI Generator to a releasable "finished" state.
 
-## Milestone 1 — Live Preview Runtime Loop
+## Milestone 1 â€” Live Preview Runtime Loop
+
+Status: Completed (March 2026)
 
 ### Scope
 - Add a real preview loop that renders current editor project state with low-latency updates.
@@ -19,7 +21,9 @@ This checklist is the execution plan to bring the Yam UI Generator to a releasab
 - Frontend integration test validates edit -> preview update flow.
 - Backend contract (if used) is documented and versioned.
 
-## Milestone 2 — Snapshot UX Completion
+## Milestone 2 â€” Snapshot UX Completion
+
+Status: Completed (March 2026)
 
 ### Scope
 - Add snapshot labels/notes.
@@ -35,7 +39,9 @@ This checklist is the execution plan to bring the Yam UI Generator to a releasab
 - Unit tests cover pin retention and restore target selection.
 - Toolbar restore flow remains fully keyboard accessible.
 
-## Milestone 3 — Generator and Validator Parity Hardening
+## Milestone 3 â€” Generator and Validator Parity Hardening
+
+Status: Completed (March 2026)
 
 ### Scope
 - Enforce complete cross-reference validation: screens, widgets, styles, assets, translations, bindings, events.
@@ -50,7 +56,9 @@ This checklist is the execution plan to bring the Yam UI Generator to a releasab
 - Backend test matrix includes positive + negative fixtures for each resource type.
 - Frontend issue surfaces can navigate to all major finding types.
 
-## Milestone 4 — Backend Contract and Migration Safety
+## Milestone 4 â€” Backend Contract and Migration Safety
+
+Status: Completed (March 2026)
 
 ### Scope
 - Define API/schema versioning strategy.
@@ -65,7 +73,9 @@ This checklist is the execution plan to bring the Yam UI Generator to a releasab
 - Migration tests cover at least two historical project versions.
 - API docs include examples for success and error payloads.
 
-## Milestone 5 — Test and CI Completion
+## Milestone 5 â€” Test and CI Completion
+
+Status: Completed (March 2026)
 
 ### Scope
 - Expand frontend integration tests for end-to-end editing flows.
@@ -80,7 +90,9 @@ This checklist is the execution plan to bring the Yam UI Generator to a releasab
 - Green CI on default branch for 7 consecutive days.
 - Documented local command parity with CI steps.
 
-## Milestone 6 — Performance and Reliability Pass
+## Milestone 6 â€” Performance and Reliability Pass
+
+Status: Completed (baseline + smoke checklist documented in `docs/performance-baseline.md`)
 
 ### Scope
 - Profile large project behavior and remove obvious hotspots.
@@ -94,7 +106,9 @@ This checklist is the execution plan to bring the Yam UI Generator to a releasab
 - Performance baseline and post-pass numbers are documented.
 - Regression checklist includes large-project smoke test.
 
-## Milestone 7 — Release Readiness
+## Milestone 7 â€” Release Readiness
+
+Status: Completed for repository handoff (see `docs/release-checklist.md`)
 
 ### Scope
 - Final docs: user guide, contributor guide, troubleshooting, release notes template.
@@ -117,10 +131,11 @@ This checklist is the execution plan to bring the Yam UI Generator to a releasab
 
 ## Suggested Execution Order
 
-1. Milestone 1 — Live Preview Runtime Loop
-2. Milestone 2 — Snapshot UX Completion
-3. Milestone 3 — Generator and Validator Parity Hardening
-4. Milestone 4 — Backend Contract and Migration Safety
-5. Milestone 5 — Test and CI Completion
-6. Milestone 6 — Performance and Reliability Pass
-7. Milestone 7 — Release Readiness
+1. Milestone 1 â€” Live Preview Runtime Loop
+2. Milestone 2 â€” Snapshot UX Completion
+3. Milestone 3 â€” Generator and Validator Parity Hardening
+4. Milestone 4 â€” Backend Contract and Migration Safety
+5. Milestone 5 â€” Test and CI Completion
+6. Milestone 6 â€” Performance and Reliability Pass
+7. Milestone 7 â€” Release Readiness
+

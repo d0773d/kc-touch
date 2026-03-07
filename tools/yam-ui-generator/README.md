@@ -37,6 +37,8 @@ Operational docs:
 - [docs/user-guide.md](docs/user-guide.md)
 - [docs/contributor-guide.md](docs/contributor-guide.md)
 - [docs/troubleshooting.md](docs/troubleshooting.md)
+- [docs/performance-baseline.md](docs/performance-baseline.md)
+- [docs/release-checklist.md](docs/release-checklist.md)
 - [docs/release-notes-template.md](docs/release-notes-template.md)
 
 Additional specifications can be added in the `docs` directory as the project evolves.
@@ -49,6 +51,7 @@ Use the same commands locally that run in CI:
    - `cd tools/yam-ui-generator/frontend`
    - `npm ci`
    - `npm run lint`
+   - `npm run typecheck`
    - `npm test`
    - `npm run build`
 

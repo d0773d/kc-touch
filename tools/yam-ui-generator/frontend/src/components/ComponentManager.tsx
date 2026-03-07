@@ -12,6 +12,23 @@ const PROP_TYPES: ComponentPropDefinition["type"][] = [
   "json",
 ];
 
+const formatPropDefault = (value: unknown): string => {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+};
+
 export default function ComponentManager(): JSX.Element {
   const { project, editorTarget, setEditorTarget, setProject } = useProject();
   const [name, setName] = useState("");
@@ -88,7 +105,8 @@ export default function ComponentManager(): JSX.Element {
     if (!selectedComponent) {
       return;
     }
-    const nextSchema = [...(selectedComponent.prop_schema ?? []), { name: "prop", type: "string", required: false }];
+    const nextProp: ComponentPropDefinition = { name: "prop", type: "string", required: false };
+    const nextSchema = [...(selectedComponent.prop_schema ?? []), nextProp];
     commitComponent({ ...selectedComponent, prop_schema: nextSchema });
   };
 
@@ -188,7 +206,7 @@ export default function ComponentManager(): JSX.Element {
                     <label>Default</label>
                     <input
                       className="input-field"
-                      value={prop.default ?? ""}
+                      value={formatPropDefault(prop.default)}
                       onChange={(event) => updatePropSchema(index, { default: event.target.value })}
                       placeholder="Optional default"
                     />

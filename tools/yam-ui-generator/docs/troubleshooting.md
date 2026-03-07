@@ -25,3 +25,4 @@
 
 - Run the same commands locally listed in `tools/yam-ui-generator/README.md`.
 - Backend lint gate is `ruff`; frontend lint gate is `eslint`.
+- Frontend type gate is `npm run typecheck` (uses `tsconfig.typecheck.json`).

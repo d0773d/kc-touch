@@ -96,7 +96,7 @@ const describeIssueLocation = (entry: ActionableIssue, project: ProjectModel): s
   if (!widget) {
     return `${base} • widgets[${widgetPath.join("/")}]`;
   }
-  const widgetLabelParts = [widget.type];
+  const widgetLabelParts: string[] = [widget.type];
   if (widget.id) {
     widgetLabelParts.push(`#${widget.id}`);
   }
