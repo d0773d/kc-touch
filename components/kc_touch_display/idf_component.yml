@@ -1,4 +1,0 @@
-dependencies:
-  waveshare/esp32_p4_platform:
-    version: "0.0.4"
-
