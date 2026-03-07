@@ -6,11 +6,101 @@ import {
   lintStyles,
   validateProject,
 } from "../utils/api";
-import { ValidationIssue } from "../types/yamui";
+import { ProjectModel, ValidationIssue } from "../types/yamui";
 import Modal from "./Modal";
+import type { ProjectSnapshotEntry } from "../context/ProjectContext";
 
 interface Props {
   onIssues: (issues: ValidationIssue[]) => void;
+}
+
+type SnapshotDiffSummary = {
+  hasChanges: boolean;
+  addedScreens: string[];
+  removedScreens: string[];
+  addedComponents: string[];
+  removedComponents: string[];
+  addedStyles: string[];
+  removedStyles: string[];
+  widgetDelta: number;
+  initialScreenCurrent: string | null;
+  initialScreenSnapshot: string | null;
+};
+
+function countWidgets(project: ProjectModel): number {
+  let total = 0;
+  const visit = (widgets?: Array<{ widgets?: unknown[] }>) => {
+    (widgets ?? []).forEach((widget) => {
+      total += 1;
+      if (widget && typeof widget === "object" && "widgets" in widget) {
+        visit((widget as { widgets?: Array<{ widgets?: unknown[] }> }).widgets);
+      }
+    });
+  };
+  Object.values(project.screens).forEach((screen) => visit(screen.widgets as Array<{ widgets?: unknown[] }>));
+  Object.values(project.components).forEach((component) => visit(component.widgets as Array<{ widgets?: unknown[] }>));
+  return total;
+}
+
+function resolveInitialScreen(project: ProjectModel): string | null {
+  const fromApp = typeof project.app.initial_screen === "string" ? project.app.initial_screen.trim() : "";
+  if (fromApp) {
+    return fromApp;
+  }
+  const byFlag = Object.entries(project.screens).find(([, screen]) => Boolean(screen.initial))?.[0];
+  return byFlag ?? null;
+}
+
+function listAddedRemoved(current: string[], snapshot: string[]): { added: string[]; removed: string[] } {
+  const currentSet = new Set(current);
+  const snapshotSet = new Set(snapshot);
+  return {
+    added: current.filter((entry) => !snapshotSet.has(entry)).sort((a, b) => a.localeCompare(b)),
+    removed: snapshot.filter((entry) => !currentSet.has(entry)).sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+function summarizeSnapshotDiff(current: ProjectModel, snapshot: ProjectModel): SnapshotDiffSummary {
+  const screenDiff = listAddedRemoved(Object.keys(current.screens), Object.keys(snapshot.screens));
+  const componentDiff = listAddedRemoved(Object.keys(current.components), Object.keys(snapshot.components));
+  const styleDiff = listAddedRemoved(Object.keys(current.styles), Object.keys(snapshot.styles));
+  const widgetDelta = countWidgets(snapshot) - countWidgets(current);
+  const initialScreenCurrent = resolveInitialScreen(current);
+  const initialScreenSnapshot = resolveInitialScreen(snapshot);
+  const hasChanges =
+    screenDiff.added.length > 0 ||
+    screenDiff.removed.length > 0 ||
+    componentDiff.added.length > 0 ||
+    componentDiff.removed.length > 0 ||
+    styleDiff.added.length > 0 ||
+    styleDiff.removed.length > 0 ||
+    widgetDelta !== 0 ||
+    initialScreenCurrent !== initialScreenSnapshot;
+
+  return {
+    hasChanges,
+    addedScreens: screenDiff.added,
+    removedScreens: screenDiff.removed,
+    addedComponents: componentDiff.added,
+    removedComponents: componentDiff.removed,
+    addedStyles: styleDiff.added,
+    removedStyles: styleDiff.removed,
+    widgetDelta,
+    initialScreenCurrent,
+    initialScreenSnapshot,
+  };
+}
+
+function renderChangeList(label: string, values: string[], tone: "added" | "removed"): JSX.Element | null {
+  if (!values.length) {
+    return null;
+  }
+  const color = tone === "added" ? "#16a34a" : "#dc2626";
+  return (
+    <p className="field-hint" style={{ margin: 0, color }}>
+      {label}: {values.join(", ")}
+    </p>
+  );
 }
 
 export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
@@ -183,6 +273,12 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
     () => snapshotEntries.find((entry) => entry.id === confirmRestoreSnapshotId) ?? null,
     [confirmRestoreSnapshotId, snapshotEntries]
   );
+  const confirmRestoreDiff = useMemo(() => {
+    if (!confirmRestoreSnapshot) {
+      return null;
+    }
+    return summarizeSnapshotDiff(project, confirmRestoreSnapshot.project);
+  }, [confirmRestoreSnapshot, project]);
 
   const openRestoreModal = useCallback(() => {
     setRestoreError(null);
@@ -264,8 +360,8 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
         <Modal
           title="Restore Snapshot"
           onClose={() => {
-                  setConfirmRestoreSnapshotId(null);
-      setShowRestore(false);
+            setConfirmRestoreSnapshotId(null);
+            setShowRestore(false);
             setRestoreError(null);
           }}
           width={700}
@@ -337,11 +433,37 @@ export default function ProjectToolbar({ onIssues }: Props): JSX.Element {
               Restore this snapshot and replace the current in-memory project state?
             </p>
             <div style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(15, 23, 42, 0.12)", background: "#fff" }}>
-              <strong>{formatSnapshotTime(confirmRestoreSnapshot.savedAt)}</strong>
+              <strong>{confirmRestoreSnapshot.label?.trim() || formatSnapshotTime(confirmRestoreSnapshot.savedAt)}</strong>
               <p className="field-hint" style={{ margin: "6px 0 0" }}>
                 {confirmRestoreSnapshot.editorTarget.type}:{confirmRestoreSnapshot.editorTarget.id}
               </p>
+              {confirmRestoreSnapshot.note && (
+                <p className="field-hint" style={{ margin: "6px 0 0" }}>
+                  {confirmRestoreSnapshot.note}
+                </p>
+              )}
             </div>
+            <details className="live-preview__diagnostics">
+              <summary>Show diff preview (optional)</summary>
+              {confirmRestoreDiff?.hasChanges ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                  {renderChangeList("Screens added", confirmRestoreDiff.addedScreens, "added")}
+                  {renderChangeList("Screens removed", confirmRestoreDiff.removedScreens, "removed")}
+                  {renderChangeList("Components added", confirmRestoreDiff.addedComponents, "added")}
+                  {renderChangeList("Components removed", confirmRestoreDiff.removedComponents, "removed")}
+                  {renderChangeList("Styles added", confirmRestoreDiff.addedStyles, "added")}
+                  {renderChangeList("Styles removed", confirmRestoreDiff.removedStyles, "removed")}
+                  <p className="field-hint" style={{ margin: 0 }}>
+                    Widget delta after restore: {confirmRestoreDiff.widgetDelta > 0 ? `+${confirmRestoreDiff.widgetDelta}` : confirmRestoreDiff.widgetDelta}
+                  </p>
+                  <p className="field-hint" style={{ margin: 0 }}>
+                    Initial screen: now `{confirmRestoreDiff.initialScreenCurrent ?? "none"}` {"->"} restore `{confirmRestoreDiff.initialScreenSnapshot ?? "none"}`
+                  </p>
+                </div>
+              ) : (
+                <p className="field-hint" style={{ margin: "8px 0 0" }}>No structural differences detected.</p>
+              )}
+            </details>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button className="button secondary" onClick={() => setConfirmRestoreSnapshotId(null)}>
                 Cancel
