@@ -30,6 +30,10 @@
 #define CONFIG_KC_TOUCH_GUI_WORK_QUEUE_LENGTH 8
 #endif
 
+#ifndef CONFIG_KC_TOUCH_GUI_EMBEDDED_SCHEMA_NAME
+#define CONFIG_KC_TOUCH_GUI_EMBEDDED_SCHEMA_NAME "home"
+#endif
+
 static const char *TAG = "kc_touch_gui";
 
 kc_touch_gui_config_t kc_touch_gui_default_config(void)
@@ -232,7 +236,16 @@ esp_err_t kc_touch_gui_dispatch(kc_touch_gui_work_cb_t cb, void *ctx, TickType_t
 static void kc_touch_gui_build_ui(void *ctx)
 {
     (void)ctx;
-    esp_err_t err = lvgl_yaml_gui_load_default();
+    const char *schema_name = CONFIG_KC_TOUCH_GUI_EMBEDDED_SCHEMA_NAME;
+    if (!schema_name || schema_name[0] == '\0') {
+        schema_name = "home";
+    }
+    ESP_LOGI(TAG, "Loading embedded YamUI schema '%s'", schema_name);
+    esp_err_t err = lvgl_yaml_gui_load_named(schema_name);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load embedded schema '%s' (%s), trying default", schema_name, esp_err_to_name(err));
+        err = lvgl_yaml_gui_load_default();
+    }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to load YamUI bundle (%s)", esp_err_to_name(err));
     }
