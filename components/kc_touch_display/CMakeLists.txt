@@ -1,10 +1,14 @@
-set(KC_TOUCH_DISPLAY_SRCS "src/kc_touch_display.c")
-set(KC_TOUCH_DISPLAY_REQUIRES kc_touch_gui lvgl)
-
-if(CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4)
-    list(APPEND KC_TOUCH_DISPLAY_SRCS "src/kc_touch_display_waveshare_p4.c")
-    list(APPEND KC_TOUCH_DISPLAY_REQUIRES esp_lcd esp_driver_gpio esp_ldo_regulator)
-endif()
+set(KC_TOUCH_DISPLAY_SRCS
+    "src/kc_touch_display.c"
+    "src/kc_touch_display_waveshare_p4.c"
+)
+set(KC_TOUCH_DISPLAY_REQUIRES
+    kc_touch_gui
+    lvgl
+    esp_lcd
+    esp_driver_gpio
+    esp_ldo_regulator
+)
 
 idf_component_register(
     SRCS ${KC_TOUCH_DISPLAY_SRCS}
