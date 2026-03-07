@@ -647,3 +647,56 @@ screens:
 
     assert project["translations"]["en"]["entries"]["app.title"] == "Legacy Values API"
     assert any("Migrated legacy translation buckets" in issue["message"] for issue in issues)
+
+
+def test_large_project_export_import_validate_smoke() -> None:
+    client = _client()
+    screen_count = 30
+    widgets_per_screen = 12
+    screens: dict[str, dict[str, object]] = {}
+
+    for screen_index in range(screen_count):
+        widgets = []
+        for widget_index in range(widgets_per_screen):
+            widgets.append(
+                {
+                    "type": "label",
+                    "id": f"screen_{screen_index}_label_{widget_index}",
+                    "text": f"Screen {screen_index} item {widget_index}",
+                    "props": {"index": widget_index},
+                }
+            )
+        screens[f"screen_{screen_index}"] = {
+            "name": f"screen_{screen_index}",
+            "initial": screen_index == 0,
+            "widgets": widgets,
+        }
+
+    project = {
+        "app": {"initial_screen": "screen_0"},
+        "state": {"meta": {"count": screen_count * widgets_per_screen}},
+        "translations": {"en": {"label": "English", "entries": {}}},
+        "styles": {},
+        "components": {},
+        "screens": screens,
+    }
+
+    export_response = client.post("/projects/export", json={"project": project})
+    assert export_response.status_code == 200
+    export_body = export_response.json()
+    assert export_body["issues"] == []
+    assert "screen_29" in export_body["yaml"]
+
+    import_response = client.post("/projects/import", json={"yaml": export_body["yaml"]})
+    assert import_response.status_code == 200
+    import_body = import_response.json()
+    assert import_body["issues"] == []
+    imported = import_body["project"]
+    assert len(imported["screens"]) == screen_count
+    assert len(imported["screens"]["screen_0"]["widgets"]) == widgets_per_screen
+
+    validate_response = client.post("/projects/validate", json={"project": imported})
+    assert validate_response.status_code == 200
+    validate_body = validate_response.json()
+    assert validate_body["valid"] is True
+    assert validate_body["issues"] == []
