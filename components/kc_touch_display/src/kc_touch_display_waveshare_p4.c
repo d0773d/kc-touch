@@ -7,6 +7,12 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_lcd_panel_ops.h"
+#if __has_include("esp_lcd_touch.h")
+#include "esp_lcd_touch.h"
+#define KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE 1
+#else
+#define KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE 0
+#endif
 
 #if __has_include("bsp/esp32_p4_platform.h")
 #include "bsp/esp32_p4_platform.h"
@@ -18,6 +24,9 @@
 static const char *TAG = "kc_ws_p4";
 static bool s_ready;
 static esp_lcd_panel_handle_t s_panel;
+#if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
+static esp_lcd_touch_handle_t s_touch;
+#endif
 
 esp_err_t kc_touch_display_backend_init_hw(void)
 {
@@ -27,7 +36,11 @@ esp_err_t kc_touch_display_backend_init_hw(void)
 
 #if KC_TOUCH_WAVESHARE_BSP_AVAILABLE
     /* Use Waveshare BSP helper for ESP32-P4 10.1 DSI panel init. */
+#if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
+    esp_err_t err = bsp_display_new_with_handles(NULL, &s_panel, &s_touch);
+#else
     esp_err_t err = bsp_display_new_with_handles(NULL, &s_panel, NULL);
+#endif
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "bsp_display_new_with_handles failed: %s", esp_err_to_name(err));
         return err;
@@ -37,7 +50,11 @@ esp_err_t kc_touch_display_backend_init_hw(void)
         return ESP_ERR_INVALID_STATE;
     }
     (void)esp_lcd_panel_disp_on_off(s_panel, true);
-    ESP_LOGI(TAG, "Waveshare P4 panel initialized via BSP");
+#if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
+    ESP_LOGI(TAG, "Waveshare P4 panel initialized via BSP (touch %s)", s_touch ? "ready" : "not detected");
+#else
+    ESP_LOGI(TAG, "Waveshare P4 panel initialized via BSP (touch API unavailable)");
+#endif
 #else
     ESP_LOGE(TAG, "Waveshare BSP header missing. Add dependency waveshare/esp32_p4_platform.");
     return ESP_ERR_NOT_SUPPORTED;
@@ -65,10 +82,34 @@ esp_err_t kc_touch_display_backend_flush(int32_t x1, int32_t y1, int32_t x2, int
 
 bool kc_touch_display_backend_touch_sample(uint16_t *x, uint16_t *y)
 {
+#if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
+    if (!s_ready || !s_touch || !x || !y) {
+        return false;
+    }
+    esp_lcd_touch_read_data(s_touch);
+    uint16_t x_pos[1] = {0};
+    uint16_t y_pos[1] = {0};
+    uint16_t strength[1] = {0};
+    uint8_t point_count = 0;
+    bool pressed = esp_lcd_touch_get_coordinates(
+        s_touch,
+        x_pos,
+        y_pos,
+        strength,
+        &point_count,
+        1
+    );
+    if (!pressed || point_count == 0) {
+        return false;
+    }
+    *x = x_pos[0];
+    *y = y_pos[0];
+    return true;
+#else
     (void)x;
     (void)y;
-    /* Touch controller wiring/driver is handled in the next step. */
     return false;
+#endif
 }
 
 esp_err_t kc_touch_display_backend_backlight_set(bool enable)
