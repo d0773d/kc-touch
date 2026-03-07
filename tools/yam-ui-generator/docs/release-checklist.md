@@ -38,6 +38,7 @@ _Updated: March 7, 2026_
 
 ## Final manual QA
 
+- Use `docs/release-qa-evidence.md` to capture reviewer, sample set, and pass/fail notes.
 - [ ] Run large-project smoke checklist in `docs/performance-baseline.md`.
 - [ ] Verify import/export roundtrip on current production project samples.
 - [ ] Tag release branch/commit after QA signoff.

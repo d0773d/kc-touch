@@ -39,6 +39,7 @@ Operational docs:
 - [docs/troubleshooting.md](docs/troubleshooting.md)
 - [docs/performance-baseline.md](docs/performance-baseline.md)
 - [docs/release-checklist.md](docs/release-checklist.md)
+- [docs/release-qa-evidence.md](docs/release-qa-evidence.md)
 - [docs/release-notes-template.md](docs/release-notes-template.md)
 
 Additional specifications can be added in the `docs` directory as the project evolves.
