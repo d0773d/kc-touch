@@ -1224,9 +1224,52 @@ static void yui_schema_runtime_destroy(yui_schema_runtime_t *schema)
     free(schema);
 }
 
-static yui_schema_runtime_t *yui_schema_runtime_load(const char *name)
+static void yui_navigation_reset_stack(void)
 {
-    if (s_loaded_schema && s_loaded_schema->name && name && strcasecmp(s_loaded_schema->name, name) == 0) {
+    yui_modal_close_all();
+    for (size_t i = 0; i < s_nav_count; ++i) {
+        yui_screen_frame_destroy(&s_nav_stack[i]);
+    }
+    s_nav_count = 0U;
+    yui_nav_queue_reset();
+}
+
+static yui_schema_runtime_t *yui_schema_runtime_attach(const char *name, yml_node_t *root)
+{
+    if (!root) {
+        return NULL;
+    }
+
+    yui_schema_t schema = {0};
+    if (yui_schema_from_tree(root, &schema) != ESP_OK) {
+        yml_node_free(root);
+        return NULL;
+    }
+
+    yui_schema_runtime_t *runtime = (yui_schema_runtime_t *)calloc(1, sizeof(yui_schema_runtime_t));
+    if (!runtime) {
+        yui_schema_free(&schema);
+        yml_node_free(root);
+        return NULL;
+    }
+    runtime->name = yui_strdup_local(name);
+    runtime->root = root;
+    runtime->schema = schema;
+
+    yui_navigation_reset_stack();
+    if (s_loaded_schema) {
+        yui_schema_runtime_destroy(s_loaded_schema);
+    }
+    s_loaded_schema = runtime;
+    return runtime;
+}
+
+static yui_schema_runtime_t *yui_schema_runtime_load_named(const char *name)
+{
+    if (!name || name[0] == '\0') {
+        return NULL;
+    }
+    if (s_loaded_schema && s_loaded_schema->name && strcasecmp(s_loaded_schema->name, name) == 0) {
         return s_loaded_schema;
     }
     size_t blob_size = 0;
@@ -1238,25 +1281,19 @@ static yui_schema_runtime_t *yui_schema_runtime_load(const char *name)
     if (yaml_core_parse_buffer((const char *)blob, blob_size, &root) != ESP_OK) {
         return NULL;
     }
-    yui_schema_t schema = {0};
-    if (yui_schema_from_tree(root, &schema) != ESP_OK) {
-        yml_node_free(root);
+    return yui_schema_runtime_attach(name, root);
+}
+
+static yui_schema_runtime_t *yui_schema_runtime_load_file(const char *path)
+{
+    if (!path || path[0] == '\0') {
         return NULL;
     }
-    yui_schema_runtime_t *runtime = (yui_schema_runtime_t *)calloc(1, sizeof(yui_schema_runtime_t));
-    if (!runtime) {
-        yui_schema_free(&schema);
-        yml_node_free(root);
+    yml_node_t *root = NULL;
+    if (yaml_core_parse_file(path, &root) != ESP_OK) {
         return NULL;
     }
-    runtime->name = yui_strdup_local(name);
-    runtime->root = root;
-    runtime->schema = schema;
-    if (s_loaded_schema) {
-        yui_schema_runtime_destroy(s_loaded_schema);
-    }
-    s_loaded_schema = runtime;
-    return runtime;
+    return yui_schema_runtime_attach(path, root);
 }
 
 static const yml_node_t *yui_schema_resolve_screen(yui_schema_runtime_t *schema, const char *screen)
@@ -1430,7 +1467,7 @@ static void yui_register_builtin_natives(void)
     yamui_runtime_register_function("ui_pop", yui_native_fn_pop);
 }
 
-esp_err_t lvgl_yaml_gui_load_default(void)
+static esp_err_t yui_runtime_prepare(void)
 {
     esp_err_t runtime_err = yamui_runtime_init();
     if (runtime_err != ESP_OK) {
@@ -1439,16 +1476,47 @@ esp_err_t lvgl_yaml_gui_load_default(void)
     yui_register_builtin_natives();
     yui_nav_queue_init(yui_navigation_execute_request, NULL);
     yui_events_set_runtime(&s_runtime_vtable);
+    return ESP_OK;
+}
 
-    const char *default_schema = ui_schemas_get_default_name();
-    yui_schema_runtime_t *schema = yui_schema_runtime_load(default_schema);
+static esp_err_t yui_boot_loaded_schema(yui_schema_runtime_t *schema)
+{
     if (!schema) {
         return ESP_ERR_NOT_FOUND;
     }
     const char *initial_screen = yui_schema_default_screen(&schema->schema);
+    if (!initial_screen || initial_screen[0] == '\0') {
+        return ESP_ERR_NOT_FOUND;
+    }
     esp_err_t err = yui_navigation_push(initial_screen);
     if (err != ESP_OK) {
         yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_NAV, "Failed to load initial screen (%s)", esp_err_to_name(err));
     }
     return err;
+}
+
+esp_err_t lvgl_yaml_gui_load_named(const char *schema_name)
+{
+    esp_err_t err = yui_runtime_prepare();
+    if (err != ESP_OK) {
+        return err;
+    }
+    yui_schema_runtime_t *schema = yui_schema_runtime_load_named(schema_name);
+    return yui_boot_loaded_schema(schema);
+}
+
+esp_err_t lvgl_yaml_gui_load_from_file(const char *path)
+{
+    esp_err_t err = yui_runtime_prepare();
+    if (err != ESP_OK) {
+        return err;
+    }
+    yui_schema_runtime_t *schema = yui_schema_runtime_load_file(path);
+    return yui_boot_loaded_schema(schema);
+}
+
+esp_err_t lvgl_yaml_gui_load_default(void)
+{
+    const char *default_schema = ui_schemas_get_default_name();
+    return lvgl_yaml_gui_load_named(default_schema);
 }

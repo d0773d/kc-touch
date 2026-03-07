@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "esp_log.h"
 
@@ -437,6 +438,50 @@ esp_err_t yaml_core_parse_string(const char *data, yml_node_t **out_root)
         return ESP_ERR_INVALID_ARG;
     }
     return yaml_core_parse_buffer(data, strlen(data), out_root);
+}
+
+esp_err_t yaml_core_parse_file(const char *path, yml_node_t **out_root)
+{
+    if (!path || !out_root) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        ESP_LOGE(TAG, "Failed to open YAML file: %s", path);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (fseek(file, 0L, SEEK_END) != 0) {
+        fclose(file);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    long file_size = ftell(file);
+    if (file_size <= 0) {
+        fclose(file);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (fseek(file, 0L, SEEK_SET) != 0) {
+        fclose(file);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    char *buffer = (char *)malloc((size_t)file_size);
+    if (!buffer) {
+        fclose(file);
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t read_size = fread(buffer, 1U, (size_t)file_size, file);
+    fclose(file);
+    if (read_size != (size_t)file_size) {
+        free(buffer);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    esp_err_t err = yaml_core_parse_buffer(buffer, read_size, out_root);
+    free(buffer);
+    return err;
 }
 
 void yml_node_free(yml_node_t *node)

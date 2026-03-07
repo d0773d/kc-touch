@@ -27,6 +27,7 @@ const yml_node_t *yml_node_next(const yml_node_t *node);
 
 esp_err_t yaml_core_parse_buffer(const char *data, size_t length, yml_node_t **out_root);
 esp_err_t yaml_core_parse_string(const char *data, yml_node_t **out_root);
+esp_err_t yaml_core_parse_file(const char *path, yml_node_t **out_root);
 void yml_node_free(yml_node_t *node);
 
 #ifdef __cplusplus
