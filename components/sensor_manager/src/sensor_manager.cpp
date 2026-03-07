@@ -2,7 +2,9 @@
 
 #include "sdkconfig.h"
 
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_TAB5
 #include <M5Unified.h>
+#endif
 
 #include <ctype.h>
 #include <stdio.h>
@@ -348,12 +350,15 @@ esp_err_t sensor_manager_init(void)
     sensor_populate_fake();
     return sensor_manager_update();
 #endif
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_TAB5
     if (!M5.In_I2C.isEnabled()) {
         ESP_LOGE(TAG, "Internal I2C bus is not initialized by M5Unified");
         return ESP_ERR_INVALID_STATE;
     }
-
     s_i2c_port = M5.In_I2C.getPort();
+#else
+    ESP_LOGI(TAG, "Using I2C port %d for sensor scan", (int)s_i2c_port);
+#endif
     s_initialized = true;
     sensor_list_clear();
 

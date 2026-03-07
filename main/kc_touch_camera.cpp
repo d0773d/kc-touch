@@ -1,6 +1,10 @@
 #include "kc_touch_camera.h"
 
+#include "sdkconfig.h"
+
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_TAB5
 #include <M5Unified.h>
+#endif
 
 #include <driver/i2c_master.h>
 #include <esp_cam_sensor_xclk.h>
@@ -55,6 +59,7 @@ static esp_err_t stop_xclk(void)
 
 static esp_err_t configure_shared_sccb(void)
 {
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_TAB5
     i2c_master_bus_handle_t shared_bus = M5.In_I2C.getBusHandle();
 
     if (!shared_bus || !M5.In_I2C.isEnabled()) {
@@ -66,6 +71,9 @@ static esp_err_t configure_shared_sccb(void)
     s_tab5_csi_config.sccb_config.i2c_handle = shared_bus;
     s_tab5_csi_config.sccb_config.freq = TAB5_CAM_SCCB_FREQ_HZ;
     return ESP_OK;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 extern "C" esp_err_t kc_touch_camera_init(void)
@@ -73,6 +81,11 @@ extern "C" esp_err_t kc_touch_camera_init(void)
     if (s_camera_ready) {
         return ESP_OK;
     }
+
+#if !CONFIG_KC_TOUCH_DISPLAY_BACKEND_TAB5
+    ESP_LOGW(TAG, "Camera init is currently implemented for Tab5 backend only");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 
     esp_err_t err = configure_shared_sccb();
     if (err != ESP_OK) {

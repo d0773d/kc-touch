@@ -2,10 +2,11 @@
 
 #include <stddef.h>
 #include "esp_bit_defs.h"
+#include "esp_idf_version.h"
 #include "esp_log.h"
+#include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <M5Unified.hpp>
 
 #define PI4IO_ADDR            0x44
 #define PI4IO_REG_CHIP_RESET  0x01
@@ -22,31 +23,60 @@
 
 static const char *TAG = "wifi_copro_power";
 static bool s_expander_ready;
+static bool s_i2c_ready;
 
-// Helper to wrap M5Unified I2C calls with ESP error codes
+static esp_err_t wifi_copro_i2c_init(void)
+{
+    if (s_i2c_ready) {
+        return ESP_OK;
+    }
+
+    i2c_config_t cfg = {};
+    cfg.mode = I2C_MODE_MASTER;
+    cfg.sda_io_num = WIFI_COPRO_I2C_SDA;
+    cfg.scl_io_num = WIFI_COPRO_I2C_SCL;
+    cfg.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    cfg.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    cfg.master.clk_speed = 400000;
+#if ESP_IDF_VERSION_MAJOR >= 5
+    cfg.clk_flags = 0;
+#endif
+
+    esp_err_t err = i2c_param_config(WIFI_COPRO_I2C_PORT, &cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "i2c_param_config failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = i2c_driver_install(WIFI_COPRO_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "i2c_driver_install failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    s_i2c_ready = true;
+    return ESP_OK;
+}
+
 static esp_err_t pi4io_write(uint8_t reg, uint8_t value)
 {
-    // M5.In_I2C uses the internal I2C port (usually I2C_NUM_0 on M5Tab5)
-    // which corresponds to the pins we need (GPIO 31/32).
-    // Note: We assume M5.begin() has been called prior to this.
-    if (!M5.In_I2C.writeRegister8(PI4IO_ADDR, reg, value, 400000)) {
-        ESP_LOGE(TAG, "I2C Write Failed to 0x%02X", PI4IO_ADDR);
-        return ESP_FAIL;
-    }
-    return ESP_OK;
+    uint8_t payload[2] = {reg, value};
+    return i2c_master_write_to_device(WIFI_COPRO_I2C_PORT, PI4IO_ADDR, payload, sizeof(payload), pdMS_TO_TICKS(I2C_TIMEOUT_MS));
 }
 
 static esp_err_t pi4io_read(uint8_t reg, uint8_t *value)
 {
-    // readRegister8 returns the value directly. 
-    // We cannot easily distinguish error from value 0 with readRegister8 
-    // unless we use the version that takes a pointer (readRegister).
-    if (!value) return ESP_ERR_INVALID_ARG;
-    
-    if (M5.In_I2C.readRegister(PI4IO_ADDR, reg, value, 1, 400000)) {
-        return ESP_OK;
+    if (!value) {
+        return ESP_ERR_INVALID_ARG;
     }
-    return ESP_FAIL;
+    return i2c_master_write_read_device(
+        WIFI_COPRO_I2C_PORT,
+        PI4IO_ADDR,
+        &reg,
+        1,
+        value,
+        1,
+        pdMS_TO_TICKS(I2C_TIMEOUT_MS)
+    );
 }
 
 esp_err_t wifi_copro_power_init(void)
@@ -55,12 +85,14 @@ esp_err_t wifi_copro_power_init(void)
         return ESP_OK;
     }
 
-    // We no longer initialize I2C here as M5Unified handles it.
-    // However, we should verify we can talk to the expander.
-    
-    esp_err_t err = pi4io_write(PI4IO_REG_CHIP_RESET, 0xFF);
+    esp_err_t err = wifi_copro_i2c_init();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to reset PI4IO expander. Ensure M5.begin() is called prior to wifi_copro_power_init().");
+        return err;
+    }
+
+    err = pi4io_write(PI4IO_REG_CHIP_RESET, 0xFF);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset PI4IO expander on I2C%d", (int)WIFI_COPRO_I2C_PORT);
         return err;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
