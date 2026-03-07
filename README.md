@@ -36,10 +36,7 @@ The kc-touch firmware now includes a dedicated LVGL wrapper component located at
 
 ### Display and touch bring-up
 
-The [components/kc_touch_display](components/kc_touch_display) component supports selectable board backends:
-
-- `M5Stack Tab5` via `M5Unified` + `M5GFX`
-- `Waveshare ESP32-P4` via `waveshare/esp32_p4_platform` (preferred) or direct JD9365 fallback
+The active firmware target is `Waveshare ESP32-P4` (10.1-DSI-TOUCH-A).
 
 For Waveshare ESP32-P4 + 10.1-DSI-TOUCH-A, add at least one dependency:
 
@@ -53,7 +50,7 @@ If you want panel-only fallback (without BSP helper APIs):
 idf.py add-dependency "waveshare/esp_lcd_jd9365"
 ```
 
-Then select `Component config -> KC Touch Display -> Display backend -> Waveshare ESP32-P4 module dev kit`.
+`kc_touch_display` now boots the Waveshare backend directly (no Tab5 path in active build).
 
 - `kc_touch_display_init()` runs right after `kc_touch_gui_init()` in [main/app_main.c](main/app_main.c#L1) so LVGL registers a real flush callback before the YamUI scene tree renders.
 - YamUI-generated layouts serve as the first visual confirmation that the panel is alive; touch input feeds LVGL through a pointer driver whenever available.
