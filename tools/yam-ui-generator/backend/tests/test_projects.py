@@ -367,3 +367,74 @@ def test_preview_render_endpoint_returns_summary_and_findings() -> None:
     assert body["summary"]["screen_count"] == 1
     assert body["summary"]["finding_count"] >= 1
     assert any(finding["path"] == "/screens/main/widgets/0/style" for finding in body["findings"])
+
+
+def test_validate_reports_asset_binding_and_event_semantic_warnings() -> None:
+    client = _client()
+    project = {
+        "app": {
+            "asset_manifest": {
+                "assets": [
+                    {"path": "media/known.png"},
+                ]
+            }
+        },
+        "state": {
+            "device": {
+                "connected": 4,
+            }
+        },
+        "translations": {
+            "en": {
+                "label": "English",
+                "entries": {},
+            }
+        },
+        "styles": {},
+        "components": {},
+        "screens": {
+            "main": {
+                "name": "main",
+                "initial": True,
+                "widgets": [
+                    {
+                        "type": "img",
+                        "id": "img-1",
+                        "src": "../unsafe.png",
+                        "bindings": {
+                            "text": "{{ state.device.missing }}",
+                            "": "state.device.connected",
+                        },
+                        "events": {
+                            "on_click": [
+                                "push(missing_screen)",
+                                "modal(missing_component)",
+                                "set(state.missing.path, 1)",
+                                "set(user.name, 1)",
+                                "",
+                            ],
+                            "on_invalid": 12,
+                            "": ["noop()"],
+                        },
+                    }
+                ],
+            }
+        },
+    }
+
+    response = client.post("/projects/validate", json={"project": project})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    issues = body["issues"]
+    assert any(issue["path"] == "/screens/main/widgets/0/src" and "parent directory traversal" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/src" and "asset_manifest" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/bindings/text" and "state.device.missing" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/bindings" and "Binding names" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/events/on_click/0" and "Target screen" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/events/on_click/1" and "Modal component" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/events/on_click/2" and "state.missing.path" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/events/on_click/3" and "must target a state path" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/events/on_click/4" and "must not be empty" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/events/on_invalid" and "string or string array" in issue["message"] for issue in issues)
+    assert any(issue["path"] == "/screens/main/widgets/0/events" and "Event names" in issue["message"] for issue in issues)
