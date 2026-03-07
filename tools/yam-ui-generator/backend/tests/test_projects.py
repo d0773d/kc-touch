@@ -132,7 +132,8 @@ def test_validate_endpoint_requires_payload_and_accepts_project() -> None:
 
     missing = client.post("/projects/validate", json={})
     assert missing.status_code == 400
-    assert missing.json()["detail"] == "Either project or yaml must be provided"
+    assert missing.json()["error"]["code"] == "bad_request"
+    assert missing.json()["error"]["message"] == "Either project or yaml must be provided"
 
 
 def test_style_preview_endpoint_returns_stub_preview() -> None:

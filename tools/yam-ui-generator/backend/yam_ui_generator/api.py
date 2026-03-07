@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from .asset_service import collect_asset_catalog, ingest_uploaded_asset, resolve_asset_file, update_asset_tags
 from .models import (
@@ -62,6 +63,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _error_code_from_status(status_code: int) -> str:
+    if status_code == 400:
+        return "bad_request"
+    if status_code == 404:
+        return "not_found"
+    if status_code == 422:
+        return "validation_error"
+    if status_code >= 500:
+        return "internal_error"
+    return "request_error"
+
+
+def _error_message(detail: object, fallback: str) -> str:
+    if isinstance(detail, str) and detail.strip():
+        return detail
+    if isinstance(detail, dict):
+        message = detail.get("message")
+        if isinstance(message, str) and message.strip():
+            return message
+    return fallback
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(_: Request, exc: HTTPException) -> JSONResponse:
+    message = _error_message(exc.detail, fallback="Request failed")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": _error_code_from_status(exc.status_code),
+                "message": message,
+                "status": exc.status_code,
+            }
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "validation_error",
+                "message": "Request validation failed",
+                "status": 422,
+                "details": exc.errors(),
+            }
+        },
+    )
 
 
 @app.get("/health")

@@ -178,7 +178,8 @@ def test_asset_upload_respects_size_limit(asset_client, monkeypatch) -> None:
     files = {"file": ("large.png", b"x" * 2048, "image/png")}
     response = client.post("/assets/upload", data={"path": "media/too_big.png"}, files=files)
     assert response.status_code == 400
-    assert "max upload size" in response.json()["detail"].lower()
+    assert response.json()["error"]["code"] == "bad_request"
+    assert "max upload size" in response.json()["error"]["message"].lower()
 
 
 def test_asset_upload_rejects_extension(asset_client, monkeypatch) -> None:
@@ -187,7 +188,8 @@ def test_asset_upload_rejects_extension(asset_client, monkeypatch) -> None:
     files = {"file": ("script.exe", b"binary", "application/octet-stream")}
     response = client.post("/assets/upload", data={"path": "media/script.exe"}, files=files)
     assert response.status_code == 400
-    assert "extension" in response.json()["detail"].lower()
+    assert response.json()["error"]["code"] == "bad_request"
+    assert "extension" in response.json()["error"]["message"].lower()
 
 
 def test_asset_upload_generates_thumbnail(asset_client) -> None:
