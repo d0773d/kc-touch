@@ -28,6 +28,14 @@ static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_touch_handle_t s_touch;
 #endif
 
+#ifndef CONFIG_KC_TOUCH_DISPLAY_WIDTH
+#define CONFIG_KC_TOUCH_DISPLAY_WIDTH 1280
+#endif
+
+#ifndef CONFIG_KC_TOUCH_DISPLAY_HEIGHT
+#define CONFIG_KC_TOUCH_DISPLAY_HEIGHT 800
+#endif
+
 esp_err_t kc_touch_display_backend_init_hw(void)
 {
     if (s_ready) {
@@ -55,6 +63,7 @@ esp_err_t kc_touch_display_backend_init_hw(void)
 #else
     ESP_LOGI(TAG, "Waveshare P4 panel initialized via BSP (touch API unavailable)");
 #endif
+    ESP_LOGI(TAG, "Configured LVGL resolution: %dx%d", CONFIG_KC_TOUCH_DISPLAY_WIDTH, CONFIG_KC_TOUCH_DISPLAY_HEIGHT);
 #else
     ESP_LOGE(TAG, "Waveshare BSP header missing. Add dependency waveshare/esp32_p4_platform.");
     return ESP_ERR_NOT_SUPPORTED;
