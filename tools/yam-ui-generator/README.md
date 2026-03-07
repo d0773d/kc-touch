@@ -33,6 +33,12 @@ For execution planning to final release readiness, see [docs/finish-checklist.md
 
 For backend contract versioning and error envelope behavior, see [docs/api-contract.md](docs/api-contract.md).
 
+Operational docs:
+- [docs/user-guide.md](docs/user-guide.md)
+- [docs/contributor-guide.md](docs/contributor-guide.md)
+- [docs/troubleshooting.md](docs/troubleshooting.md)
+- [docs/release-notes-template.md](docs/release-notes-template.md)
+
 Additional specifications can be added in the `docs` directory as the project evolves.
 
 ## CI Command Parity
