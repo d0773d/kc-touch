@@ -31,6 +31,8 @@ See [docs/phase1-core-features.md](docs/phase1-core-features.md) for the detaile
 
 For execution planning to final release readiness, see [docs/finish-checklist.md](docs/finish-checklist.md).
 
+For backend contract versioning and error envelope behavior, see [docs/api-contract.md](docs/api-contract.md).
+
 Additional specifications can be added in the `docs` directory as the project evolves.
 
 ## CI Command Parity

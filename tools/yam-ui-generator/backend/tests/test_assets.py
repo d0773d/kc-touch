@@ -121,6 +121,15 @@ def test_asset_file_route_serves_bytes(asset_client) -> None:
     assert response.content == b"served"
 
 
+def test_asset_file_route_missing_uses_error_envelope(asset_client) -> None:
+    client, _ = asset_client
+    response = client.get("/assets/files/media/missing.png")
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error"]["code"] == "not_found"
+    assert body["error"]["message"] == "Asset not found"
+
+
 def test_asset_catalog_filters(asset_client) -> None:
     client, root = asset_client
     media_dir = root / "media"
