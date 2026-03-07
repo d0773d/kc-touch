@@ -4,9 +4,11 @@
 
 #include "kc_touch_display_backend.h"
 
+#include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_lcd_panel_ops.h"
+#include "soc/soc_caps.h"
 #if __has_include("esp_lcd_touch.h")
 #include "esp_lcd_touch.h"
 #define KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE 1
@@ -21,12 +23,28 @@
 #define KC_TOUCH_WAVESHARE_BSP_AVAILABLE 0
 #endif
 
+#if __has_include("esp_lcd_jd9365_10_1.h")
+#include "esp_lcd_jd9365_10_1.h"
+#include "esp_lcd_mipi_dsi.h"
+#include "esp_ldo_regulator.h"
+#include "driver/gpio.h"
+#define KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE 1
+#else
+#define KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE 0
+#endif
+
 static const char *TAG = "kc_ws_p4";
 static bool s_ready;
 static esp_lcd_panel_handle_t s_panel;
 #if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
 static esp_lcd_touch_handle_t s_touch;
 #endif
+#if KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE
+static esp_lcd_dsi_bus_handle_t s_mipi_dsi_bus;
+static esp_lcd_panel_io_handle_t s_mipi_dbi_io;
+static esp_ldo_channel_handle_t s_mipi_ldo_chan;
+#endif
+static bool s_backlight_ready;
 
 #ifndef CONFIG_KC_TOUCH_DISPLAY_WIDTH
 #define CONFIG_KC_TOUCH_DISPLAY_WIDTH 1280
@@ -64,8 +82,74 @@ esp_err_t kc_touch_display_backend_init_hw(void)
     ESP_LOGI(TAG, "Waveshare P4 panel initialized via BSP (touch API unavailable)");
 #endif
     ESP_LOGI(TAG, "Configured LVGL resolution: %dx%d", CONFIG_KC_TOUCH_DISPLAY_WIDTH, CONFIG_KC_TOUCH_DISPLAY_HEIGHT);
+#elif KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE && SOC_MIPI_DSI_SUPPORTED
+    if (CONFIG_KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO >= 0) {
+        gpio_config_t bk_gpio_config = {
+            .mode = GPIO_MODE_OUTPUT,
+            .pin_bit_mask = (1ULL << CONFIG_KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO),
+        };
+        esp_err_t err = gpio_config(&bk_gpio_config);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "backlight gpio init failed: %s", esp_err_to_name(err));
+            return err;
+        }
+        (void)gpio_set_level(CONFIG_KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO, 1);
+        s_backlight_ready = true;
+    }
+
+    esp_ldo_channel_config_t ldo_mipi_phy_config = {
+        .chan_id = CONFIG_KC_TOUCH_WAVESHARE_MIPI_LDO_CHANNEL,
+        .voltage_mv = CONFIG_KC_TOUCH_WAVESHARE_MIPI_LDO_MV,
+    };
+    esp_err_t err = esp_ldo_acquire_channel(&ldo_mipi_phy_config, &s_mipi_ldo_chan);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "MIPI PHY LDO acquire failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    esp_lcd_dsi_bus_config_t bus_config = JD9365_PANEL_BUS_DSI_2CH_CONFIG();
+    err = esp_lcd_new_dsi_bus(&bus_config, &s_mipi_dsi_bus);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_new_dsi_bus failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    esp_lcd_dbi_io_config_t dbi_config = JD9365_PANEL_IO_DBI_CONFIG();
+    err = esp_lcd_new_panel_io_dbi(s_mipi_dsi_bus, &dbi_config, &s_mipi_dbi_io);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_new_panel_io_dbi failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    esp_lcd_dpi_panel_config_t dpi_config = JD9365_800_1280_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB888);
+    jd9365_vendor_config_t vendor_config = {
+        .flags = {
+            .use_mipi_interface = 1,
+        },
+        .mipi_config = {
+            .dsi_bus = s_mipi_dsi_bus,
+            .dpi_config = &dpi_config,
+            .lane_num = 2,
+        },
+    };
+    const esp_lcd_panel_dev_config_t panel_config = {
+        .reset_gpio_num = CONFIG_KC_TOUCH_WAVESHARE_LCD_RST_GPIO,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = 24,
+        .vendor_config = &vendor_config,
+    };
+    err = esp_lcd_new_panel_jd9365(s_mipi_dbi_io, &panel_config, &s_panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_new_panel_jd9365 failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(s_panel), TAG, "panel reset failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_panel), TAG, "panel init failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "panel on failed");
+    ESP_LOGI(TAG, "Waveshare P4 panel initialized via jd9365 component (touch TBD)");
+    ESP_LOGI(TAG, "Configured LVGL resolution: %dx%d", CONFIG_KC_TOUCH_DISPLAY_WIDTH, CONFIG_KC_TOUCH_DISPLAY_HEIGHT);
 #else
-    ESP_LOGE(TAG, "Waveshare BSP header missing. Add dependency waveshare/esp32_p4_platform.");
+    ESP_LOGE(TAG, "No Waveshare display backend available. Add waveshare/esp32_p4_platform or waveshare/esp_lcd_jd9365_10_1.");
     return ESP_ERR_NOT_SUPPORTED;
 #endif
 
@@ -130,6 +214,14 @@ esp_err_t kc_touch_display_backend_backlight_set(bool enable)
     /* Keep brightness simple for now; 0=off, 100=on. */
     int percent = enable ? 100 : 0;
     return bsp_display_brightness_set(percent);
+#elif KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE
+    if (!s_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_backlight_ready || CONFIG_KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO < 0) {
+        return ESP_OK;
+    }
+    return gpio_set_level(CONFIG_KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO, enable ? 1 : 0);
 #else
     (void)enable;
     if (!s_ready) {

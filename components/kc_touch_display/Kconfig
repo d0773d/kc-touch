@@ -29,15 +29,43 @@ endchoice
 
 config KC_TOUCH_DISPLAY_WIDTH
     int "Display width (pixels)"
-    default 1280 if KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4
+    default 800 if KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4
     default 720
     range 100 2000
 
 config KC_TOUCH_DISPLAY_HEIGHT
     int "Display height (pixels)"
-    default 800 if KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4
+    default 1280 if KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4
     default 1280
     range 100 2000
+
+config KC_TOUCH_WAVESHARE_LCD_RST_GPIO
+    int "Waveshare LCD reset GPIO"
+    default 27
+    range -1 48
+    help
+        GPIO used for JD9365 reset. Set to -1 if reset pin is not connected.
+
+config KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO
+    int "Waveshare backlight GPIO"
+    default 26
+    range -1 48
+    help
+        GPIO used to control panel backlight. Set to -1 if handled elsewhere.
+
+config KC_TOUCH_WAVESHARE_MIPI_LDO_CHANNEL
+    int "Waveshare MIPI LDO channel"
+    default 3
+    range 0 7
+    help
+        LDO channel used to power MIPI DSI PHY.
+
+config KC_TOUCH_WAVESHARE_MIPI_LDO_MV
+    int "Waveshare MIPI LDO voltage (mV)"
+    default 2500
+    range 1800 3300
+    help
+        Voltage for the selected MIPI PHY LDO channel.
 
 config KC_TOUCH_DISPLAY_BUFFER_LINES
     int "LVGL buffer height (lines)"
