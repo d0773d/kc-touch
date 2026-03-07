@@ -36,12 +36,27 @@ The kc-touch firmware now includes a dedicated LVGL wrapper component located at
 
 ### Display and touch bring-up
 
-The [components/kc_touch_display](components/kc_touch_display) component is now purpose-built for the M5Stack Tab5. It leverages the upstream `M5Unified` + `M5GFX` drivers to light up the native MIPI DSI panel, GT911 touch controller, and PWM backlight—no GPIO bookkeeping required as long as PSRAM runs at 200 MHz.
+The [components/kc_touch_display](components/kc_touch_display) component supports selectable board backends:
+
+- `M5Stack Tab5` via `M5Unified` + `M5GFX`
+- `Waveshare ESP32-P4` via `waveshare/esp32_p4_platform` (preferred) or direct JD9365 fallback
+
+For Waveshare ESP32-P4 + 10.1-DSI-TOUCH-A, add at least one dependency:
+
+```bash
+idf.py add-dependency "waveshare/esp32_p4_platform^1.0.5"
+```
+
+If you want panel-only fallback (without BSP helper APIs):
+
+```bash
+idf.py add-dependency "waveshare/esp_lcd_jd9365"
+```
+
+Then select `Component config -> KC Touch Display -> Display backend -> Waveshare ESP32-P4 module dev kit`.
 
 - `kc_touch_display_init()` runs right after `kc_touch_gui_init()` in [main/app_main.c](main/app_main.c#L1) so LVGL registers a real flush callback before the YamUI scene tree renders.
-- YamUI-generated layouts now serve as the first visual confirmation that the panel is alive; touch input feeds LVGL through a pointer driver whenever it is enabled.
-- `kc_touch_display_backlight_set()` proxies straight to the Tab5 brightness control exposed by M5Unified.
-
+- YamUI-generated layouts serve as the first visual confirmation that the panel is alive; touch input feeds LVGL through a pointer driver whenever available.
 ## How to use example
 
 ### Hardware Required

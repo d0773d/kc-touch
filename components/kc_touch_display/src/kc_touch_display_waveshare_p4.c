@@ -23,14 +23,20 @@
 #define KC_TOUCH_WAVESHARE_BSP_AVAILABLE 0
 #endif
 
-#if __has_include("esp_lcd_jd9365_10_1.h")
+#if __has_include("esp_lcd_jd9365.h")
+#include "esp_lcd_jd9365.h"
+#define KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE 1
+#elif __has_include("esp_lcd_jd9365_10_1.h")
 #include "esp_lcd_jd9365_10_1.h"
-#include "esp_lcd_mipi_dsi.h"
-#include "esp_ldo_regulator.h"
-#include "driver/gpio.h"
 #define KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE 1
 #else
 #define KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE 0
+#endif
+
+#if KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE
+#include "esp_lcd_mipi_dsi.h"
+#include "esp_ldo_regulator.h"
+#include "driver/gpio.h"
 #endif
 
 static const char *TAG = "kc_ws_p4";
@@ -149,7 +155,7 @@ esp_err_t kc_touch_display_backend_init_hw(void)
     ESP_LOGI(TAG, "Waveshare P4 panel initialized via jd9365 component (touch TBD)");
     ESP_LOGI(TAG, "Configured LVGL resolution: %dx%d", CONFIG_KC_TOUCH_DISPLAY_WIDTH, CONFIG_KC_TOUCH_DISPLAY_HEIGHT);
 #else
-    ESP_LOGE(TAG, "No Waveshare display backend available. Add waveshare/esp32_p4_platform or waveshare/esp_lcd_jd9365_10_1.");
+    ESP_LOGE(TAG, "No Waveshare display backend available. Add waveshare/esp32_p4_platform or waveshare/esp_lcd_jd9365.");
     return ESP_ERR_NOT_SUPPORTED;
 #endif
 
