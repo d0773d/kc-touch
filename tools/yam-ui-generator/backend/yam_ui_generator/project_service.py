@@ -6,15 +6,15 @@ import csv
 import datetime as dt
 import io
 import json
-from typing import Any, Dict, List, Tuple, Literal, Set
+from typing import Any, Dict, List, Literal, Set, Tuple
 
 import yaml
 
+from .asset_service import collect_asset_catalog
 from .migration import migrate_project_payload
 from .models import Project, TranslationLocale, ValidationIssue
 from .schema import validate_project
 from .yaml_io import ensure_project_dict, project_to_yaml
-from .asset_service import collect_asset_catalog
 
 
 def import_project_from_yaml(text: str) -> Tuple[Project, List[ValidationIssue]]:

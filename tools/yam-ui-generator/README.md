@@ -40,10 +40,12 @@ Use the same commands locally that run in CI:
 1. Frontend
    - `cd tools/yam-ui-generator/frontend`
    - `npm ci`
+   - `npm run lint`
    - `npm test`
    - `npm run build`
 
 2. Backend
    - `cd tools/yam-ui-generator/backend`
    - `poetry install --no-interaction`
+   - `poetry run ruff check .`
    - `poetry run pytest -q --basetemp .pytest_tmp`

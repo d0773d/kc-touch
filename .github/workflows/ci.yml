@@ -59,5 +59,8 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
+      - name: Lint
+        run: poetry run ruff check .
+
       - name: Run tests
         run: poetry run pytest -q --basetemp .pytest_tmp

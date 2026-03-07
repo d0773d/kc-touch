@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from typing import List
+from typing import Annotated
 
-from fastapi import File, Form, HTTPException, UploadFile, FastAPI
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -16,14 +16,14 @@ from .models import (
     AssetTagUpdateRequest,
     AssetTagUpdateResponse,
     AssetUploadResponse,
+    PreviewRenderRequest,
+    PreviewRenderResponse,
     Project,
     ProjectExportRequest,
     ProjectExportResponse,
     ProjectImportRequest,
     ProjectImportResponse,
     ProjectSettingsResponse,
-    PreviewRenderRequest,
-    PreviewRenderResponse,
     ProjectSettingsUpdateRequest,
     ProjectSettingsUpdateResponse,
     ProjectValidateRequest,
@@ -40,9 +40,9 @@ from .models import (
 )
 from .palette import PALETTE
 from .project_service import (
+    apply_project_settings,
     export_project_to_yaml,
     export_translations_payload,
-    apply_project_settings,
     import_project_from_yaml,
     import_translations_payload,
     validate_payload,
@@ -175,7 +175,7 @@ def build_asset_catalog(payload: AssetCatalogRequest) -> AssetCatalogResponse:
     return AssetCatalogResponse(assets=assets)
 
 
-def _parse_tags(raw: str | None) -> List[str]:
+def _parse_tags(raw: str | None) -> list[str]:
     if not raw:
         return []
     try:
@@ -189,9 +189,9 @@ def _parse_tags(raw: str | None) -> List[str]:
 
 @app.post("/assets/upload", response_model=AssetUploadResponse)
 async def upload_asset(
-    file: UploadFile = File(...),
-    path: str | None = Form(None),
-    tags: str | None = Form(None),
+    file: Annotated[UploadFile, File(...)],
+    path: Annotated[str | None, Form()] = None,
+    tags: Annotated[str | None, Form()] = None,
 ) -> AssetUploadResponse:
     try:
         asset = ingest_uploaded_asset(file.file, file.filename, path, _parse_tags(tags))

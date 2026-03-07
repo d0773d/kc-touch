@@ -1,6 +1,6 @@
 import json
-import yaml
 
+import yaml
 from fastapi.testclient import TestClient
 
 from yam_ui_generator.api import app
