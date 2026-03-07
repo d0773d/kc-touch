@@ -397,10 +397,6 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
     return () => window.clearTimeout(timer);
   }, [focusedKey]);
 
-  if (localeCodes.length === 0) {
-    return null;
-  }
-
   const tableColumnsStyle = { gridTemplateColumns: buildColumnsTemplate(localeCodes.length) };
   const keyCount = allKeys.length;
   const summarizeIssues = (issues: ValidationIssue[]): string | null => {
@@ -628,6 +624,10 @@ export default function TranslationManager({ issues }: TranslationManagerProps):
       return { ...prev, [activeDiff.key]: activeSelection };
     });
   }, [activeDiff, activeSelection, setFillSelections]);
+
+  if (localeCodes.length === 0) {
+    return null;
+  }
 
   return (
     <section className="translation-manager" id="translation-manager">
@@ -1099,7 +1099,7 @@ function DiffViewer({
                     <span className="diff-viewer__target-before">
                       {currentValue.length ? `Existing: ${currentValue}` : "Empty (will copy primary)"}
                     </span>
-                    {isFilled && <span className="diff-viewer__target-note">Won't overwrite existing copy.</span>}
+                    {isFilled && <span className="diff-viewer__target-note">Won&apos;t overwrite existing copy.</span>}
                   </div>
                 </label>
               </li>

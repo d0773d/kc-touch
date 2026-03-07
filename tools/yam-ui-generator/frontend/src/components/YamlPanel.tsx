@@ -188,7 +188,7 @@ function previewNode(
       if (componentName && !project.components?.[componentName]) {
         findings.push({
           path,
-          message: `Component \"${componentName}\" is not defined`, 
+          message: `Component "${componentName}" is not defined`,
           severity: "error",
           source: "local",
         });
@@ -203,7 +203,7 @@ function previewNode(
     default:
       findings.push({
         path,
-        message: `Unsupported widget type \"${(widget as { type?: string }).type ?? "unknown"}\"`,
+        message: `Unsupported widget type "${(widget as { type?: string }).type ?? "unknown"}"`,
         severity: "warning",
         source: "local",
       });

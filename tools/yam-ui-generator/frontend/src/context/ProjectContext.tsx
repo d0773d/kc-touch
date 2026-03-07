@@ -1077,6 +1077,7 @@ export function ProjectProvider({ children }: { children: ReactNode }): JSX.Elem
       setSnapshotPinned,
       editorTarget,
       selectedPath,
+      selectWidget,
       addWidget,
       updateWidget,
       removeWidget,

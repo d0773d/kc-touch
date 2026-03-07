@@ -8,7 +8,6 @@ import {
 } from "../utils/api";
 import { ProjectModel, ValidationIssue } from "../types/yamui";
 import Modal from "./Modal";
-import type { ProjectSnapshotEntry } from "../context/ProjectContext";
 
 interface Props {
   onIssues: (issues: ValidationIssue[]) => void;
