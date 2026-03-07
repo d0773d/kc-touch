@@ -438,3 +438,148 @@ def test_validate_reports_asset_binding_and_event_semantic_warnings() -> None:
     assert any(issue["path"] == "/screens/main/widgets/0/events/on_click/4" and "must not be empty" in issue["message"] for issue in issues)
     assert any(issue["path"] == "/screens/main/widgets/0/events/on_invalid" and "string or string array" in issue["message"] for issue in issues)
     assert any(issue["path"] == "/screens/main/widgets/0/events" and "Event names" in issue["message"] for issue in issues)
+
+
+def test_roundtrip_preserves_semantic_state_for_complex_project_fixture() -> None:
+    client = _client()
+    project = {
+        "app": {
+            "name": "Roundtrip Fixture",
+            "initial_screen": "main",
+            "locale": "en",
+            "supported_locales": ["en", "es"],
+            "asset_manifest": {
+                "assets": [
+                    {"path": "media/hero.png", "kind": "image", "usage_count": 1},
+                ]
+            },
+        },
+        "state": {
+            "dashboard": {
+                "title": "Overview",
+                "count": 3,
+            }
+        },
+        "translations": {
+            "en": {
+                "label": "English",
+                "entries": {
+                    "dashboard.title": "Dashboard",
+                    "button.sync": "Sync",
+                },
+            },
+            "es": {
+                "label": "Espanol",
+                "entries": {
+                    "dashboard.title": "Tablero",
+                    "button.sync": "Sincronizar",
+                },
+            },
+        },
+        "styles": {
+            "hero": {
+                "name": "Hero",
+                "category": "surface",
+                "value": {"backgroundColor": "#111827", "color": "#f8fafc", "padding": 12},
+            },
+            "title": {
+                "name": "Title",
+                "category": "text",
+                "value": {"fontSize": 24, "fontWeight": 700, "color": "#f8fafc"},
+            },
+        },
+        "components": {
+            "sync_modal": {
+                "description": "Modal card",
+                "widgets": [
+                    {
+                        "type": "panel",
+                        "id": "modal-root",
+                        "style": "hero",
+                        "widgets": [
+                            {
+                                "type": "label",
+                                "id": "modal-label",
+                                "text": "{{ t('dashboard.title') }}",
+                                "style": "title",
+                            }
+                        ],
+                    }
+                ],
+            }
+        },
+        "screens": {
+            "main": {
+                "name": "main",
+                "initial": True,
+                "widgets": [
+                    {
+                        "type": "column",
+                        "id": "main-col",
+                        "widgets": [
+                            {
+                                "type": "img",
+                                "id": "hero-img",
+                                "src": "media/hero.png",
+                            },
+                            {
+                                "type": "label",
+                                "id": "title-label",
+                                "text": "{{ t('dashboard.title') }}",
+                                "style": "title",
+                                "bindings": {
+                                    "value": "{{ state.dashboard.title }}",
+                                },
+                            },
+                            {
+                                "type": "button",
+                                "id": "sync-btn",
+                                "text": "{{ t('button.sync') }}",
+                                "events": {
+                                    "on_click": [
+                                        "push(settings)",
+                                        "modal(sync_modal)",
+                                        "set(state.dashboard.count, 5)",
+                                    ]
+                                },
+                            },
+                        ],
+                    }
+                ],
+            },
+            "settings": {
+                "name": "settings",
+                "initial": False,
+                "widgets": [],
+            },
+        },
+    }
+
+    export_response = client.post("/projects/export", json={"project": project})
+    assert export_response.status_code == 200
+    export_body = export_response.json()
+    assert export_body["issues"] == []
+    yaml_text = export_body["yaml"]
+
+    import_response = client.post("/projects/import", json={"yaml": yaml_text})
+    assert import_response.status_code == 200
+    import_body = import_response.json()
+    assert import_body["issues"] == []
+    imported = import_body["project"]
+
+    validate_response = client.post("/projects/validate", json={"project": imported})
+    assert validate_response.status_code == 200
+    validate_body = validate_response.json()
+    assert validate_body["valid"] is True
+    assert validate_body["issues"] == []
+
+    assert imported["app"]["initial_screen"] == "main"
+    assert imported["app"]["asset_manifest"]["assets"][0]["path"] == "media/hero.png"
+    assert imported["state"]["dashboard"]["count"] == 3
+    assert imported["translations"]["es"]["entries"]["button.sync"] == "Sincronizar"
+    assert imported["styles"]["hero"]["category"] == "surface"
+    assert imported["components"]["sync_modal"]["widgets"][0]["id"] == "modal-root"
+    assert imported["screens"]["main"]["widgets"][0]["widgets"][0]["src"] == "media/hero.png"
+    assert imported["screens"]["main"]["widgets"][0]["widgets"][1]["bindings"]["value"] == "{{ state.dashboard.title }}"
+    assert imported["screens"]["main"]["widgets"][0]["widgets"][2]["events"]["on_click"][0] == "push(settings)"
+    assert imported["screens"]["main"]["widgets"][0]["widgets"][2]["events"]["on_click"][1] == "modal(sync_modal)"
