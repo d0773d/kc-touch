@@ -8,8 +8,8 @@
 - **Current Focus:** Reproduce the same build flow on Linux VPS with ESP-IDF 5.5.1.
 
 ## Next Steps
-1. Set up ESP-IDF 5.5.1 toolchain on the Linux VPS and run `idf.py fullclean build`.
-2. If Linux succeeds, commit the updated `dependencies.lock`.
+1. On Linux VPS, run `tools/linux_vps_build.sh` (see `docs/linux_vps_migration.md`).
+2. If Linux succeeds, tag this step as complete and proceed to flash/monitor validation.
 
 
 
