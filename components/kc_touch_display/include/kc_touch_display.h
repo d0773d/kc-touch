@@ -10,9 +10,8 @@ extern "C" {
 /**
  * @brief Initialize the KC Touch display and (optional) touch drivers.
  *
- * The implementation boots the native M5Stack Tab5 (MIPI DSI) display via
- * M5Unified/M5GFX, wires LVGL draw buffers, and enables the integrated touch
- * controller when requested.
+ * The implementation boots the configured display backend, wires LVGL,
+ * and enables touch input when requested by the active hardware path.
  */
 esp_err_t kc_touch_display_init(void);
 

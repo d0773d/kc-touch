@@ -23,6 +23,13 @@
 #define KC_TOUCH_WAVESHARE_BSP_AVAILABLE 0
 #endif
 
+#if __has_include("bsp/touch.h")
+#include "bsp/touch.h"
+#define KC_TOUCH_WAVESHARE_BSP_TOUCH_API_AVAILABLE 1
+#else
+#define KC_TOUCH_WAVESHARE_BSP_TOUCH_API_AVAILABLE 0
+#endif
+
 #if __has_include("esp_lcd_jd9365.h")
 #include "esp_lcd_jd9365.h"
 #define KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE 1
@@ -42,6 +49,7 @@
 static const char *TAG = "kc_ws_p4";
 static bool s_ready;
 static esp_lcd_panel_handle_t s_panel;
+static bool s_bsp_lvgl_active;
 #if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
 static esp_lcd_touch_handle_t s_touch;
 #endif
@@ -67,26 +75,30 @@ esp_err_t kc_touch_display_backend_init_hw(void)
     }
 
 #if KC_TOUCH_WAVESHARE_BSP_AVAILABLE
-    /* Use Waveshare BSP helper for ESP32-P4 10.1 DSI panel init. */
-#if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
-    esp_err_t err = bsp_display_new_with_handles(NULL, &s_panel, &s_touch);
-#else
-    esp_err_t err = bsp_display_new_with_handles(NULL, &s_panel, NULL);
-#endif
+    /* Prefer Waveshare BSP LVGL adapter path (same flow as vendor examples). */
+    bsp_display_cfg_t display_cfg = {
+        .lv_adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG(),
+        .rotation = ESP_LV_ADAPTER_ROTATE_0,
+        .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_TRIPLE_PARTIAL,
+        .touch_flags = {
+            .swap_xy = 0,
+            .mirror_x = 0,
+            .mirror_y = 0,
+        },
+    };
+    lv_display_t *disp = bsp_display_start_with_config(&display_cfg);
+    if (!disp) {
+        ESP_LOGE(TAG, "bsp_display_start_with_config failed");
+        return ESP_FAIL;
+    }
+    esp_err_t err = bsp_display_backlight_on();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "bsp_display_new_with_handles failed: %s", esp_err_to_name(err));
-        return err;
+        ESP_LOGW(TAG, "bsp_display_backlight_on failed: %s", esp_err_to_name(err));
     }
-    if (!s_panel) {
-        ESP_LOGE(TAG, "Waveshare BSP did not return a panel handle");
-        return ESP_ERR_INVALID_STATE;
-    }
-    (void)esp_lcd_panel_disp_on_off(s_panel, true);
-#if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
-    ESP_LOGI(TAG, "Waveshare P4 panel initialized via BSP (touch %s)", s_touch ? "ready" : "not detected");
-#else
-    ESP_LOGI(TAG, "Waveshare P4 panel initialized via BSP (touch API unavailable)");
-#endif
+    s_panel = bsp_display_get_panel_handle();
+    s_bsp_lvgl_active = true;
+    s_touch = NULL;
+    ESP_LOGI(TAG, "Waveshare P4 panel initialized via BSP LVGL adapter");
     ESP_LOGI(TAG, "Configured LVGL resolution: %dx%d", CONFIG_KC_TOUCH_DISPLAY_WIDTH, CONFIG_KC_TOUCH_DISPLAY_HEIGHT);
 #elif KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE && SOC_MIPI_DSI_SUPPORTED
     if (CONFIG_KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO >= 0) {
@@ -168,6 +180,14 @@ esp_err_t kc_touch_display_backend_flush(int32_t x1, int32_t y1, int32_t x2, int
     if (!s_ready) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (s_bsp_lvgl_active) {
+        (void)x1;
+        (void)y1;
+        (void)x2;
+        (void)y2;
+        (void)color_data;
+        return ESP_OK;
+    }
     if (!s_panel || !color_data) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -182,6 +202,11 @@ esp_err_t kc_touch_display_backend_flush(int32_t x1, int32_t y1, int32_t x2, int
 bool kc_touch_display_backend_touch_sample(uint16_t *x, uint16_t *y)
 {
 #if KC_TOUCH_ESP_LCD_TOUCH_AVAILABLE
+    if (s_bsp_lvgl_active) {
+        (void)x;
+        (void)y;
+        return false;
+    }
     if (!s_ready || !s_touch || !x || !y) {
         return false;
     }

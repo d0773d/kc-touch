@@ -11,6 +11,7 @@ extern "C" {
 
 typedef enum {
     YUI_ACTION_SET = 0,
+    YUI_ACTION_TOGGLE,
     YUI_ACTION_GOTO,
     YUI_ACTION_PUSH,
     YUI_ACTION_POP,

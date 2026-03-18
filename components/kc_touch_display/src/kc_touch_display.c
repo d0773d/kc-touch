@@ -11,21 +11,36 @@
 #include "lvgl.h"
 #include "sdkconfig.h"
 
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4 && __has_include("bsp/display.h")
+#include "bsp/display.h"
+#define KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY 1
+#else
+#define KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY 0
+#endif
+
 #if CONFIG_KC_TOUCH_DISPLAY_ENABLE
 
+#if KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
+#define DISPLAY_WIDTH  BSP_LCD_H_RES
+#define DISPLAY_HEIGHT BSP_LCD_V_RES
+#else
 #define DISPLAY_WIDTH  CONFIG_KC_TOUCH_DISPLAY_WIDTH
 #define DISPLAY_HEIGHT CONFIG_KC_TOUCH_DISPLAY_HEIGHT
 #define BUFFER_LINES   CONFIG_KC_TOUCH_DISPLAY_BUFFER_LINES
 #define BUFFER_PIXELS  (DISPLAY_WIDTH * BUFFER_LINES)
-
+#endif
+#if !KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
 _Static_assert(BUFFER_LINES <= DISPLAY_HEIGHT, "LVGL buffer must not exceed panel height");
+#endif
 
 static const char *TAG = "kc_touch_display";
 
 static lv_display_t *s_lv_display;
 static bool s_display_ready;
+#if !KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
 static lv_color_t s_lv_buf_a[BUFFER_PIXELS];
 static lv_color_t s_lv_buf_b[BUFFER_PIXELS];
+#endif
 static kc_touch_display_prov_cb_t s_prov_cb;
 static void *s_prov_ctx;
 static kc_touch_display_cancel_cb_t s_cancel_cb = NULL;
@@ -33,11 +48,14 @@ static void *s_cancel_ctx = NULL;
 static lv_obj_t *s_status_label;
 static lv_obj_t *s_prov_back_btn = NULL;
 
-#if CONFIG_KC_TOUCH_TOUCH_ENABLE
+#if CONFIG_KC_TOUCH_TOUCH_ENABLE && !KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
 static lv_indev_t *s_touch_indev;
+#endif
+#if CONFIG_KC_TOUCH_TOUCH_ENABLE
 static bool s_touch_ready;
 #endif
 
+#if !KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
 static lv_display_rotation_t kc_touch_display_rotation(void)
 {
 #if defined(CONFIG_KC_TOUCH_DISPLAY_ROTATION_0) && CONFIG_KC_TOUCH_DISPLAY_ROTATION_0
@@ -65,7 +83,7 @@ static void kc_touch_display_flush_cb(lv_display_t *disp, const lv_area_t *area,
     }
     lv_color_t *color_p = (lv_color_t *)px_map;
 #if CONFIG_LV_COLOR_DEPTH == 16
-    // Swap RGB565 byte order for the Tab5 panel (replacement for deprecated LV_COLOR_16_SWAP)
+    // Swap RGB565 byte order before panel flush.
     lv_draw_sw_rgb565_swap(color_p, lv_area_get_size(area));
 #endif
     esp_err_t err = kc_touch_display_backend_flush(area->x1, area->y1, area->x2, area->y2, color_p);
@@ -74,10 +92,20 @@ static void kc_touch_display_flush_cb(lv_display_t *disp, const lv_area_t *area,
     }
     lv_display_flush_ready(disp);
 }
+#endif
 
 static void kc_touch_display_register_lvgl(void *ctx)
 {
     (void)ctx;
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4 && KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
+    s_lv_display = lv_display_get_default();
+    if (!s_lv_display) {
+        ESP_LOGE(TAG, "BSP display adapter did not provide a default LVGL display");
+        return;
+    }
+    ESP_LOGI(TAG, "Using BSP-managed LVGL display");
+    return;
+#else
     lv_display_rotation_t rot = kc_touch_display_rotation();
     int32_t hor_res = (rot == LV_DISPLAY_ROTATION_90 || rot == LV_DISPLAY_ROTATION_270) ? DISPLAY_HEIGHT : DISPLAY_WIDTH;
     int32_t ver_res = (rot == LV_DISPLAY_ROTATION_90 || rot == LV_DISPLAY_ROTATION_270) ? DISPLAY_WIDTH : DISPLAY_HEIGHT;
@@ -101,9 +129,10 @@ static void kc_touch_display_register_lvgl(void *ctx)
     // We do NOT build the default scene here anymore because kc_touch_gui
     // loads the YamUI bundle as the main application UI.
     // kc_touch_display_build_scene(NULL);
+#endif
 }
 
-#if CONFIG_KC_TOUCH_TOUCH_ENABLE
+#if CONFIG_KC_TOUCH_TOUCH_ENABLE && !KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
 static bool kc_touch_touch_sample(uint16_t *x, uint16_t *y)
 {
     if (!x || !y) {
@@ -150,10 +179,10 @@ static esp_err_t kc_touch_touch_init(void)
         return err;
     }
     s_touch_ready = true;
-    ESP_LOGI(TAG, "M5 Tab5 touch input initialized");
+    ESP_LOGI(TAG, "Touch input initialized");
     return ESP_OK;
 }
-#endif // CONFIG_KC_TOUCH_TOUCH_ENABLE
+#endif // CONFIG_KC_TOUCH_TOUCH_ENABLE && !KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
 
 esp_err_t kc_touch_display_init(void)
 {
@@ -169,10 +198,14 @@ esp_err_t kc_touch_display_init(void)
     ESP_RETURN_ON_ERROR(kc_touch_gui_dispatch(kc_touch_display_register_lvgl, NULL, pdMS_TO_TICKS(200)), TAG, "lvgl disp");
 
 #if CONFIG_KC_TOUCH_TOUCH_ENABLE
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4 && KC_TOUCH_HAS_WAVESHARE_BSP_DISPLAY
+    ESP_LOGI(TAG, "Touch input is managed by BSP LVGL adapter");
+#else
     esp_err_t touch_err = kc_touch_touch_init();
     if (touch_err != ESP_OK) {
         ESP_LOGW(TAG, "Touch init skipped (%s)", esp_err_to_name(touch_err));
     }
+#endif
 #endif
 
     s_display_ready = true;

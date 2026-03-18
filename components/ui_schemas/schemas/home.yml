@@ -5,6 +5,9 @@ app:
 state:
   provisioning.stage: "welcome"
   wifi.selected_ssid: "none"
+  wifi.security: "WPA2"
+  provisioning.auto_start: "false"
+  display.brightness: "40"
 styles:
   hero_label:
     text_color: "#FFFFFF"
@@ -113,6 +116,33 @@ screens:
       - type: label
         text: "Provisioning Stage: {{provisioning.stage}}"
         style: hero_label
+      - type: textarea
+        id: ssid_input
+        placeholder: "Enter SSID"
+        text: "{{wifi.selected_ssid}}"
+        on_change: set(wifi.selected_ssid, {{value}})
+      - type: keyboard
+        target: ssid_input
+        mode: text_lower
+      - type: dropdown
+        options:
+          - Open
+          - WPA2
+          - WPA3
+        value: "{{wifi.security}}"
+        on_change: set(wifi.security, {{value}})
+      - type: switch
+        value: "{{provisioning.auto_start}}"
+        on_change: set(provisioning.auto_start, {{checked}})
+      - type: slider
+        min: 0
+        max: 100
+        value: "{{display.brightness}}"
+        on_change: set(display.brightness, {{value}})
+      - type: bar
+        min: 0
+        max: 100
+        value: "{{display.brightness}}"
       - type: button
         text: "Set Credentials Stage"
         style: primary_button

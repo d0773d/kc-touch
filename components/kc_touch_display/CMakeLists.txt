@@ -8,6 +8,8 @@ set(KC_TOUCH_DISPLAY_REQUIRES
     esp_lcd
     esp_driver_gpio
     esp_hw_support
+    waveshare__esp32_p4_platform
+    waveshare__esp_lcd_jd9365
 )
 
 idf_component_register(
