@@ -3,28 +3,50 @@ app:
   initial_screen: home
   locale: en-US
 state:
+  ui.dark_mode: "false"
   provisioning.stage: "welcome"
   wifi.selected_ssid: "none"
   wifi.security: "WPA2"
   provisioning.auto_start: "false"
   display.brightness: "40"
 styles:
-  hero_label:
+  light.hero_label:
+    text_color: "#1F2A44"
+    text_font: "montserrat_24"
+  dark.hero_label:
     text_color: "#FFFFFF"
     text_font: "montserrat_24"
-  body_text:
+  light.body_text:
+    text_color: "#4D5B7C"
+  dark.body_text:
     text_color: "#A0A6C3"
-  primary_button:
+  light.primary_button:
     bg_color: "#4C7DFF"
     text_color: "#FFFFFF"
     radius: 18
     padding: 16
-  ghost_button:
+  dark.primary_button:
+    bg_color: "#4C7DFF"
+    text_color: "#FFFFFF"
+    radius: 18
+    padding: 16
+  light.ghost_button:
+    bg_color: "#DCE6FF"
+    text_color: "#18315E"
+    radius: 16
+    padding: 12
+  dark.ghost_button:
     bg_color: "#2F3347"
     text_color: "#FFFFFF"
     radius: 16
     padding: 12
-  card_panel:
+  light.card_panel:
+    bg_color: "#FFFFFF"
+    text_color: "#1F2A44"
+    radius: 18
+    padding: 18
+    spacing: 8
+  dark.card_panel:
     bg_color: "#1F2334"
     text_color: "#FFFFFF"
     radius: 18
@@ -104,6 +126,17 @@ screens:
         text: "Provision Wi-Fi"
         style: primary_button
         on_click: push(provision)
+      - type: row
+        layout:
+          gap: 10
+          align: center
+        widgets:
+          - type: label
+            text: "Dark Theme"
+            style: hero_label
+          - type: switch
+            value: "{{ui.dark_mode}}"
+            on_change: set(ui.dark_mode, {{checked}})
       - type: button
         text: "Open Modal"
         style: primary_button
@@ -163,6 +196,7 @@ screens:
           - pop()
       - type: button
         text: "Mark Complete"
+        style: primary_button
         on_click:
           - set(wifi.selected_ssid, "YamUI-Guest")
           - set(provisioning.stage, "done")

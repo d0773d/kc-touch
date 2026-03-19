@@ -108,6 +108,11 @@ static lv_flex_align_t yui_flex_align_from_string(const char *value, lv_flex_ali
 static esp_err_t yui_render_widget_list(const yml_node_t *widgets_node, yui_schema_runtime_t *schema, lv_obj_t *parent, yui_component_scope_t *scope);
 static bool yui_dropdown_select_value(lv_obj_t *dropdown, const char *value);
 static esp_err_t yui_widget_bind_conditions(yui_widget_runtime_t *runtime, const yml_node_t *node, lv_obj_t *target);
+static bool yui_theme_is_dark(void);
+static lv_color_t yui_theme_screen_bg_color(void);
+static lv_color_t yui_theme_modal_overlay_color(void);
+static lv_color_t yui_theme_modal_panel_color(void);
+static const yui_style_t *yui_resolve_style(const yui_schema_t *schema, const char *style_name);
 
 typedef struct {
     const char *yaml_key;
@@ -306,6 +311,7 @@ static yui_screen_frame_t *s_nav_stack;
 static size_t s_nav_count;
 static size_t s_nav_capacity;
 static yui_state_watch_handle_t s_display_brightness_watch;
+static yui_state_watch_handle_t s_theme_watch;
 typedef struct {
     lv_obj_t *overlay;
 } yui_modal_frame_t;
@@ -459,7 +465,7 @@ static esp_err_t yui_modal_show_component(const char *component_name)
     lv_obj_t *overlay = lv_obj_create(root);
     lv_obj_remove_style_all(overlay);
     lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(overlay, yui_theme_modal_overlay_color(), 0);
     lv_obj_set_style_bg_opa(overlay, LV_OPA_60, 0);
     lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING);
@@ -467,7 +473,7 @@ static esp_err_t yui_modal_show_component(const char *component_name)
     lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *panel = lv_obj_create(overlay);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(0x25293C), 0);
+    lv_obj_set_style_bg_color(panel, yui_theme_modal_panel_color(), 0);
     lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(panel, 18, 0);
     lv_obj_set_style_radius(panel, 16, 0);
@@ -507,6 +513,40 @@ static esp_err_t yui_runtime_close_modal(void);
 static esp_err_t yui_runtime_call_native(const char *function, const char **args, size_t arg_count);
 static esp_err_t yui_runtime_emit_event(const char *event, const char **args, size_t arg_count);
 
+static bool yui_theme_is_dark(void)
+{
+    return yui_state_get_bool("ui.dark_mode", false);
+}
+
+static lv_color_t yui_theme_screen_bg_color(void)
+{
+    return yui_theme_is_dark() ? lv_color_hex(0x0F1117) : lv_color_hex(0xF5F7FB);
+}
+
+static lv_color_t yui_theme_modal_overlay_color(void)
+{
+    return yui_theme_is_dark() ? lv_color_hex(0x000000) : lv_color_hex(0x1B2233);
+}
+
+static lv_color_t yui_theme_modal_panel_color(void)
+{
+    return yui_theme_is_dark() ? lv_color_hex(0x25293C) : lv_color_hex(0xFFFFFF);
+}
+
+static const yui_style_t *yui_resolve_style(const yui_schema_t *schema, const char *style_name)
+{
+    if (!schema || !style_name || style_name[0] == '\0') {
+        return NULL;
+    }
+    char themed_name[96];
+    snprintf(themed_name, sizeof(themed_name), "%s.%s", yui_theme_is_dark() ? "dark" : "light", style_name);
+    const yui_style_t *style = yui_schema_get_style(schema, themed_name);
+    if (style) {
+        return style;
+    }
+    return yui_schema_get_style(schema, style_name);
+}
+
 static void yui_apply_display_brightness_value(const char *value)
 {
     int percent = 100;
@@ -528,12 +568,28 @@ static void yui_display_brightness_watch_cb(const char *key, const char *value, 
     yui_apply_display_brightness_value(value);
 }
 
+static void yui_theme_watch_cb(const char *key, const char *value, void *user_ctx)
+{
+    (void)key;
+    (void)value;
+    (void)user_ctx;
+    (void)yui_nav_queue_submit(YUI_NAV_REQUEST_REFRESH, NULL);
+}
+
 static esp_err_t yui_register_display_watchers(void)
 {
     if (s_display_brightness_watch != 0U) {
         return ESP_OK;
     }
     return yui_state_watch("display.brightness", yui_display_brightness_watch_cb, NULL, &s_display_brightness_watch);
+}
+
+static esp_err_t yui_register_theme_watchers(void)
+{
+    if (s_theme_watch != 0U) {
+        return ESP_OK;
+    }
+    return yui_state_watch("ui.dark_mode", yui_theme_watch_cb, NULL, &s_theme_watch);
 }
 
 static void yui_sync_display_brightness_from_state(void)
@@ -1480,6 +1536,9 @@ static void yui_apply_style(lv_obj_t *obj, const yui_style_t *style)
         lv_obj_set_style_bg_color(obj, yui_color_from_string(style->background_color, lv_color_hex(0x101018)), 0);
         lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     }
+    if (style->text_color) {
+        lv_obj_set_style_text_color(obj, yui_color_from_string(style->text_color, lv_color_hex(0xFFFFFF)), 0);
+    }
     if (style->padding > 0) {
         lv_obj_set_style_pad_all(obj, style->padding, 0);
     }
@@ -1623,7 +1682,7 @@ static void yui_apply_common_widget_attrs(lv_obj_t *obj, const yml_node_t *node,
     }
     const char *style_name = yui_node_scalar(node, "style");
     if (style_name) {
-        const yui_style_t *style = yui_schema_get_style(&schema->schema, style_name);
+        const yui_style_t *style = yui_resolve_style(&schema->schema, style_name);
         yui_apply_style(obj, style);
     }
     lv_coord_t size_value = 0;
@@ -2066,10 +2125,14 @@ static esp_err_t yui_render_screen(const yml_node_t *screen_node, yui_schema_run
     yui_modal_close_all();
     yui_widget_refs_clear();
     lv_obj_clean(root);
+    lv_obj_set_style_bg_color(root, yui_theme_screen_bg_color(), 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
     lv_obj_t *container = lv_obj_create(root);
     lv_obj_set_size(container, LV_PCT(100), LV_PCT(100));
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(container, yui_theme_screen_bg_color(), 0);
+    lv_obj_set_style_bg_opa(container, LV_OPA_COVER, 0);
     yui_apply_layout(container, yml_node_get_child(screen_node, "layout"), "column");
 
     const yml_node_t *widgets = yml_node_get_child(screen_node, "widgets");
@@ -2353,6 +2416,8 @@ static esp_err_t yui_navigation_execute_request(yui_nav_request_type_t type, con
             return yui_navigation_push(arg);
         case YUI_NAV_REQUEST_POP:
             return yui_navigation_pop_internal();
+        case YUI_NAV_REQUEST_REFRESH:
+            return yui_navigation_render_current();
         case YUI_NAV_REQUEST_SHOW_MODAL:
             return yui_modal_show_component(arg);
         case YUI_NAV_REQUEST_CLOSE_MODAL:
@@ -2399,7 +2464,11 @@ static esp_err_t yui_runtime_prepare(void)
     yui_register_builtin_natives();
     yui_nav_queue_init(yui_navigation_execute_request, NULL);
     yui_events_set_runtime(&s_runtime_vtable);
-    return yui_register_display_watchers();
+    esp_err_t err = yui_register_display_watchers();
+    if (err != ESP_OK) {
+        return err;
+    }
+    return yui_register_theme_watchers();
 }
 
 static esp_err_t yui_boot_loaded_schema(yui_schema_runtime_t *schema)
