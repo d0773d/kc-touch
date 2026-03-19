@@ -10,6 +10,14 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4 && __has_include("bsp/display.h")
+#include "bsp/display.h"
+#include "esp_lv_adapter.h"
+#define KC_TOUCH_GUI_HAS_WAVESHARE_BSP_DISPLAY 1
+#else
+#define KC_TOUCH_GUI_HAS_WAVESHARE_BSP_DISPLAY 0
+#endif
+
 #ifndef CONFIG_KC_TOUCH_GUI_TASK_STACK_SIZE
 #define CONFIG_KC_TOUCH_GUI_TASK_STACK_SIZE 8192
 #endif
@@ -69,6 +77,33 @@ typedef struct {
 
 static kc_touch_gui_runtime_t s_gui = {0};
 
+static bool kc_touch_gui_uses_bsp_lvgl_adapter(void)
+{
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4 && KC_TOUCH_GUI_HAS_WAVESHARE_BSP_DISPLAY
+    return true;
+#else
+    return false;
+#endif
+}
+
+static bool kc_touch_gui_lvgl_lock(TickType_t ticks_to_wait)
+{
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4 && KC_TOUCH_GUI_HAS_WAVESHARE_BSP_DISPLAY
+    uint32_t timeout_ms = (ticks_to_wait == portMAX_DELAY) ? UINT32_MAX : (uint32_t)pdTICKS_TO_MS(ticks_to_wait);
+    return esp_lv_adapter_lock((int32_t)timeout_ms) == ESP_OK;
+#else
+    (void)ticks_to_wait;
+    return true;
+#endif
+}
+
+static void kc_touch_gui_lvgl_unlock(void)
+{
+#if CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4 && KC_TOUCH_GUI_HAS_WAVESHARE_BSP_DISPLAY
+    esp_lv_adapter_unlock();
+#endif
+}
+
 void kc_touch_gui_set_provisioning_cb(kc_touch_gui_prov_cb_t cb, void *ctx)
 {
     s_gui.prov_cb = cb;
@@ -123,19 +158,27 @@ static void kc_touch_gui_task(void *arg)
     (void)arg;
     const TickType_t wait = pdMS_TO_TICKS(s_gui.cfg.task_period_ms);
     kc_touch_gui_work_item_t item;
+    const bool bsp_lvgl = kc_touch_gui_uses_bsp_lvgl_adapter();
 
     while (true) {
         if (xQueueReceive(s_gui.queue, &item, wait) == pdTRUE) {
-            if (item.cb) {
-                item.cb(item.ctx);
-            }
-            while (xQueueReceive(s_gui.queue, &item, 0) == pdTRUE) {
+            if (kc_touch_gui_lvgl_lock(pdMS_TO_TICKS(1000))) {
                 if (item.cb) {
                     item.cb(item.ctx);
                 }
+                while (xQueueReceive(s_gui.queue, &item, 0) == pdTRUE) {
+                    if (item.cb) {
+                        item.cb(item.ctx);
+                    }
+                }
+                kc_touch_gui_lvgl_unlock();
+            } else {
+                ESP_LOGW(TAG, "Failed to acquire BSP LVGL lock for queued UI work");
             }
         }
-        lv_timer_handler();
+        if (!bsp_lvgl) {
+            lv_timer_handler();
+        }
     }
 }
 

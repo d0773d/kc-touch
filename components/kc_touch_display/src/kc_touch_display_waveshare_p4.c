@@ -262,4 +262,28 @@ esp_err_t kc_touch_display_backend_backlight_set(bool enable)
 #endif
 }
 
+esp_err_t kc_touch_display_backend_brightness_set(int percent)
+{
+    if (!s_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (percent < 0) {
+        percent = 0;
+    } else if (percent > 100) {
+        percent = 100;
+    }
+
+#if KC_TOUCH_WAVESHARE_BSP_AVAILABLE
+    return bsp_display_brightness_set(percent);
+#elif KC_TOUCH_WAVESHARE_JD9365_COMPONENT_AVAILABLE
+    if (!s_backlight_ready || CONFIG_KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO < 0) {
+        return ESP_OK;
+    }
+    return gpio_set_level(CONFIG_KC_TOUCH_WAVESHARE_BACKLIGHT_GPIO, percent > 0 ? 1 : 0);
+#else
+    return ESP_OK;
+#endif
+}
+
 #endif // CONFIG_KC_TOUCH_DISPLAY_ENABLE && CONFIG_KC_TOUCH_DISPLAY_BACKEND_WAVESHARE_P4

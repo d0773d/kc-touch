@@ -305,6 +305,7 @@ static yui_schema_runtime_t *s_loaded_schema;
 static yui_screen_frame_t *s_nav_stack;
 static size_t s_nav_count;
 static size_t s_nav_capacity;
+static yui_state_watch_handle_t s_display_brightness_watch;
 typedef struct {
     lv_obj_t *overlay;
 } yui_modal_frame_t;
@@ -505,6 +506,40 @@ static esp_err_t yui_runtime_show_modal(const char *component);
 static esp_err_t yui_runtime_close_modal(void);
 static esp_err_t yui_runtime_call_native(const char *function, const char **args, size_t arg_count);
 static esp_err_t yui_runtime_emit_event(const char *event, const char **args, size_t arg_count);
+
+static void yui_apply_display_brightness_value(const char *value)
+{
+    int percent = 100;
+    if (value && value[0] != '\0') {
+        percent = (int)strtol(value, NULL, 10);
+    }
+    if (percent < 0) {
+        percent = 0;
+    } else if (percent > 100) {
+        percent = 100;
+    }
+    (void)kc_touch_display_brightness_set(percent);
+}
+
+static void yui_display_brightness_watch_cb(const char *key, const char *value, void *user_ctx)
+{
+    (void)key;
+    (void)user_ctx;
+    yui_apply_display_brightness_value(value);
+}
+
+static esp_err_t yui_register_display_watchers(void)
+{
+    if (s_display_brightness_watch != 0U) {
+        return ESP_OK;
+    }
+    return yui_state_watch("display.brightness", yui_display_brightness_watch_cb, NULL, &s_display_brightness_watch);
+}
+
+static void yui_sync_display_brightness_from_state(void)
+{
+    yui_apply_display_brightness_value(yui_state_get("display.brightness", "100"));
+}
 
 static const yui_action_runtime_t s_runtime_vtable = {
     .goto_screen = yui_runtime_goto_screen,
@@ -1705,9 +1740,11 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
     }
     if (strcmp(type, "button") == 0) {
-        lv_obj_t *btn = lv_btn_create(parent);
-        yui_register_widget_id(node, btn);
+        const char *text = yui_node_scalar(node, "text");
+        lv_obj_t *btn = lv_button_create(parent);
         lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+        yui_register_widget_id(node, btn);
+        bool text_is_dynamic = text && strstr(text, "{{") && strstr(text, "}}");
         if (!yui_node_has_child(node, "width")) {
             lv_flex_flow_t parent_flow = lv_obj_get_style_flex_flow(parent, LV_PART_MAIN);
             if (parent_flow == LV_FLEX_FLOW_COLUMN || parent_flow == LV_FLEX_FLOW_COLUMN_WRAP) {
@@ -1718,12 +1755,15 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         }
         yui_apply_common_widget_attrs(btn, node, schema);
         lv_obj_t *label = lv_label_create(btn);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
         lv_obj_center(label);
-        const char *text = yui_node_scalar(node, "text");
+        if (text && !text_is_dynamic) {
+            lv_label_set_text(label, text);
+        }
         yui_widget_runtime_t *runtime = yui_widget_runtime_create(btn, scope);
         if (runtime) {
             runtime->text_target = label;
-            if (text) {
+            if (text && text_is_dynamic) {
                 (void)yui_widget_bind_text(runtime, text, label);
             }
             (void)yui_widget_bind_conditions(runtime, node, btn);
@@ -2359,7 +2399,7 @@ static esp_err_t yui_runtime_prepare(void)
     yui_register_builtin_natives();
     yui_nav_queue_init(yui_navigation_execute_request, NULL);
     yui_events_set_runtime(&s_runtime_vtable);
-    return ESP_OK;
+    return yui_register_display_watchers();
 }
 
 static esp_err_t yui_boot_loaded_schema(yui_schema_runtime_t *schema)
@@ -2367,6 +2407,7 @@ static esp_err_t yui_boot_loaded_schema(yui_schema_runtime_t *schema)
     if (!schema) {
         return ESP_ERR_NOT_FOUND;
     }
+    yui_sync_display_brightness_from_state();
     const char *initial_screen = yui_schema_default_screen(&schema->schema);
     if (!initial_screen || initial_screen[0] == '\0') {
         return ESP_ERR_NOT_FOUND;

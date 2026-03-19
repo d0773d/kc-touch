@@ -218,6 +218,11 @@ esp_err_t kc_touch_display_backlight_set(bool enable)
     return kc_touch_display_backend_backlight_set(enable);
 }
 
+esp_err_t kc_touch_display_brightness_set(int percent)
+{
+    return kc_touch_display_backend_brightness_set(percent);
+}
+
 esp_err_t kc_touch_display_set_provisioning_cb(kc_touch_display_prov_cb_t cb, void *ctx)
 {
     s_prov_cb = cb;
@@ -388,6 +393,12 @@ esp_err_t kc_touch_display_init(void)
 esp_err_t kc_touch_display_backlight_set(bool enable)
 {
     (void)enable;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t kc_touch_display_brightness_set(int percent)
+{
+    (void)percent;
     return ESP_ERR_NOT_SUPPORTED;
 }
 

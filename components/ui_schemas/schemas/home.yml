@@ -134,6 +134,18 @@ screens:
       - type: switch
         value: "{{provisioning.auto_start}}"
         on_change: set(provisioning.auto_start, {{checked}})
+      - type: button
+        text: "Toggle Auto-start"
+        style: ghost_button
+        on_click: toggle(provisioning.auto_start)
+      - type: button
+        text: "Brightness +5"
+        style: ghost_button
+        on_click: increment(display.brightness, 5)
+      - type: button
+        text: "Brightness -5"
+        style: ghost_button
+        on_click: decrement(display.brightness, 5)
       - type: slider
         min: 0
         max: 100

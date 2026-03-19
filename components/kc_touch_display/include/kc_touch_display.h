@@ -20,6 +20,11 @@ esp_err_t kc_touch_display_init(void);
  */
 esp_err_t kc_touch_display_backlight_set(bool enable);
 
+/**
+ * @brief Set display brightness as a percentage from 0-100.
+ */
+esp_err_t kc_touch_display_brightness_set(int percent);
+
 typedef void (*kc_touch_display_prov_cb_t)(void *ctx);
 
 /**
