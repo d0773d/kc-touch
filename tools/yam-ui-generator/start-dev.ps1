@@ -1,3 +1,10 @@
+param(
+    [string]$ApiBaseUrl,
+    [string]$BackendBindHost = "0.0.0.0",
+    [string]$FrontendBindHost = "0.0.0.0",
+    [int]$BackendPort = 8000
+)
+
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -12,14 +19,35 @@ if (-not (Test-Path $frontendDir)) {
     throw "Frontend directory not found: $frontendDir"
 }
 
+function Get-PreferredLocalIPv4 {
+    $candidates = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
+        $_.IPAddress -ne "127.0.0.1" -and
+        $_.PrefixOrigin -ne "WellKnown" -and
+        $_.IPAddress -notlike "169.254.*"
+    }
+
+    $preferred = $candidates | Select-Object -First 1
+    if ($preferred) {
+        return $preferred.IPAddress
+    }
+
+    return "127.0.0.1"
+}
+
+if ([string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
+    $localIp = Get-PreferredLocalIPv4
+    $ApiBaseUrl = "http://${localIp}:${BackendPort}"
+}
+
 $backendCommand = @"
 Set-Location '$backendDir'
-poetry run uvicorn yam_ui_generator.api:app --reload
+poetry run uvicorn yam_ui_generator.api:app --reload --host $BackendBindHost --port $BackendPort
 "@
 
 $frontendCommand = @"
 Set-Location '$frontendDir'
-npm run dev
+`$env:VITE_API_BASE_URL = '$ApiBaseUrl'
+npx vite --host $FrontendBindHost
 "@
 
 Write-Host "Starting YamUI backend with Poetry..."
@@ -39,5 +67,6 @@ Start-Process powershell -ArgumentList @(
 )
 
 Write-Host ""
-Write-Host "Backend:  http://127.0.0.1:8000"
-Write-Host "Frontend: http://localhost:5173"
+Write-Host "Backend bind: ${BackendBindHost}:${BackendPort}"
+Write-Host "Frontend bind: ${FrontendBindHost}:5173"
+Write-Host "Frontend API base: $ApiBaseUrl"
