@@ -40,31 +40,53 @@ if ([string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
 }
 
 $backendCommand = @"
+`$Host.UI.RawUI.WindowTitle = 'YamUI Backend'
 Set-Location '$backendDir'
 poetry run uvicorn yam_ui_generator.api:app --reload --host $BackendBindHost --port $BackendPort
 "@
 
 $frontendCommand = @"
+`$Host.UI.RawUI.WindowTitle = 'YamUI Frontend'
 Set-Location '$frontendDir'
 `$env:VITE_API_BASE_URL = '$ApiBaseUrl'
-npx vite --host $FrontendBindHost
+npx.cmd vite --host $FrontendBindHost
 "@
 
+function Start-YamUITerminal {
+    param(
+        [string]$Title,
+        [string]$Command
+    )
+
+    $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
+    if ($wt) {
+        Start-Process $wt.Source -ArgumentList @(
+            "new-tab",
+            "--title", $Title,
+            "--suppressApplicationTitle",
+            "powershell.exe",
+            "-NoProfile",
+            "-NoExit",
+            "-Command", $Command
+        )
+        return
+    }
+
+    Start-Process powershell -ArgumentList @(
+        "-NoProfile",
+        "-NoExit",
+        "-Command",
+        $Command
+    )
+}
+
 Write-Host "Starting YamUI backend with Poetry..."
-Start-Process powershell -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    $backendCommand
-)
+Start-YamUITerminal -Title "YamUI Backend" -Command $backendCommand
 
 Start-Sleep -Seconds 2
 
 Write-Host "Starting YamUI frontend..."
-Start-Process powershell -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    $frontendCommand
-)
+Start-YamUITerminal -Title "YamUI Frontend" -Command $frontendCommand
 
 Write-Host ""
 Write-Host "Backend bind: ${BackendBindHost}:${BackendPort}"
