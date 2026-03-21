@@ -271,6 +271,45 @@ static esp_err_t yui_parse_component_props(const yml_node_t *props_node, yui_com
     return ESP_OK;
 }
 
+static esp_err_t yui_parse_component_prop_schema(const yml_node_t *prop_schema_node, yui_component_def_t *component)
+{
+    if (!prop_schema_node) {
+        return ESP_OK;
+    }
+    if (!yui_node_is_sequence(prop_schema_node)) {
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER,
+                  "Component '%s' prop_schema must be a sequence",
+                  component->name ? component->name : "<component>");
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t count = yml_node_child_count(prop_schema_node);
+    if (count == 0U) {
+        return ESP_OK;
+    }
+    component->props = (char **)calloc(count, sizeof(char *));
+    if (!component->props) {
+        return ESP_ERR_NO_MEM;
+    }
+    component->prop_count = count;
+    size_t idx = 0;
+    for (const yml_node_t *entry = yml_node_child_at(prop_schema_node, 0); entry; entry = yml_node_next(entry)) {
+        if (!yui_node_is_mapping(entry)) {
+            continue;
+        }
+        const char *name = NULL;
+        const yml_node_t *name_node = yml_node_get_child(entry, "name");
+        if (name_node) {
+            name = yml_node_get_scalar(name_node);
+        }
+        if (!name || name[0] == '\0') {
+            continue;
+        }
+        component->props[idx++] = yui_strdup(name);
+    }
+    component->prop_count = idx;
+    return ESP_OK;
+}
+
 static esp_err_t yui_parse_components(const yml_node_t *node, yui_schema_t *schema)
 {
     if (!schema) {
@@ -306,7 +345,13 @@ static esp_err_t yui_parse_components(const yml_node_t *node, yui_schema_t *sche
             yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_PARSER, "Component '%s' missing widgets block", component->name ? component->name : "<component>");
         }
         const yml_node_t *props = yml_node_get_child(child, "props");
-        esp_err_t err = yui_parse_component_props(props, component);
+        const yml_node_t *prop_schema = yml_node_get_child(child, "prop_schema");
+        esp_err_t err = ESP_OK;
+        if (props && yui_node_is_sequence(props)) {
+            err = yui_parse_component_props(props, component);
+        } else if (prop_schema) {
+            err = yui_parse_component_prop_schema(prop_schema, component);
+        }
         if (err != ESP_OK) {
             return err;
         }

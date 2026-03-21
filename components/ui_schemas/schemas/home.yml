@@ -121,17 +121,32 @@ styles:
 
 components:
   stat_card:
-    props: [label, value, unit]
-    layout:
-      type: column
-      gap: 4
+    description: "Compact statistic card with value and label."
+    props: {}
+    prop_schema:
+      - name: label
+        type: string
+        required: true
+      - name: value
+        type: number
+        required: true
+      - name: unit
+        type: string
+        required: false
+        default: ""
     widgets:
-      - type: label
-        text: "{{label}}"
-        style: stat-label
-      - type: label
-        text: "{{value}}{{unit}}"
-        style: stat-value
+      - type: column
+        style: card
+        layout:
+          type: column
+          gap: 6
+        widgets:
+          - type: label
+            text: "{{label}}"
+            style: stat-label
+          - type: label
+            text: "{{value}}{{unit}}"
+            style: stat-value
 
 screens:
   main:
@@ -161,35 +176,21 @@ screens:
               gap: 12
             width: "100%"
             widgets:
-              - type: panel
+              - type: stat_card
                 id: panel-online
-                style: card
                 grow: 1
-                layout:
-                  type: column
-                  gap: 6
-                widgets:
-                  - type: label
-                    text: "Online Devices"
-                    style: stat-label
-                  - type: label
-                    text: "{{state.device_status.active}} active"
-                    style: stat-value
+                props:
+                  label: "Online Devices"
+                  value: "{{state.device_status.active}}"
+                  unit: " active"
 
-              - type: panel
+              - type: stat_card
                 id: panel-total
-                style: card
                 grow: 1
-                layout:
-                  type: column
-                  gap: 6
-                widgets:
-                  - type: label
-                    text: "Total Devices"
-                    style: stat-label
-                  - type: label
-                    text: "{{state.device_status.connected}} total"
-                    style: stat-value
+                props:
+                  label: "Total Devices"
+                  value: "{{state.device_status.connected}}"
+                  unit: " total"
 
           - type: panel
             id: panel-activity

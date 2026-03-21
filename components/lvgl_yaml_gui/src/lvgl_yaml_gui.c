@@ -263,7 +263,16 @@ static yui_component_scope_t *yui_scope_create(yui_component_scope_t *parent, co
         yui_component_prop_t *prop = &scope->props[i];
         const char *prop_name = component->props[i];
         prop->name = prop_name ? yui_strdup_local(prop_name) : NULL;
-        const yml_node_t *value_node = (instance_node && prop_name) ? yml_node_get_child(instance_node, prop_name) : NULL;
+        const yml_node_t *value_node = NULL;
+        if (instance_node && prop_name) {
+            value_node = yml_node_get_child(instance_node, prop_name);
+            if (!value_node) {
+                const yml_node_t *props_node = yml_node_get_child(instance_node, "props");
+                if (props_node && yml_node_get_type(props_node) == YML_NODE_MAPPING) {
+                    value_node = yml_node_get_child(props_node, prop_name);
+                }
+            }
+        }
         const char *scalar = value_node ? yml_node_get_scalar(value_node) : NULL;
         prop->template_value = scalar ? yui_strdup_local(scalar) : yui_strdup_local("");
         if (!prop->template_value) {
@@ -1783,11 +1792,15 @@ static esp_err_t yui_render_component_instance(const yui_component_def_t *compon
         return ESP_ERR_NO_MEM;
     }
     lv_obj_t *container = lv_obj_create(parent);
+    yui_register_widget_id(instance_node, container);
     yui_prepare_layout_container(container);
     /* Size to fit content by default */
     lv_obj_set_size(container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     if (instance_node && !yui_node_has_child(instance_node, "width") && yui_parent_flows_column(parent)) {
         lv_obj_set_width(container, LV_PCT(100));
+    }
+    if (instance_node) {
+        yui_apply_common_widget_attrs(container, instance_node, schema);
     }
     yui_apply_layout(container, component->layout_node, "column");
     lv_obj_add_event_cb(container, yui_scope_delete_cb, LV_EVENT_DELETE, scope);
