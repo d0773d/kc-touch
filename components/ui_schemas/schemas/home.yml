@@ -33,43 +33,89 @@ translations:
 
 styles:
   light.card:
-    bg_color: "#0F172A"
-    text_color: "#E2E8F0"
-    radius: 8
-    padding: 16
+    name: "Card Surface"
+    category: surface
+    description: "Dark elevated card used for stats"
+    value:
+      backgroundColor: "#0F172A"
+      color: "#E2E8F0"
+      borderRadius: 8
+      padding: 16
   dark.card:
-    bg_color: "#0F172A"
-    text_color: "#E2E8F0"
-    radius: 8
-    padding: 16
+    name: "Card Surface"
+    category: surface
+    description: "Dark elevated card used for stats"
+    value:
+      backgroundColor: "#0F172A"
+      color: "#E2E8F0"
+      borderRadius: 8
+      padding: 16
 
   light.cta:
-    bg_color: "#22D3EE"
-    text_color: "#0F172A"
-    radius: 999
-    padding_x: 24
-    padding_y: 12
+    name: "Primary CTA"
+    category: surface
+    description: "Button styling for primary actions"
+    value:
+      backgroundColor: "#22D3EE"
+      color: "#0F172A"
+      borderRadius: 999
+      paddingHorizontal: 24
+      paddingVertical: 12
   dark.cta:
-    bg_color: "#22D3EE"
-    text_color: "#0F172A"
-    radius: 999
-    padding_x: 24
-    padding_y: 12
+    name: "Primary CTA"
+    category: surface
+    description: "Button styling for primary actions"
+    value:
+      backgroundColor: "#22D3EE"
+      color: "#0F172A"
+      borderRadius: 999
+      paddingHorizontal: 24
+      paddingVertical: 12
 
   light.heading:
-    text_color: "#94A3B8"
+    name: "Heading Text"
+    category: text
+    value:
+      color: "#94A3B8"
+      fontSize: 20
+      fontWeight: 600
   dark.heading:
-    text_color: "#94A3B8"
+    name: "Heading Text"
+    category: text
+    value:
+      color: "#94A3B8"
+      fontSize: 20
+      fontWeight: 600
 
   light.stat-label:
-    text_color: "#94A3B8"
+    name: "Stat Label"
+    category: text
+    value:
+      color: "#94A3B8"
+      fontSize: 14
+      fontWeight: 500
   dark.stat-label:
-    text_color: "#94A3B8"
+    name: "Stat Label"
+    category: text
+    value:
+      color: "#94A3B8"
+      fontSize: 14
+      fontWeight: 500
 
   light.stat-value:
-    text_color: "#F8FAFC"
+    name: "Stat Value"
+    category: text
+    value:
+      color: "#F8FAFC"
+      fontSize: 32
+      fontWeight: 700
   dark.stat-value:
-    text_color: "#F8FAFC"
+    name: "Stat Value"
+    category: text
+    value:
+      color: "#F8FAFC"
+      fontSize: 32
+      fontWeight: 700
 
 components:
   stat_card:

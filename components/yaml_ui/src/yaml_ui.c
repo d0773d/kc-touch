@@ -30,6 +30,18 @@ static bool yui_node_is_sequence(const yml_node_t *node)
     return node && yml_node_get_type(node) == YML_NODE_SEQUENCE;
 }
 
+static const yml_node_t *yui_style_source_node(const yml_node_t *node)
+{
+    if (!node) {
+        return NULL;
+    }
+    const yml_node_t *value_node = yml_node_get_child(node, "value");
+    if (yui_node_is_mapping(value_node)) {
+        return value_node;
+    }
+    return node;
+}
+
 static char *yui_read_string(const yml_node_t *node, const char *key)
 {
     if (!node || !key) {
@@ -43,12 +55,40 @@ static char *yui_read_string(const yml_node_t *node, const char *key)
     return scalar ? yui_strdup(scalar) : NULL;
 }
 
+static char *yui_read_string_alias(const yml_node_t *node, const char *key, const char *alias)
+{
+    char *value = yui_read_string(node, key);
+    if (value || !alias) {
+        return value;
+    }
+    return yui_read_string(node, alias);
+}
+
 static int32_t yui_read_i32(const yml_node_t *node, const char *key, int32_t def)
 {
     if (!node || !key) {
         return def;
     }
     const yml_node_t *child = yml_node_get_child(node, key);
+    if (!child) {
+        return def;
+    }
+    const char *scalar = yml_node_get_scalar(child);
+    if (!scalar) {
+        return def;
+    }
+    return atoi(scalar);
+}
+
+static int32_t yui_read_i32_alias(const yml_node_t *node, const char *key, const char *alias, int32_t def)
+{
+    if (!node) {
+        return def;
+    }
+    const yml_node_t *child = yml_node_get_child(node, key);
+    if (!child && alias) {
+        child = yml_node_get_child(node, alias);
+    }
     if (!child) {
         return def;
     }
@@ -77,6 +117,18 @@ static bool yui_read_bool(const yml_node_t *node, const char *key, bool def)
     }
     if (strcasecmp(scalar, "false") == 0 || strcmp(scalar, "0") == 0) {
         return false;
+    }
+    if (strcasecmp(scalar, "none") == 0 || strcasecmp(scalar, "off") == 0) {
+        return false;
+    }
+    if (strcasecmp(scalar, "true") == 0 || strcmp(scalar, "1") == 0) {
+        return true;
+    }
+    if (strcasecmp(scalar, "yes") == 0 || strcasecmp(scalar, "on") == 0) {
+        return true;
+    }
+    if (scalar[0] != '\0') {
+        return true;
     }
     return def;
 }
@@ -152,21 +204,22 @@ static esp_err_t yui_parse_styles(const yml_node_t *node, yui_schema_t *schema)
             yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_PARSER, "Style '%s' must be a mapping", yml_node_get_key(child));
             continue;
         }
+        const yml_node_t *style_node = yui_style_source_node(child);
         yui_style_t *style = &schema->styles[idx++];
         style->name = yui_strdup(yml_node_get_key(child));
-        style->background_color = yui_read_string(child, "bg_color");
-        style->text_color = yui_read_string(child, "text_color");
-        style->accent_color = yui_read_string(child, "accent_color");
-        style->text_font = yui_read_string(child, "text_font");
-        style->width = yui_read_i32(child, "width", 0);
-        style->height = yui_read_i32(child, "height", 0);
-        style->padding = yui_read_i32(child, "padding", 0);
-        style->padding_x = yui_read_i32(child, "padding_x", -1);
-        style->padding_y = yui_read_i32(child, "padding_y", -1);
-        style->radius = yui_read_i32(child, "radius", 0);
-        style->spacing = yui_read_i32(child, "spacing", 0);
-        style->shadow = yui_read_bool(child, "shadow", false);
-        style->align = yui_read_string(child, "align");
+        style->background_color = yui_read_string_alias(style_node, "bg_color", "backgroundColor");
+        style->text_color = yui_read_string_alias(style_node, "text_color", "color");
+        style->accent_color = yui_read_string_alias(style_node, "accent_color", "accentColor");
+        style->text_font = yui_read_string_alias(style_node, "text_font", "fontFamily");
+        style->width = yui_read_i32_alias(style_node, "width", "minWidth", 0);
+        style->height = yui_read_i32_alias(style_node, "height", "minHeight", 0);
+        style->padding = yui_read_i32(style_node, "padding", 0);
+        style->padding_x = yui_read_i32_alias(style_node, "padding_x", "paddingHorizontal", -1);
+        style->padding_y = yui_read_i32_alias(style_node, "padding_y", "paddingVertical", -1);
+        style->radius = yui_read_i32_alias(style_node, "radius", "borderRadius", 0);
+        style->spacing = yui_read_i32_alias(style_node, "spacing", "gap", 0);
+        style->shadow = yui_read_bool(style_node, "shadow", false);
+        style->align = yui_read_string(style_node, "align");
     }
     return ESP_OK;
 }
