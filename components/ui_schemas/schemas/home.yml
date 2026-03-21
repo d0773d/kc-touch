@@ -8,10 +8,12 @@ app:
 
 state:
   welcome_message: "Welcome to YamUI"
-  device_status.connected: "4"
-  device_status.active: "3"
-  ui.sync_count: "0"
-  ui.dark_mode: "false"
+  device_status:
+    connected: "4"
+    active: "3"
+  ui:
+    sync_count: "0"
+    dark_mode: "false"
 
 translations:
   en:
@@ -171,7 +173,7 @@ screens:
                     text: "Online Devices"
                     style: stat-label
                   - type: label
-                    text: "{{device_status.active}} active"
+                    text: "{{state.device_status.active}} active"
                     style: stat-value
 
               - type: panel
@@ -186,7 +188,7 @@ screens:
                     text: "Total Devices"
                     style: stat-label
                   - type: label
-                    text: "{{device_status.connected}} total"
+                    text: "{{state.device_status.connected}} total"
                     style: stat-value
 
           - type: panel
@@ -224,7 +226,7 @@ screens:
                 text: "Dark Theme"
                 style: heading
               - type: switch
-                value: "{{ui.dark_mode}}"
+                value: "{{state.ui.dark_mode}}"
                 on_change: set(ui.dark_mode, {{checked}})
 
           - type: button
@@ -237,8 +239,8 @@ screens:
                 - set(welcome_message, "Sync requested")
 
           - type: label
-            text: "Sync Count: {{ui.sync_count}}"
+            text: "Sync Count: {{state.ui.sync_count}}"
             style: stat-label
 
           - type: label
-            text: "{{welcome_message}}"
+            text: "{{state.welcome_message}}"
