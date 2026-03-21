@@ -1,203 +1,198 @@
 version: 2
 app:
-  initial_screen: home
-  locale: en-US
+  name: "YamUI Sample Application"
+  version: "0.1.0"
+  author: "YamUI"
+  initial_screen: main
+  locale: en
+
 state:
+  welcome_message: "Welcome to YamUI"
+  device_status.connected: "4"
+  device_status.active: "3"
+  ui.sync_count: "0"
   ui.dark_mode: "false"
-  provisioning.stage: "welcome"
-  wifi.selected_ssid: "none"
-  wifi.security: "WPA2"
-  provisioning.auto_start: "false"
-  display.brightness: "40"
+
+translations:
+  en:
+    label: "English"
+    entries:
+      app.device_overview: "Device Overview"
+      panels.recent_activity: "Recent Activity"
+      panels.online_devices: "Online Devices"
+      panels.total_devices: "Total Devices"
+      actions.trigger_sync: "Trigger Sync"
+    metadata: {}
+  es:
+    label: "Español"
+    entries:
+      app.device_overview: "Panel de dispositivos"
+      panels.recent_activity: "Actividad reciente"
+      actions.trigger_sync: "Iniciar sincronización"
+    metadata: {}
+
 styles:
-  light.hero_label:
-    text_color: "#1F2A44"
-    text_font: "montserrat_24"
-  dark.hero_label:
-    text_color: "#FFFFFF"
-    text_font: "montserrat_24"
-  light.body_text:
-    text_color: "#4D5B7C"
-  dark.body_text:
-    text_color: "#A0A6C3"
-  light.primary_button:
-    bg_color: "#4C7DFF"
-    text_color: "#FFFFFF"
-    radius: 18
+  light.card:
+    bg_color: "#0F172A"
+    text_color: "#E2E8F0"
+    radius: 8
     padding: 16
-  dark.primary_button:
-    bg_color: "#4C7DFF"
-    text_color: "#FFFFFF"
-    radius: 18
+  dark.card:
+    bg_color: "#0F172A"
+    text_color: "#E2E8F0"
+    radius: 8
     padding: 16
-  light.ghost_button:
-    bg_color: "#DCE6FF"
-    text_color: "#18315E"
-    radius: 16
-    padding: 12
-  dark.ghost_button:
-    bg_color: "#2F3347"
-    text_color: "#FFFFFF"
-    radius: 16
-    padding: 12
-  light.card_panel:
-    bg_color: "#FFFFFF"
-    text_color: "#1F2A44"
-    radius: 18
-    padding: 18
-    spacing: 8
-  dark.card_panel:
-    bg_color: "#1F2334"
-    text_color: "#FFFFFF"
-    radius: 18
-    padding: 18
-    spacing: 8
+
+  light.cta:
+    bg_color: "#22D3EE"
+    text_color: "#0F172A"
+    radius: 999
+    padding_x: 24
+    padding_y: 12
+  dark.cta:
+    bg_color: "#22D3EE"
+    text_color: "#0F172A"
+    radius: 999
+    padding_x: 24
+    padding_y: 12
+
+  light.heading:
+    text_color: "#94A3B8"
+  dark.heading:
+    text_color: "#94A3B8"
+
+  light.stat-label:
+    text_color: "#94A3B8"
+  dark.stat-label:
+    text_color: "#94A3B8"
+
+  light.stat-value:
+    text_color: "#F8FAFC"
+  dark.stat-value:
+    text_color: "#F8FAFC"
+
 components:
-  InfoCard:
-    props: [title, subtitle]
+  stat_card:
+    props: [label, value, unit]
     layout:
       type: column
-      gap: 6
+      gap: 4
     widgets:
       - type: label
-        text: "{{title}}"
-        style: hero_label
+        text: "{{label}}"
+        style: stat-label
       - type: label
-        text: "{{subtitle}}"
-        style: body_text
-  ProvisionDialog:
-    layout:
-      type: column
-      gap: 14
-      align: center
-    widgets:
-      - type: img
-        src: "symbol:wifi"
-        align: center
-      - type: label
-        text: "Start Wi-Fi Provisioning?"
-        align: center
-        style: hero_label
-      - type: label
-        text: "This will walk you through Wi-Fi setup."
-        align: center
-        style: body_text
-      - type: row
-        layout:
-          gap: 10
-          align: center
-        widgets:
-          - type: button
-            text: "Close"
-            style: ghost_button
-            on_click: close_modal()
-          - type: button
-            text: "Start"
-            style: primary_button
-            on_click:
-              - push(provision)
-              - close_modal()
+        text: "{{value}}{{unit}}"
+        style: stat-value
+
 screens:
-  home:
+  main:
+    name: main
+    title: "Sample Dashboard"
+    initial: true
     layout:
       type: column
-      gap: 18
+      gap: 16
     widgets:
-      - type: img
-        src: "symbol:wifi"
-        align: center
-      - type: label
-        text: "YamUI Starter App"
-        style: hero_label
-        align: center
-      - type: panel
-        style: card_panel
+      - type: column
+        id: main-column
         layout:
           type: column
-          gap: 12
-        widgets:
-          - type: InfoCard
-            title: "Current SSID"
-            subtitle: "{{wifi.selected_ssid}}"
-          - type: InfoCard
-            title: "Provisioning Stage"
-            subtitle: "{{provisioning.stage}}"
-      - type: button
-        text: "Provision Wi-Fi"
-        style: primary_button
-        on_click: push(provision)
-      - type: row
-        layout:
-          gap: 10
-          align: center
+          gap: 16
+        width: "100%"
         widgets:
           - type: label
-            text: "Dark Theme"
-            style: hero_label
-          - type: switch
-            value: "{{ui.dark_mode}}"
-            on_change: set(ui.dark_mode, {{checked}})
-      - type: button
-        text: "Open Modal"
-        style: primary_button
-        on_click: modal(ProvisionDialog)
-  provision:
-    layout:
-      type: column
-      gap: 12
-    widgets:
-      - type: label
-        text: "Provisioning Stage: {{provisioning.stage}}"
-        style: hero_label
-      - type: textarea
-        id: ssid_input
-        placeholder: "Enter SSID"
-        text: "{{wifi.selected_ssid}}"
-        on_change: set(wifi.selected_ssid, {{value}})
-      - type: keyboard
-        target: ssid_input
-        mode: text_lower
-      - type: dropdown
-        options:
-          - Open
-          - WPA2
-          - WPA3
-        value: "{{wifi.security}}"
-        on_change: set(wifi.security, {{value}})
-      - type: switch
-        value: "{{provisioning.auto_start}}"
-        on_change: set(provisioning.auto_start, {{checked}})
-      - type: button
-        text: "Toggle Auto-start"
-        style: ghost_button
-        on_click: toggle(provisioning.auto_start)
-      - type: button
-        text: "Brightness +5"
-        style: ghost_button
-        on_click: increment(display.brightness, 5)
-      - type: button
-        text: "Brightness -5"
-        style: ghost_button
-        on_click: decrement(display.brightness, 5)
-      - type: slider
-        min: 0
-        max: 100
-        value: "{{display.brightness}}"
-        on_change: set(display.brightness, {{value}})
-      - type: bar
-        min: 0
-        max: 100
-        value: "{{display.brightness}}"
-      - type: button
-        text: "Set Credentials Stage"
-        style: primary_button
-        on_click:
-          - set(provisioning.stage, "credentials")
-          - pop()
-      - type: button
-        text: "Mark Complete"
-        style: primary_button
-        on_click:
-          - set(wifi.selected_ssid, "YamUI-Guest")
-          - set(provisioning.stage, "done")
-          - pop()
+            id: heading-label
+            text: "Device Overview"
+            style: heading
+
+          - type: row
+            id: summary-row
+            layout:
+              type: row
+              gap: 12
+            width: "100%"
+            widgets:
+              - type: panel
+                id: panel-online
+                style: card
+                grow: 1
+                layout:
+                  type: column
+                  gap: 6
+                widgets:
+                  - type: label
+                    text: "Online Devices"
+                    style: stat-label
+                  - type: label
+                    text: "{{device_status.active}} active"
+                    style: stat-value
+
+              - type: panel
+                id: panel-total
+                style: card
+                grow: 1
+                layout:
+                  type: column
+                  gap: 6
+                widgets:
+                  - type: label
+                    text: "Total Devices"
+                    style: stat-label
+                  - type: label
+                    text: "{{device_status.connected}} total"
+                    style: stat-value
+
+          - type: panel
+            id: panel-activity
+            style: card
+            layout:
+              type: column
+              gap: 8
+            widgets:
+              - type: label
+                text: "Recent Activity"
+                style: stat-label
+              - type: spacer
+                size: 4
+              - type: list
+                id: activity-list
+                layout:
+                  type: column
+                  gap: 8
+                widgets:
+                  - type: label
+                    text: "Camera connected"
+                  - type: label
+                    text: "Sensor calibrated"
+                  - type: label
+                    text: "Display refreshed"
+
+          - type: row
+            layout:
+              type: row
+              gap: 10
+              align: center
+            widgets:
+              - type: label
+                text: "Dark Theme"
+                style: heading
+              - type: switch
+                value: "{{ui.dark_mode}}"
+                on_change: set(ui.dark_mode, {{checked}})
+
+          - type: button
+            id: sync-button
+            text: "Trigger Sync"
+            style: cta
+            events:
+              onPress:
+                - increment(ui.sync_count, 1)
+                - set(welcome_message, "Sync requested")
+
+          - type: label
+            text: "Sync Count: {{ui.sync_count}}"
+            style: stat-label
+
+          - type: label
+            text: "{{welcome_message}}"
