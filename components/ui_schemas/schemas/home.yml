@@ -214,13 +214,12 @@ screens:
           - type: panel
             id: panel-activity
             style: card
+            props:
+              title_key: "panels.recent_activity"
             layout:
               type: column
               gap: 8
             widgets:
-              - type: label
-                text_key: "panels.recent_activity"
-                style: stat-label
               - type: spacer
                 size: 4
               - type: list
@@ -278,3 +277,5 @@ screens:
 
           - type: label
             text_key: "{{state.welcome_message}}"
+
+

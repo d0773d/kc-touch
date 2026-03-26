@@ -2340,6 +2340,28 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         if (layout) {
             yui_apply_layout(panel, layout, "column");
         }
+
+        const yml_node_t *props_node = yml_node_get_child(node, "props");
+        char title_buf[YUI_TEXT_BUFFER_MAX];
+        const char *title = yui_node_resolved_localized_scalar(node, "title", "title_key", scope, title_buf, sizeof(title_buf));
+        if ((!title || title[0] == '\0') && props_node) {
+            title = yui_node_resolved_localized_scalar(props_node, "title", "title_key", scope, title_buf, sizeof(title_buf));
+            if ((!title || title[0] == '\0')) {
+                title = yui_node_resolved_localized_scalar(props_node, "title", "titleKey", scope, title_buf, sizeof(title_buf));
+            }
+        }
+        if (title && title[0] != '\0') {
+            lv_obj_t *label = lv_label_create(panel);
+            const yui_style_t *title_style = yui_resolve_style(&schema->schema, "stat-label");
+            if (!title_style) {
+                title_style = yui_resolve_style(&schema->schema, "heading");
+            }
+            if (title_style) {
+                yui_apply_style(label, title_style);
+            }
+            lv_label_set_text(label, title);
+        }
+
         return yui_render_widget_list(yml_node_get_child(node, "widgets"), schema, panel, scope);
     }
     if (strcmp(type, "spacer") == 0) {
@@ -2794,6 +2816,7 @@ esp_err_t lvgl_yaml_gui_load_default(void)
     const char *default_schema = ui_schemas_get_default_name();
     return lvgl_yaml_gui_load_named(default_schema);
 }
+
 
 
 
