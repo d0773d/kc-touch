@@ -42,11 +42,26 @@ typedef struct {
 } yui_component_def_t;
 
 typedef struct {
+    char *key;
+    char *value;
+} yui_translation_entry_t;
+
+typedef struct {
+    char *locale;
+    char *label;
+    yui_translation_entry_t *entries;
+    size_t entry_count;
+} yui_translation_locale_t;
+
+typedef struct {
     char *name;
     char *background_color;
     char *text_color;
     char *accent_color;
     char *text_font;
+    int32_t font_size;
+    int32_t font_weight;
+    int32_t letter_spacing;
     int32_t width;
     int32_t height;
     int32_t padding;
@@ -73,6 +88,8 @@ typedef struct {
     yui_app_config_t app;
     yui_style_t *styles;
     size_t style_count;
+    yui_translation_locale_t *translations;
+    size_t translation_count;
     yui_component_def_t *components;
     size_t component_count;
 } yui_schema_t;
@@ -84,6 +101,7 @@ const yui_component_def_t *yui_schema_get_component(const yui_schema_t *schema, 
 const yui_style_t *yui_schema_get_style(const yui_schema_t *schema, const char *name);
 const char *yui_schema_default_screen(const yui_schema_t *schema);
 const char *yui_schema_locale(const yui_schema_t *schema);
+const char *yui_schema_translate(const yui_schema_t *schema, const char *locale, const char *key);
 
 #ifdef __cplusplus
 }

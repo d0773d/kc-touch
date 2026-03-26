@@ -161,6 +161,9 @@ static esp_err_t yui_parse_app(const yml_node_t *node, yui_schema_t *schema)
     }
     schema->app.initial_screen = yui_read_string(node, "initial_screen");
     schema->app.locale = yui_read_string(node, "locale");
+    if (schema->app.locale && schema->app.locale[0] != '\0' && yui_state_get("ui.locale", "")[0] == '\0') {
+        (void)yui_state_set("ui.locale", schema->app.locale);
+    }
     return ESP_OK;
 }
 
@@ -175,6 +178,24 @@ static void yui_style_free(yui_style_t *style)
     free(style->accent_color);
     free(style->text_font);
     free(style->align);
+}
+
+static void yui_translation_locale_free(yui_translation_locale_t *locale)
+{
+    if (!locale) {
+        return;
+    }
+    free(locale->locale);
+    free(locale->label);
+    if (locale->entries) {
+        for (size_t i = 0; i < locale->entry_count; ++i) {
+            free(locale->entries[i].key);
+            free(locale->entries[i].value);
+        }
+        free(locale->entries);
+    }
+    locale->entries = NULL;
+    locale->entry_count = 0U;
 }
 
 static esp_err_t yui_parse_styles(const yml_node_t *node, yui_schema_t *schema)
@@ -211,6 +232,9 @@ static esp_err_t yui_parse_styles(const yml_node_t *node, yui_schema_t *schema)
         style->text_color = yui_read_string_alias(style_node, "text_color", "color");
         style->accent_color = yui_read_string_alias(style_node, "accent_color", "accentColor");
         style->text_font = yui_read_string_alias(style_node, "text_font", "fontFamily");
+        style->font_size = yui_read_i32_alias(style_node, "font_size", "fontSize", 0);
+        style->font_weight = yui_read_i32_alias(style_node, "font_weight", "fontWeight", 0);
+        style->letter_spacing = yui_read_i32_alias(style_node, "letter_spacing", "letterSpacing", 0);
         style->width = yui_read_i32_alias(style_node, "width", "minWidth", 0);
         style->height = yui_read_i32_alias(style_node, "height", "minHeight", 0);
         style->padding = yui_read_i32(style_node, "padding", 0);
@@ -221,6 +245,81 @@ static esp_err_t yui_parse_styles(const yml_node_t *node, yui_schema_t *schema)
         style->shadow = yui_read_bool(style_node, "shadow", false);
         style->align = yui_read_string(style_node, "align");
     }
+    return ESP_OK;
+}
+
+static esp_err_t yui_parse_translation_entries(const yml_node_t *node, yui_translation_locale_t *locale)
+{
+    if (!node) {
+        return ESP_OK;
+    }
+    if (!yui_node_is_mapping(node)) {
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "translation entries must be a mapping");
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t count = yml_node_child_count(node);
+    if (count == 0U) {
+        return ESP_OK;
+    }
+    locale->entries = (yui_translation_entry_t *)calloc(count, sizeof(yui_translation_entry_t));
+    if (!locale->entries) {
+        return ESP_ERR_NO_MEM;
+    }
+    locale->entry_count = count;
+    size_t idx = 0;
+    for (const yml_node_t *child = yml_node_child_at(node, 0); child; child = yml_node_next(child)) {
+        const char *key = yml_node_get_key(child);
+        const char *value = yml_node_get_scalar(child);
+        if (!key || !value) {
+            continue;
+        }
+        locale->entries[idx].key = yui_strdup(key);
+        locale->entries[idx].value = yui_strdup(value);
+        if (!locale->entries[idx].key || !locale->entries[idx].value) {
+            return ESP_ERR_NO_MEM;
+        }
+        idx++;
+    }
+    locale->entry_count = idx;
+    return ESP_OK;
+}
+
+static esp_err_t yui_parse_translations(const yml_node_t *node, yui_schema_t *schema)
+{
+    if (!schema) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!node) {
+        return ESP_OK;
+    }
+    if (!yui_node_is_mapping(node)) {
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "translations block must be a mapping");
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t count = yml_node_child_count(node);
+    if (count == 0U) {
+        return ESP_OK;
+    }
+    schema->translations = (yui_translation_locale_t *)calloc(count, sizeof(yui_translation_locale_t));
+    if (!schema->translations) {
+        return ESP_ERR_NO_MEM;
+    }
+    schema->translation_count = count;
+    size_t idx = 0;
+    for (const yml_node_t *child = yml_node_child_at(node, 0); child; child = yml_node_next(child)) {
+        if (!yui_node_is_mapping(child)) {
+            yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_PARSER, "Translation locale '%s' must be a mapping", yml_node_get_key(child));
+            continue;
+        }
+        yui_translation_locale_t *locale = &schema->translations[idx++];
+        locale->locale = yui_strdup(yml_node_get_key(child));
+        locale->label = yui_read_string(child, "label");
+        esp_err_t err = yui_parse_translation_entries(yml_node_get_child(child, "entries"), locale);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    schema->translation_count = idx;
     return ESP_OK;
 }
 
@@ -394,6 +493,12 @@ esp_err_t yui_schema_from_tree(const yml_node_t *root, yui_schema_t *out_schema)
         return err;
     }
 
+    err = yui_parse_translations(yml_node_get_child(root, "translations"), out_schema);
+    if (err != ESP_OK) {
+        yui_schema_free(out_schema);
+        return err;
+    }
+
     out_schema->styles_node = yml_node_get_child(root, "styles");
     err = yui_parse_styles(out_schema->styles_node, out_schema);
     if (err != ESP_OK) {
@@ -441,6 +546,15 @@ void yui_schema_free(yui_schema_t *schema)
     }
     schema->styles = NULL;
     schema->style_count = 0;
+
+    if (schema->translations) {
+        for (size_t i = 0; i < schema->translation_count; ++i) {
+            yui_translation_locale_free(&schema->translations[i]);
+        }
+        free(schema->translations);
+    }
+    schema->translations = NULL;
+    schema->translation_count = 0U;
 
     if (schema->components) {
         for (size_t i = 0; i < schema->component_count; ++i) {
@@ -516,4 +630,28 @@ const char *yui_schema_locale(const yui_schema_t *schema)
         return NULL;
     }
     return schema->app.locale;
+}
+
+const char *yui_schema_translate(const yui_schema_t *schema, const char *locale, const char *key)
+{
+    if (!schema || !key || key[0] == '\0') {
+        return NULL;
+    }
+    const char *target_locale = (locale && locale[0] != '\0') ? locale : schema->app.locale;
+    if (!target_locale || target_locale[0] == '\0' || !schema->translations) {
+        return NULL;
+    }
+    for (size_t i = 0; i < schema->translation_count; ++i) {
+        const yui_translation_locale_t *bucket = &schema->translations[i];
+        if (!bucket->locale || strcmp(bucket->locale, target_locale) != 0) {
+            continue;
+        }
+        for (size_t j = 0; j < bucket->entry_count; ++j) {
+            if (bucket->entries[j].key && strcmp(bucket->entries[j].key, key) == 0) {
+                return bucket->entries[j].value;
+            }
+        }
+        break;
+    }
+    return NULL;
 }

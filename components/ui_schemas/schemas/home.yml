@@ -1,4 +1,4 @@
-version: 2
+﻿version: 2
 app:
   name: "YamUI Sample Application"
   version: "0.1.0"
@@ -7,13 +7,14 @@ app:
   locale: en
 
 state:
-  welcome_message: "Welcome to YamUI"
+  welcome_message: "status.welcome"
   device_status:
     connected: "4"
     active: "3"
   ui:
     sync_count: "0"
     dark_mode: "false"
+    locale: "en"
 
 translations:
   en:
@@ -23,14 +24,32 @@ translations:
       panels.recent_activity: "Recent Activity"
       panels.online_devices: "Online Devices"
       panels.total_devices: "Total Devices"
+      labels.dark_theme: "Dark Theme"
       actions.trigger_sync: "Trigger Sync"
+      actions.english: "English"
+      actions.spanish: "Español"
+      activity.camera_connected: "Camera connected"
+      activity.sensor_calibrated: "Sensor calibrated"
+      activity.display_refreshed: "Display refreshed"
+      status.welcome: "Welcome to YamUI"
+      status.sync_requested: "Sync requested"
     metadata: {}
   es:
     label: "Español"
     entries:
       app.device_overview: "Panel de dispositivos"
       panels.recent_activity: "Actividad reciente"
+      panels.online_devices: "Dispositivos en línea"
+      panels.total_devices: "Dispositivos totales"
+      labels.dark_theme: "Tema oscuro"
       actions.trigger_sync: "Iniciar sincronización"
+      actions.english: "Inglés"
+      actions.spanish: "Español"
+      activity.camera_connected: "Cámara conectada"
+      activity.sensor_calibrated: "Sensor calibrado"
+      activity.display_refreshed: "Pantalla actualizada"
+      status.welcome: "Bienvenido a YamUI"
+      status.sync_requested: "Sincronización solicitada"
     metadata: {}
 
 styles:
@@ -124,7 +143,7 @@ components:
     description: "Compact statistic card with value and label."
     props: {}
     prop_schema:
-      - name: label
+      - name: label_key
         type: string
         required: true
       - name: value
@@ -142,7 +161,7 @@ components:
           gap: 6
         widgets:
           - type: label
-            text: "{{label}}"
+            text_key: "{{label_key}}"
             style: stat-label
           - type: label
             text: "{{value}}{{unit}}"
@@ -166,7 +185,7 @@ screens:
         widgets:
           - type: label
             id: heading-label
-            text: "Device Overview"
+            text_key: "app.device_overview"
             style: heading
 
           - type: row
@@ -180,7 +199,7 @@ screens:
                 id: panel-online
                 grow: 1
                 props:
-                  label: "Online Devices"
+                  label_key: "panels.online_devices"
                   value: "{{state.device_status.active}}"
                   unit: " active"
 
@@ -188,7 +207,7 @@ screens:
                 id: panel-total
                 grow: 1
                 props:
-                  label: "Total Devices"
+                  label_key: "panels.total_devices"
                   value: "{{state.device_status.connected}}"
                   unit: " total"
 
@@ -200,7 +219,7 @@ screens:
               gap: 8
             widgets:
               - type: label
-                text: "Recent Activity"
+                text_key: "panels.recent_activity"
                 style: stat-label
               - type: spacer
                 size: 4
@@ -211,11 +230,11 @@ screens:
                   gap: 8
                 widgets:
                   - type: label
-                    text: "Camera connected"
+                    text_key: "activity.camera_connected"
                   - type: label
-                    text: "Sensor calibrated"
+                    text_key: "activity.sensor_calibrated"
                   - type: label
-                    text: "Display refreshed"
+                    text_key: "activity.display_refreshed"
 
           - type: row
             layout:
@@ -224,24 +243,38 @@ screens:
               align: center
             widgets:
               - type: label
-                text: "Dark Theme"
+                text_key: "labels.dark_theme"
                 style: heading
               - type: switch
                 value: "{{state.ui.dark_mode}}"
                 on_change: set(ui.dark_mode, {{checked}})
 
+          - type: row
+            layout:
+              type: row
+              gap: 8
+            widgets:
+              - type: button
+                text_key: "actions.english"
+                style: cta
+                on_click: set(ui.locale, en)
+              - type: button
+                text_key: "actions.spanish"
+                style: cta
+                on_click: set(ui.locale, es)
+
           - type: button
             id: sync-button
-            text: "Trigger Sync"
+            text_key: "actions.trigger_sync"
             style: cta
             events:
               onPress:
                 - increment(ui.sync_count, 1)
-                - set(welcome_message, "Sync requested")
+                - set(welcome_message, status.sync_requested)
 
           - type: label
             text: "Sync Count: {{state.ui.sync_count}}"
             style: stat-label
 
           - type: label
-            text: "{{state.welcome_message}}"
+            text_key: "{{state.welcome_message}}"

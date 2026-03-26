@@ -3,6 +3,7 @@
 #include "esp_timer.h"
 #include "kc_touch_display.h"
 #include "lvgl.h"
+#include "yui_fonts.h"
 #include "ui_schemas.h"
 #include "yaml_core.h"
 #include "yaml_ui.h"
@@ -92,12 +93,14 @@ struct yui_widget_runtime {
     bool last_visible;
     bool has_enabled_state;
     bool last_enabled;
+    bool watch_all_state;
 };
 
 static void yui_widget_refresh_text(yui_widget_runtime_t *runtime);
 static void yui_widget_refresh_value(yui_widget_runtime_t *runtime);
 static void yui_widget_refresh_conditions(yui_widget_runtime_t *runtime);
 static void yui_widget_schedule_condition_refresh(yui_widget_runtime_t *runtime);
+static esp_err_t yui_widget_watch_all_state(yui_widget_runtime_t *runtime);
 static bool yui_expr_value_is_truthy(const yui_expr_value_t *value);
 static void yui_format_text(const char *tmpl, yui_component_scope_t *scope, char *out, size_t out_len);
 static char *yui_strdup_local(const char *value);
@@ -114,6 +117,9 @@ static lv_color_t yui_theme_modal_overlay_color(void);
 static lv_color_t yui_theme_modal_panel_color(void);
 static const yui_style_t *yui_resolve_style(const yui_schema_t *schema, const char *style_name);
 static const yml_node_t *yui_find_event_node(const yml_node_t *node, const char *yaml_key, const char *companion_key);
+static const char *yui_translate_key(const char *key);
+static const char *yui_canonicalize_state_key(const char *key);
+static bool yui_binding_key_requires_screen_refresh(const char *key);
 
 typedef struct {
     const char *yaml_key;
@@ -153,6 +159,26 @@ static const yui_symbol_entry_t s_symbol_entries[] = {
     {"left", LV_SYMBOL_LEFT},
     {"right", LV_SYMBOL_RIGHT},
 };
+
+static const char *yui_canonicalize_state_key(const char *key)
+{
+    if (!key) {
+        return NULL;
+    }
+    if (strncmp(key, "state.", 6) == 0 && key[6] != '\0') {
+        return key + 6;
+    }
+    return key;
+}
+
+static bool yui_binding_key_requires_screen_refresh(const char *key)
+{
+    const char *canonical = yui_canonicalize_state_key(key);
+    if (!canonical || canonical[0] == '\0') {
+        return false;
+    }
+    return strcmp(canonical, "ui.sync_count") == 0 || strcmp(canonical, "welcome_message") == 0;
+}
 
 static const char *yui_symbol_lookup(const char *name)
 {
@@ -323,6 +349,7 @@ static size_t s_nav_count;
 static size_t s_nav_capacity;
 static yui_state_watch_handle_t s_display_brightness_watch;
 static yui_state_watch_handle_t s_theme_watch;
+static yui_state_watch_handle_t s_locale_watch;
 typedef struct {
     lv_obj_t *overlay;
 } yui_modal_frame_t;
@@ -529,6 +556,23 @@ static bool yui_theme_is_dark(void)
     return yui_state_get_bool("ui.dark_mode", false);
 }
 
+static const char *yui_current_locale(void)
+{
+    if (!s_loaded_schema) {
+        return yui_state_get("ui.locale", "");
+    }
+    return yui_state_get("ui.locale", yui_schema_locale(&s_loaded_schema->schema));
+}
+
+static const char *yui_translate_key(const char *key)
+{
+    if (!key || key[0] == '\0' || !s_loaded_schema) {
+        return key;
+    }
+    const char *translated = yui_schema_translate(&s_loaded_schema->schema, yui_current_locale(), key);
+    return translated ? translated : key;
+}
+
 static lv_color_t yui_theme_screen_bg_color(void)
 {
     return yui_theme_is_dark() ? lv_color_hex(0x0F1117) : lv_color_hex(0xF5F7FB);
@@ -587,6 +631,14 @@ static void yui_theme_watch_cb(const char *key, const char *value, void *user_ct
     (void)yui_nav_queue_submit(YUI_NAV_REQUEST_REFRESH, NULL);
 }
 
+static void yui_locale_watch_cb(const char *key, const char *value, void *user_ctx)
+{
+    (void)key;
+    (void)value;
+    (void)user_ctx;
+    (void)yui_nav_queue_submit(YUI_NAV_REQUEST_REFRESH, NULL);
+}
+
 static esp_err_t yui_register_display_watchers(void)
 {
     if (s_display_brightness_watch != 0U) {
@@ -601,6 +653,14 @@ static esp_err_t yui_register_theme_watchers(void)
         return ESP_OK;
     }
     return yui_state_watch("ui.dark_mode", yui_theme_watch_cb, NULL, &s_theme_watch);
+}
+
+static esp_err_t yui_register_locale_watchers(void)
+{
+    if (s_locale_watch != 0U) {
+        return ESP_OK;
+    }
+    return yui_state_watch("ui.locale", yui_locale_watch_cb, NULL, &s_locale_watch);
 }
 
 static void yui_sync_display_brightness_from_state(void)
@@ -835,6 +895,28 @@ static const char *yui_node_resolved_scalar(const yml_node_t *node, const char *
     return buffer;
 }
 
+static const char *yui_node_resolved_localized_scalar(const yml_node_t *node,
+                                                      const char *value_key,
+                                                      const char *translation_key_field,
+                                                      yui_component_scope_t *scope,
+                                                      char *buffer,
+                                                      size_t buffer_len)
+{
+    const char *raw_translation_key = yui_node_scalar(node, translation_key_field);
+    if (raw_translation_key && raw_translation_key[0] != '\0') {
+        char key_buffer[YUI_TEXT_BUFFER_MAX];
+        key_buffer[0] = '\0';
+        yui_format_text(raw_translation_key, scope, key_buffer, sizeof(key_buffer));
+        const char *translated = yui_translate_key(key_buffer);
+        if (!buffer || buffer_len == 0U) {
+            return translated;
+        }
+        snprintf(buffer, buffer_len, "%s", translated ? translated : "");
+        return buffer;
+    }
+    return yui_node_resolved_scalar(node, value_key, scope, buffer, buffer_len);
+}
+
 static int32_t yui_node_resolved_i32(const yml_node_t *node, const char *key, yui_component_scope_t *scope, int32_t def)
 {
     char buffer[32];
@@ -1005,7 +1087,18 @@ static void yui_widget_refresh_text(yui_widget_runtime_t *runtime)
     }
     char buffer[YUI_TEXT_BUFFER_MAX];
     yui_format_text(runtime->text_template, runtime->scope, buffer, sizeof(buffer));
+    if (strstr(runtime->text_template, "sync_count") != NULL) {
+        yamui_log(YAMUI_LOG_LEVEL_INFO, YAMUI_LOG_CAT_LVGL, "refresh_text tmpl='%s' value='%s'",
+                  runtime->text_template, buffer);
+    }
     lv_label_set_text(runtime->text_target, buffer);
+    lv_obj_mark_layout_as_dirty(runtime->text_target);
+    lv_obj_invalidate(runtime->text_target);
+    lv_obj_t *parent = lv_obj_get_parent(runtime->text_target);
+    if (parent) {
+        lv_obj_mark_layout_as_dirty(parent);
+        lv_obj_invalidate(parent);
+    }
 }
 
 static bool yui_dropdown_select_value(lv_obj_t *dropdown, const char *value)
@@ -1174,17 +1267,37 @@ static void yui_widget_refresh_conditions(yui_widget_runtime_t *runtime)
     runtime->condition_refreshing = false;
 }
 
-static void yui_widget_state_cb(const char *key, const char *value, void *user_ctx)
+static void yui_widget_refresh_binding_async_cb(void *user_data)
 {
-    (void)key;
-    (void)value;
-    yui_widget_runtime_t *runtime = (yui_widget_runtime_t *)user_ctx;
+    yui_widget_runtime_t *runtime = (yui_widget_runtime_t *)user_data;
     if (!runtime || runtime->disposed) {
         return;
     }
     yui_widget_refresh_text(runtime);
     yui_widget_refresh_value(runtime);
     yui_widget_schedule_condition_refresh(runtime);
+}
+
+static void yui_widget_state_cb(const char *key, const char *value, void *user_ctx)
+{
+    (void)value;
+    yui_widget_runtime_t *runtime = (yui_widget_runtime_t *)user_ctx;
+    if (!runtime || runtime->disposed) {
+        return;
+    }
+    if (runtime->text_template && strstr(runtime->text_template, "sync_count") != NULL) {
+        yamui_log(YAMUI_LOG_LEVEL_INFO, YAMUI_LOG_CAT_LVGL, "state_cb key='%s' value='%s' tmpl='%s'",
+                  key ? key : "", value ? value : "", runtime->text_template);
+    }
+    if (runtime->text_template && yui_binding_key_requires_screen_refresh(key)) {
+        (void)yui_nav_queue_submit(YUI_NAV_REQUEST_REFRESH, NULL);
+        return;
+    }
+    if (lv_async_call(yui_widget_refresh_binding_async_cb, runtime) != LV_RESULT_OK) {
+        yui_widget_refresh_text(runtime);
+        yui_widget_refresh_value(runtime);
+        yui_widget_schedule_condition_refresh(runtime);
+    }
 }
 
 static bool yui_is_valid_token(const char *token)
@@ -1273,8 +1386,12 @@ static esp_err_t yui_widget_watch_state(yui_widget_runtime_t *runtime, const cha
     if (!runtime || !key || key[0] == '\0') {
         return ESP_OK;
     }
+    const char *watch_key = yui_canonicalize_state_key(key);
+    if (!watch_key || watch_key[0] == '\0') {
+        return ESP_OK;
+    }
     yui_state_watch_handle_t handle = 0;
-    esp_err_t err = yui_state_watch(key, yui_widget_state_cb, runtime, &handle);
+    esp_err_t err = yui_state_watch(watch_key, yui_widget_state_cb, runtime, &handle);
     if (err != ESP_OK || handle == 0U) {
         return err;
     }
@@ -1324,6 +1441,10 @@ static esp_err_t yui_widget_bind_text(yui_widget_runtime_t *runtime, const char 
                 return err;
             }
         }
+    }
+    err = yui_widget_watch_all_state(runtime);
+    if (err != ESP_OK) {
+        return err;
     }
     yui_widget_refresh_text(runtime);
     return ESP_OK;
@@ -1415,6 +1536,10 @@ static esp_err_t yui_widget_bind_value(yui_widget_runtime_t *runtime, const char
             }
         }
     }
+    err = yui_widget_watch_all_state(runtime);
+    if (err != ESP_OK) {
+        return err;
+    }
     yui_widget_refresh_value(runtime);
     return ESP_OK;
 }
@@ -1500,6 +1625,10 @@ static esp_err_t yui_widget_bind_conditions(yui_widget_runtime_t *runtime, const
         }
     }
     free(tokens);
+    err = yui_widget_watch_all_state(runtime);
+    if (err != ESP_OK) {
+        return err;
+    }
     yui_widget_schedule_condition_refresh(runtime);
     return ESP_OK;
 }
@@ -1519,6 +1648,25 @@ static esp_err_t yui_widget_parse_events(const yml_node_t *node, yui_widget_runt
             return err;
         }
     }
+    return ESP_OK;
+}
+
+static esp_err_t yui_widget_watch_all_state(yui_widget_runtime_t *runtime)
+{
+    if (!runtime || runtime->watch_all_state) {
+        return ESP_OK;
+    }
+    yui_state_watch_handle_t handle = 0U;
+    esp_err_t err = yui_state_watch(NULL, yui_widget_state_cb, runtime, &handle);
+    if (err != ESP_OK || handle == 0U) {
+        return err;
+    }
+    esp_err_t append_err = yui_widget_append_watch(runtime, handle);
+    if (append_err != ESP_OK) {
+        yui_state_unwatch(handle);
+        return append_err;
+    }
+    runtime->watch_all_state = true;
     return ESP_OK;
 }
 
@@ -1574,12 +1722,19 @@ static void yui_apply_style(lv_obj_t *obj, const yui_style_t *style)
     if (!obj || !style) {
         return;
     }
+    const lv_font_t *font = yui_font_pick(style->font_size, style->font_weight, style->text_font);
+    if (font) {
+        lv_obj_set_style_text_font(obj, font, 0);
+    }
     if (style->background_color) {
         lv_obj_set_style_bg_color(obj, yui_color_from_string(style->background_color, lv_color_hex(0x101018)), 0);
         lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     }
     if (style->text_color) {
         lv_obj_set_style_text_color(obj, yui_color_from_string(style->text_color, lv_color_hex(0xFFFFFF)), 0);
+    }
+    if (style->letter_spacing != 0) {
+        lv_obj_set_style_text_letter_space(obj, style->letter_spacing, 0);
     }
     if (style->padding > 0) {
         lv_obj_set_style_pad_all(obj, style->padding, 0);
@@ -1828,7 +1983,8 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         lv_obj_t *label = lv_label_create(parent);
         yui_register_widget_id(node, label);
         yui_apply_common_widget_attrs(label, node, schema);
-        const char *text = yui_node_scalar(node, "text");
+        char text_buf[YUI_TEXT_BUFFER_MAX];
+        const char *text = yui_node_resolved_localized_scalar(node, "text", "text_key", scope, text_buf, sizeof(text_buf));
         yui_widget_runtime_t *runtime = yui_widget_runtime_create(label, scope);
         if (runtime && text) {
             (void)yui_widget_bind_text(runtime, text, label);
@@ -1869,7 +2025,8 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
     }
     if (strcmp(type, "button") == 0) {
-        const char *text = yui_node_scalar(node, "text");
+        char text_buf[YUI_TEXT_BUFFER_MAX];
+        const char *text = yui_node_resolved_localized_scalar(node, "text", "text_key", scope, text_buf, sizeof(text_buf));
         lv_obj_t *btn = lv_button_create(parent);
         lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
         yui_register_widget_id(node, btn);
@@ -1921,7 +2078,8 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         lv_obj_t *ta = lv_textarea_create(parent);
         yui_register_widget_id(node, ta);
         yui_apply_common_widget_attrs(ta, node, schema);
-        const char *placeholder = yui_node_scalar(node, "placeholder");
+        char placeholder_buf[YUI_TEXT_BUFFER_MAX];
+        const char *placeholder = yui_node_resolved_localized_scalar(node, "placeholder", "placeholder_key", scope, placeholder_buf, sizeof(placeholder_buf));
         if (placeholder) {
             lv_textarea_set_placeholder_text(ta, placeholder);
         }
@@ -2244,12 +2402,14 @@ static esp_err_t yui_render_screen(const yml_node_t *screen_node, yui_schema_run
     lv_obj_clean(root);
     lv_obj_set_style_bg_color(root, yui_theme_screen_bg_color(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_font(root, yui_font_default(), 0);
 
     lv_obj_t *container = lv_obj_create(root);
     lv_obj_set_size(container, LV_PCT(100), LV_PCT(100));
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(container, yui_theme_screen_bg_color(), 0);
     lv_obj_set_style_bg_opa(container, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_font(container, yui_font_default(), 0);
     yui_apply_layout(container, yml_node_get_child(screen_node, "layout"), "column");
 
     const yml_node_t *widgets = yml_node_get_child(screen_node, "widgets");
@@ -2585,7 +2745,11 @@ static esp_err_t yui_runtime_prepare(void)
     if (err != ESP_OK) {
         return err;
     }
-    return yui_register_theme_watchers();
+    err = yui_register_theme_watchers();
+    if (err != ESP_OK) {
+        return err;
+    }
+    return yui_register_locale_watchers();
 }
 
 static esp_err_t yui_boot_loaded_schema(yui_schema_runtime_t *schema)
@@ -2630,3 +2794,6 @@ esp_err_t lvgl_yaml_gui_load_default(void)
     const char *default_schema = ui_schemas_get_default_name();
     return lvgl_yaml_gui_load_named(default_schema);
 }
+
+
+
