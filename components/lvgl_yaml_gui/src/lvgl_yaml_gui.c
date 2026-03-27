@@ -2327,6 +2327,7 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
     if (strcmp(type, "panel") == 0) {
         lv_obj_t *panel = lv_obj_create(parent);
         yui_register_widget_id(node, panel);
+        lv_obj_set_size(panel, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
         if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
             lv_obj_set_width(panel, LV_PCT(100));
@@ -2426,16 +2427,13 @@ static esp_err_t yui_render_screen(const yml_node_t *screen_node, yui_schema_run
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_set_style_text_font(root, yui_font_default(), 0);
 
-    lv_obj_t *container = lv_obj_create(root);
-    lv_obj_set_size(container, LV_PCT(100), LV_PCT(100));
-    lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(container, yui_theme_screen_bg_color(), 0);
-    lv_obj_set_style_bg_opa(container, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_font(container, yui_font_default(), 0);
-    yui_apply_layout(container, yml_node_get_child(screen_node, "layout"), "column");
+    lv_obj_add_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(root, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO);
+    yui_apply_layout(root, yml_node_get_child(screen_node, "layout"), "column");
 
     const yml_node_t *widgets = yml_node_get_child(screen_node, "widgets");
-    esp_err_t err = yui_render_widget_list(widgets, schema, container, NULL);
+    esp_err_t err = yui_render_widget_list(widgets, schema, root, NULL);
     if (err != ESP_OK) {
         return err;
     }
