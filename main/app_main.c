@@ -8,6 +8,7 @@
 #include "kc_touch_gui.h"
 #include "kc_touch_display.h"
 #include "sensor_manager.h"
+#include "yui_camera.h"
 #include "yamui_logging.h"
 
 static const char *TAG = "yamui_main";
@@ -32,6 +33,16 @@ void app_main(void)
     esp_err_t sensor_err = sensor_manager_init();
     if (sensor_err != ESP_OK) {
         ESP_LOGW(TAG, "sensor_manager_init: %s", esp_err_to_name(sensor_err));
+    }
+
+    esp_err_t camera_err = yui_camera_init();
+    if (camera_err == ESP_OK) {
+        kc_touch_gui_set_camera_ready(true);
+        ESP_LOGI(TAG, "yui_camera_init: ready");
+    } else if (camera_err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "yui_camera_init: %s", esp_err_to_name(camera_err));
+    } else {
+        ESP_LOGI(TAG, "yui_camera_init: not enabled/supported");
     }
 
     kc_touch_gui_show_root();
