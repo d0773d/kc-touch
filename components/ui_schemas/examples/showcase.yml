@@ -12,11 +12,12 @@ state:
     dark_mode: "false"
     locale: "en"
     keyboard_visible: "false"
-    brightness: "72"
     temperature: "22"
     humidity: "48"
     pressure: "1012"
     sync_count: "0"
+  display:
+    brightness: "72"
   profile:
     name: "Workshop Node"
     note: "Ready for provisioning"
@@ -438,21 +439,22 @@ screens:
                     on_click: modal(routine_modal)
 
               - type: label
-                text: "Brightness: {{state.ui.brightness}}"
+                text: "Brightness: {{state.display.brightness}}"
                 style: stat-label
               - type: slider
                 min: 0
                 max: 100
-                value: "{{state.ui.brightness}}"
-                on_change: set(ui.brightness, {{value}})
+                value: "{{state.display.brightness}}"
+                on_change: set(display.brightness, {{value}})
               - type: bar
                 min: 0
                 max: 100
-                value: "{{state.ui.brightness}}"
+                value: "{{state.display.brightness}}"
               - type: arc
                 min: 0
                 max: 100
-                value: "{{state.ui.brightness}}"
+                value: "{{state.display.brightness}}"
+                on_change: set(display.brightness, {{value}})
 
           - type: row
             layout:

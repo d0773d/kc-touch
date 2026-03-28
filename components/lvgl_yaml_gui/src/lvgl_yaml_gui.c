@@ -739,6 +739,13 @@ static const char *yui_event_resolve_value(const yui_event_resolver_ctx_t *ctx, 
         return buffer;
     }
 #endif
+#if LV_USE_ARC
+    if (lv_obj_check_type(target, &lv_arc_class)) {
+        int32_t value = lv_arc_get_value(target);
+        snprintf(buffer, buffer_len, "%ld", (long)value);
+        return buffer;
+    }
+#endif
     const void *param = lv_event_get_param(evt);
     if (param) {
         strncpy(buffer, (const char *)param, buffer_len - 1U);
@@ -1983,11 +1990,13 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         lv_obj_t *label = lv_label_create(parent);
         yui_register_widget_id(node, label);
         yui_apply_common_widget_attrs(label, node, schema);
+        const char *raw_text = yui_node_scalar(node, "text");
         char text_buf[YUI_TEXT_BUFFER_MAX];
         const char *text = yui_node_resolved_localized_scalar(node, "text", "text_key", scope, text_buf, sizeof(text_buf));
         yui_widget_runtime_t *runtime = yui_widget_runtime_create(label, scope);
         if (runtime && text) {
-            (void)yui_widget_bind_text(runtime, text, label);
+            const char *bind_text = (raw_text && strstr(raw_text, "{{") && strstr(raw_text, "}}")) ? raw_text : text;
+            (void)yui_widget_bind_text(runtime, bind_text, label);
         } else if (text) {
             lv_label_set_text(label, text);
         }
