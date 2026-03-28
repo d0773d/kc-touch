@@ -1,8 +1,12 @@
 #include "lvgl_yaml_gui.h"
 
+#include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_timer.h"
+#include "kc_touch_gui.h"
 #include "kc_touch_display.h"
 #include "lvgl.h"
+#include "freertos/semphr.h"
 #include "yui_fonts.h"
 #include "ui_schemas.h"
 #include "yaml_core.h"
@@ -12,6 +16,7 @@
 #include "yamui_logging.h"
 #include "yamui_runtime.h"
 #include "yamui_state.h"
+#include "yui_camera.h"
 #include "yui_navigation_queue.h"
 
 #include <ctype.h>
@@ -54,6 +59,25 @@ typedef struct {
     char *id;
     lv_obj_t *obj;
 } yui_widget_ref_t;
+
+typedef struct {
+    lv_obj_t *container;
+    lv_obj_t *image;
+    lv_obj_t *placeholder;
+    lv_draw_buf_t *draw_buf;
+    uint8_t *staging_buf;
+    size_t frame_len;
+    uint32_t frame_width;
+    uint32_t frame_height;
+    uint32_t source_width;
+    uint32_t source_height;
+    int video_fd;
+    bool stream_started;
+    SemaphoreHandle_t frame_lock;
+    bool frame_ready;
+    bool update_queued;
+    bool active;
+} yui_camera_preview_t;
 
 struct yui_component_prop {
     char *name;
@@ -120,6 +144,8 @@ static const yml_node_t *yui_find_event_node(const yml_node_t *node, const char 
 static const char *yui_translate_key(const char *key);
 static const char *yui_canonicalize_state_key(const char *key);
 static bool yui_binding_key_requires_screen_refresh(const char *key);
+static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, lv_obj_t *placeholder);
+static void yui_camera_preview_stop(void);
 
 typedef struct {
     const char *yaml_key;
@@ -359,9 +385,288 @@ static size_t s_modal_capacity;
 static yui_widget_ref_t *s_widget_refs;
 static size_t s_widget_ref_count;
 static size_t s_widget_ref_capacity;
+static yui_camera_preview_t s_camera_preview;
+static int64_t s_camera_preview_last_frame_us;
+
+#define YUI_CAMERA_PREVIEW_MIN_FRAME_INTERVAL_US (250000)
+#define YUI_CAMERA_PREVIEW_MAX_WIDTH 200U
+#define YUI_CAMERA_PREVIEW_MAX_HEIGHT 160U
+
+static void yui_camera_preview_apply_frame(void *ctx)
+{
+    (void)ctx;
+
+    if (!s_camera_preview.active || !s_camera_preview.image || !s_camera_preview.draw_buf || !s_camera_preview.frame_lock) {
+        s_camera_preview.update_queued = false;
+        return;
+    }
+
+    if (xSemaphoreTake(s_camera_preview.frame_lock, 0) == pdTRUE) {
+        if (s_camera_preview.frame_ready && s_camera_preview.staging_buf && s_camera_preview.draw_buf->data) {
+            memcpy(s_camera_preview.draw_buf->data, s_camera_preview.staging_buf, s_camera_preview.frame_len);
+            s_camera_preview.frame_ready = false;
+            lv_obj_remove_flag(s_camera_preview.image, LV_OBJ_FLAG_HIDDEN);
+            if (s_camera_preview.placeholder) {
+                lv_obj_add_flag(s_camera_preview.placeholder, LV_OBJ_FLAG_HIDDEN);
+            }
+            lv_obj_invalidate(s_camera_preview.image);
+        }
+        xSemaphoreGive(s_camera_preview.frame_lock);
+    }
+
+    s_camera_preview.update_queued = false;
+}
+
+static void yui_camera_preview_frame_cb(uint8_t *frame_buf,
+                                        uint8_t frame_index,
+                                        uint32_t width,
+                                        uint32_t height,
+                                        size_t frame_len)
+{
+    (void)frame_index;
+    (void)width;
+    (void)height;
+
+    if (!s_camera_preview.active || !frame_buf || !s_camera_preview.staging_buf || !s_camera_preview.frame_lock) {
+        return;
+    }
+
+    int64_t now_us = esp_timer_get_time();
+    if ((now_us - s_camera_preview_last_frame_us) < YUI_CAMERA_PREVIEW_MIN_FRAME_INTERVAL_US) {
+        return;
+    }
+
+    if (frame_len > s_camera_preview.frame_len) {
+        frame_len = s_camera_preview.frame_len;
+    }
+
+    if (xSemaphoreTake(s_camera_preview.frame_lock, 0) == pdTRUE) {
+        const uint32_t preview_w = s_camera_preview.frame_width;
+        const uint32_t preview_h = s_camera_preview.frame_height;
+        const uint32_t source_w = s_camera_preview.source_width;
+        const uint32_t source_h = s_camera_preview.source_height;
+        uint16_t *dst = (uint16_t *)s_camera_preview.staging_buf;
+        const uint16_t *src = (const uint16_t *)frame_buf;
+
+        for (uint32_t y = 0; y < preview_h; ++y) {
+            uint32_t src_y = (y * source_h) / preview_h;
+            const uint16_t *src_row = src + (src_y * source_w);
+            uint16_t *dst_row = dst + (y * preview_w);
+            for (uint32_t x = 0; x < preview_w; ++x) {
+                uint32_t src_x = (x * source_w) / preview_w;
+                dst_row[x] = src_row[src_x];
+            }
+        }
+        s_camera_preview.frame_ready = true;
+        s_camera_preview_last_frame_us = now_us;
+        xSemaphoreGive(s_camera_preview.frame_lock);
+    }
+
+    if (!s_camera_preview.update_queued) {
+        s_camera_preview.update_queued = true;
+        if (kc_touch_gui_dispatch(yui_camera_preview_apply_frame, NULL, 0) != ESP_OK) {
+            s_camera_preview.update_queued = false;
+        }
+    }
+}
+
+static void yui_camera_preview_stop(void)
+{
+    yui_camera_stream_register_frame_cb(NULL);
+
+    if (s_camera_preview.video_fd >= 0) {
+        if (s_camera_preview.stream_started) {
+            (void)yui_camera_stream_stop(s_camera_preview.video_fd);
+            (void)yui_camera_stream_wait_for_stop();
+        }
+        (void)yui_camera_stream_close(s_camera_preview.video_fd);
+        s_camera_preview.video_fd = -1;
+    }
+
+    if (s_camera_preview.draw_buf) {
+        if (s_camera_preview.draw_buf->unaligned_data) {
+            heap_caps_free(s_camera_preview.draw_buf->unaligned_data);
+        }
+        free(s_camera_preview.draw_buf);
+        s_camera_preview.draw_buf = NULL;
+    }
+    if (s_camera_preview.staging_buf) {
+        heap_caps_free(s_camera_preview.staging_buf);
+        s_camera_preview.staging_buf = NULL;
+    }
+    if (s_camera_preview.frame_lock) {
+        vSemaphoreDelete(s_camera_preview.frame_lock);
+        s_camera_preview.frame_lock = NULL;
+    }
+
+    s_camera_preview.container = NULL;
+    s_camera_preview.image = NULL;
+    s_camera_preview.placeholder = NULL;
+    s_camera_preview.frame_len = 0U;
+    s_camera_preview.frame_width = 0U;
+    s_camera_preview.frame_height = 0U;
+    s_camera_preview.source_width = 0U;
+    s_camera_preview.source_height = 0U;
+    s_camera_preview.frame_ready = false;
+    s_camera_preview.update_queued = false;
+    s_camera_preview.stream_started = false;
+    s_camera_preview.active = false;
+    s_camera_preview_last_frame_us = 0;
+}
+
+static void yui_camera_preview_delete_cb(lv_event_t *event)
+{
+    if (!event || lv_event_get_code(event) != LV_EVENT_DELETE) {
+        return;
+    }
+
+    lv_obj_t *target = lv_event_get_target(event);
+    if (target == s_camera_preview.container) {
+        yui_camera_preview_stop();
+    }
+}
+
+static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, lv_obj_t *placeholder)
+{
+    const char *preview_device = yui_camera_preview_device_path();
+
+    if (!container || !image || !placeholder) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!kc_touch_gui_camera_ready() || !yui_camera_is_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (s_camera_preview.active) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    int video_fd = yui_camera_stream_open(preview_device, YUI_CAMERA_FMT_RGB565);
+    if (video_fd < 0) {
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = yui_camera_stream_set_buffers(video_fd, 2, NULL);
+    if (err != ESP_OK) {
+        (void)yui_camera_stream_close(video_fd);
+        return err;
+    }
+
+    uint32_t width = 0U;
+    uint32_t height = 0U;
+    size_t frame_len = 0U;
+    err = yui_camera_stream_get_frame_info(&width, &height, &frame_len);
+    if (err != ESP_OK) {
+        (void)yui_camera_stream_close(video_fd);
+        return err;
+    }
+
+    uint32_t preview_width = width;
+    uint32_t preview_height = height;
+    if (preview_width > YUI_CAMERA_PREVIEW_MAX_WIDTH) {
+        preview_width = YUI_CAMERA_PREVIEW_MAX_WIDTH;
+        preview_height = (height * preview_width) / width;
+    }
+    if (preview_height > YUI_CAMERA_PREVIEW_MAX_HEIGHT) {
+        preview_height = YUI_CAMERA_PREVIEW_MAX_HEIGHT;
+        preview_width = (width * preview_height) / height;
+    }
+    if (preview_width == 0U) {
+        preview_width = 1U;
+    }
+    if (preview_height == 0U) {
+        preview_height = 1U;
+    }
+
+    uint32_t draw_buf_size = LV_DRAW_BUF_SIZE(preview_width, preview_height, LV_COLOR_FORMAT_RGB565);
+    lv_draw_buf_t *draw_buf = (lv_draw_buf_t *)calloc(1, sizeof(lv_draw_buf_t));
+    if (!draw_buf) {
+        (void)yui_camera_stream_close(video_fd);
+        return ESP_ERR_NO_MEM;
+    }
+
+    void *draw_mem = heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN,
+                                             draw_buf_size,
+                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!draw_mem) {
+        draw_mem = heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN, draw_buf_size, MALLOC_CAP_8BIT);
+    }
+    if (!draw_mem) {
+        free(draw_buf);
+        (void)yui_camera_stream_close(video_fd);
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (lv_draw_buf_init(draw_buf, preview_width, preview_height, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO, draw_mem, draw_buf_size) != LV_RESULT_OK) {
+        heap_caps_free(draw_mem);
+        free(draw_buf);
+        (void)yui_camera_stream_close(video_fd);
+        return ESP_FAIL;
+    }
+    lv_draw_buf_set_flag(draw_buf, LV_IMAGE_FLAGS_MODIFIABLE);
+
+    uint8_t *staging = (uint8_t *)heap_caps_malloc(draw_buf->data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!staging) {
+        staging = (uint8_t *)heap_caps_malloc(draw_buf->data_size, MALLOC_CAP_8BIT);
+    }
+    if (!staging) {
+        heap_caps_free(draw_mem);
+        free(draw_buf);
+        (void)yui_camera_stream_close(video_fd);
+        return ESP_ERR_NO_MEM;
+    }
+
+    SemaphoreHandle_t frame_lock = xSemaphoreCreateMutex();
+    if (!frame_lock) {
+        heap_caps_free(staging);
+        heap_caps_free(draw_mem);
+        free(draw_buf);
+        (void)yui_camera_stream_close(video_fd);
+        return ESP_ERR_NO_MEM;
+    }
+
+    memset(draw_buf->data, 0, draw_buf->data_size);
+    memset(staging, 0, draw_buf->data_size);
+
+    s_camera_preview.container = container;
+    s_camera_preview.image = image;
+    s_camera_preview.placeholder = placeholder;
+    s_camera_preview.draw_buf = draw_buf;
+    s_camera_preview.staging_buf = staging;
+    s_camera_preview.frame_len = draw_buf->data_size;
+    s_camera_preview.frame_width = preview_width;
+    s_camera_preview.frame_height = preview_height;
+    s_camera_preview.source_width = width;
+    s_camera_preview.source_height = height;
+    s_camera_preview.video_fd = video_fd;
+    s_camera_preview.frame_lock = frame_lock;
+    s_camera_preview.frame_ready = false;
+    s_camera_preview.update_queued = false;
+    s_camera_preview.stream_started = false;
+    s_camera_preview.active = true;
+
+    lv_image_set_src(image, draw_buf);
+    lv_obj_set_size(image, (int32_t)preview_width, (int32_t)preview_height);
+    lv_obj_center(image);
+    lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+
+    err = yui_camera_stream_register_frame_cb(yui_camera_preview_frame_cb);
+    if (err == ESP_OK) {
+        err = yui_camera_stream_start(video_fd, tskNO_AFFINITY);
+    }
+    if (err == ESP_OK) {
+        s_camera_preview.stream_started = true;
+    }
+    if (err != ESP_OK) {
+        yui_camera_preview_stop();
+        return err;
+    }
+
+    return ESP_OK;
+}
 
 static void yui_widget_refs_clear(void)
 {
+    yui_camera_preview_stop();
     if (s_widget_refs) {
         for (size_t i = 0; i < s_widget_ref_count; ++i) {
             free(s_widget_refs[i].id);
@@ -2003,6 +2308,49 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         if (runtime) {
             (void)yui_widget_bind_conditions(runtime, node, label);
             (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+    }
+    if (strcmp(type, "camera_preview") == 0) {
+        lv_obj_t *container = lv_obj_create(parent);
+        yui_register_widget_id(node, container);
+        lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_clip_corner(container, true, 0);
+        lv_obj_set_style_pad_all(container, 0, 0);
+        lv_obj_set_style_border_width(container, 0, 0);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(container, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(container, 240);
+        }
+        yui_apply_common_widget_attrs(container, node, schema);
+
+        lv_obj_t *image = lv_image_create(container);
+        lv_image_set_inner_align(image, LV_IMAGE_ALIGN_CENTER);
+        lv_obj_center(image);
+
+        lv_obj_t *placeholder = lv_label_create(container);
+        lv_label_set_text(placeholder, kc_touch_gui_camera_ready() ? "Starting camera preview..." : "Camera unavailable");
+        const yui_style_t *placeholder_style = yui_resolve_style(&schema->schema, "body");
+        if (placeholder_style) {
+            yui_apply_style(placeholder, placeholder_style);
+        }
+        lv_obj_center(placeholder);
+
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(container, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, container);
+        }
+        lv_obj_add_event_cb(container, yui_camera_preview_delete_cb, LV_EVENT_DELETE, NULL);
+
+        esp_err_t preview_err = yui_camera_preview_start(container, image, placeholder);
+        if (preview_err != ESP_OK) {
+            yamui_log(YAMUI_LOG_LEVEL_WARN,
+                      YAMUI_LOG_CAT_LVGL,
+                      "camera_preview unavailable (%s)",
+                      esp_err_to_name(preview_err));
+            lv_label_set_text(placeholder, "Camera preview unavailable");
         }
         return ESP_OK;
     }

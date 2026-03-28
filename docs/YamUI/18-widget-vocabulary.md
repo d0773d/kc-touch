@@ -111,7 +111,31 @@ lv_img_create(parent);
 
 ---
 
-## 2.4 `spacer`
+## 2.4 `camera_preview`
+
+Displays a live camera feed using the active board camera service.
+
+```yaml
+- type: camera_preview
+  height: 260
+```
+
+Supports:
+
+- `width`
+- `height`
+- `style`
+- `visible`
+
+LVGL mapping:
+
+```c
+lv_image_create(parent);
+```
+
+---
+
+## 2.5 `spacer`
 
 Adds vertical or horizontal space.
 

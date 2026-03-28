@@ -1,6 +1,8 @@
 #include "yui_camera.h"
 
+#include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -56,6 +58,28 @@ static uint32_t yui_camera_to_v4l2_format(yui_camera_pixel_format_t format)
     }
 }
 
+static const char *yui_camera_v4l2_format_name(uint32_t format)
+{
+    switch (format) {
+    case V4L2_PIX_FMT_SBGGR8:
+        return "SBGGR8";
+    case V4L2_PIX_FMT_SBGGR10:
+        return "SBGGR10";
+    case V4L2_PIX_FMT_GREY:
+        return "GREY";
+    case V4L2_PIX_FMT_RGB565:
+        return "RGB565";
+    case V4L2_PIX_FMT_RGB24:
+        return "RGB24";
+    case V4L2_PIX_FMT_YUV422P:
+        return "YUV422P";
+    case V4L2_PIX_FMT_YUV420:
+        return "YUV420";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 int yui_camera_stream_open(const char *device_path, yui_camera_pixel_format_t init_fmt)
 {
     if (!device_path) {
@@ -66,27 +90,34 @@ int yui_camera_stream_open(const char *device_path, yui_camera_pixel_format_t in
     struct v4l2_capability capability = {0};
     const int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
-    int fd = open(device_path, O_RDONLY);
+    int fd = open(device_path, O_RDWR);
     if (fd < 0) {
-        ESP_LOGE(TAG, "Open video device failed: %s", device_path);
+        ESP_LOGE(TAG, "Open video device failed: %s errno=%d (%s)", device_path, errno, strerror(errno));
         return -1;
     }
 
     if (ioctl(fd, VIDIOC_QUERYCAP, &capability) != 0) {
-        ESP_LOGE(TAG, "failed to query capability");
+        ESP_LOGE(TAG, "failed to query capability errno=%d (%s)", errno, strerror(errno));
         close(fd);
         return -1;
     }
 
     default_format.type = type;
     if (ioctl(fd, VIDIOC_G_FMT, &default_format) != 0) {
-        ESP_LOGE(TAG, "failed to get format");
+        ESP_LOGE(TAG, "failed to get format errno=%d (%s)", errno, strerror(errno));
         close(fd);
         return -1;
     }
 
     s_stream.camera_buf_width = default_format.fmt.pix.width;
     s_stream.camera_buf_height = default_format.fmt.pix.height;
+    ESP_LOGI(TAG,
+             "device=%s default fmt=%s (%" PRIu32 ") %" PRIu32 "x%" PRIu32,
+             device_path,
+             yui_camera_v4l2_format_name(default_format.fmt.pix.pixelformat),
+             default_format.fmt.pix.pixelformat,
+             default_format.fmt.pix.width,
+             default_format.fmt.pix.height);
 
     const uint32_t pixel_format = yui_camera_to_v4l2_format(init_fmt);
     if (default_format.fmt.pix.pixelformat != pixel_format) {
@@ -98,10 +129,33 @@ int yui_camera_stream_open(const char *device_path, yui_camera_pixel_format_t in
         };
 
         if (ioctl(fd, VIDIOC_S_FMT, &format) != 0) {
-            ESP_LOGE(TAG, "failed to set format");
+            ESP_LOGE(TAG,
+                     "failed to set format %s (%" PRIu32 ") on %s errno=%d (%s)",
+                     yui_camera_v4l2_format_name(pixel_format),
+                     pixel_format,
+                     device_path,
+                     errno,
+                     strerror(errno));
             close(fd);
             return -1;
         }
+
+        memset(&default_format, 0, sizeof(default_format));
+        default_format.type = type;
+        if (ioctl(fd, VIDIOC_G_FMT, &default_format) != 0) {
+            ESP_LOGE(TAG, "failed to re-read format errno=%d (%s)", errno, strerror(errno));
+            close(fd);
+            return -1;
+        }
+        s_stream.camera_buf_width = default_format.fmt.pix.width;
+        s_stream.camera_buf_height = default_format.fmt.pix.height;
+        ESP_LOGI(TAG,
+                 "device=%s active fmt=%s (%" PRIu32 ") %" PRIu32 "x%" PRIu32,
+                 device_path,
+                 yui_camera_v4l2_format_name(default_format.fmt.pix.pixelformat),
+                 default_format.fmt.pix.pixelformat,
+                 default_format.fmt.pix.width,
+                 default_format.fmt.pix.height);
     }
 
     if (!s_stream.stop_sem) {
@@ -109,6 +163,21 @@ int yui_camera_stream_open(const char *device_path, yui_camera_pixel_format_t in
     }
 
     return fd;
+}
+
+esp_err_t yui_camera_stream_get_frame_info(uint32_t *width, uint32_t *height, size_t *frame_len)
+{
+    if (!width || !height || !frame_len) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_stream.camera_buf_width == 0U || s_stream.camera_buf_height == 0U || s_stream.camera_buf_size == 0U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    *width = s_stream.camera_buf_width;
+    *height = s_stream.camera_buf_height;
+    *frame_len = s_stream.camera_buf_size;
+    return ESP_OK;
 }
 
 esp_err_t yui_camera_stream_set_buffers(int video_fd, uint32_t fb_num, const void **fb)
@@ -124,7 +193,7 @@ esp_err_t yui_camera_stream_set_buffers(int video_fd, uint32_t fb_num, const voi
     s_stream.camera_mem_mode = req.memory = fb ? V4L2_MEMORY_USERPTR : V4L2_MEMORY_MMAP;
 
     if (ioctl(video_fd, VIDIOC_REQBUFS, &req) != 0) {
-        ESP_LOGE(TAG, "request buffers failed");
+        ESP_LOGE(TAG, "request buffers failed errno=%d (%s)", errno, strerror(errno));
         close(video_fd);
         return ESP_FAIL;
     }
@@ -136,7 +205,7 @@ esp_err_t yui_camera_stream_set_buffers(int video_fd, uint32_t fb_num, const voi
         buf.index = i;
 
         if (ioctl(video_fd, VIDIOC_QUERYBUF, &buf) != 0) {
-            ESP_LOGE(TAG, "query buffer failed");
+            ESP_LOGE(TAG, "query buffer failed errno=%d (%s)", errno, strerror(errno));
             close(video_fd);
             return ESP_FAIL;
         }
@@ -144,7 +213,7 @@ esp_err_t yui_camera_stream_set_buffers(int video_fd, uint32_t fb_num, const voi
         if (req.memory == V4L2_MEMORY_MMAP) {
             s_stream.camera_buffer[i] = mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, video_fd, buf.m.offset);
             if (!s_stream.camera_buffer[i]) {
-                ESP_LOGE(TAG, "mmap failed");
+                ESP_LOGE(TAG, "mmap failed errno=%d (%s)", errno, strerror(errno));
                 close(video_fd);
                 return ESP_FAIL;
             }
@@ -161,11 +230,18 @@ esp_err_t yui_camera_stream_set_buffers(int video_fd, uint32_t fb_num, const voi
         s_stream.camera_buf_size = buf.length;
 
         if (ioctl(video_fd, VIDIOC_QBUF, &buf) != 0) {
-            ESP_LOGE(TAG, "queue frame buffer failed");
+            ESP_LOGE(TAG, "queue frame buffer failed errno=%d (%s)", errno, strerror(errno));
             close(video_fd);
             return ESP_FAIL;
         }
     }
+
+    ESP_LOGI(TAG,
+             "configured %u buffers, frame_len=%u, size=%" PRIu32 "x%" PRIu32,
+             (unsigned)fb_num,
+             (unsigned)s_stream.camera_buf_size,
+             s_stream.camera_buf_width,
+             s_stream.camera_buf_height);
 
     return ESP_OK;
 }
@@ -223,7 +299,7 @@ static void yui_camera_dispatch_frame(void)
 
 static void yui_camera_stream_task(void *arg)
 {
-    int video_fd = *((int *)arg);
+    int video_fd = (int)(intptr_t)arg;
 
     while (true) {
         ESP_ERROR_CHECK(yui_camera_receive_frame(video_fd));
@@ -243,12 +319,12 @@ static void yui_camera_stream_task(void *arg)
 esp_err_t yui_camera_stream_start(int video_fd, int core_id)
 {
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ESP_RETURN_ON_FALSE(ioctl(video_fd, VIDIOC_STREAMON, &type) == 0, ESP_FAIL, TAG, "start stream");
+    ESP_RETURN_ON_FALSE(ioctl(video_fd, VIDIOC_STREAMON, &type) == 0, ESP_FAIL, TAG, "start stream errno=%d (%s)", errno, strerror(errno));
 
     BaseType_t result = xTaskCreatePinnedToCore(yui_camera_stream_task,
                                                 "yui_cam_stream",
                                                 YUI_CAMERA_TASK_STACK_SIZE,
-                                                &video_fd,
+                                                (void *)(intptr_t)video_fd,
                                                 YUI_CAMERA_TASK_PRIORITY,
                                                 &s_stream.stream_task_handle,
                                                 core_id);

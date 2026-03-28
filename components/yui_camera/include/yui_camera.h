@@ -30,8 +30,10 @@ esp_err_t yui_camera_init(void);
 esp_err_t yui_camera_deinit(void);
 bool yui_camera_is_ready(void);
 const char *yui_camera_device_path(void);
+const char *yui_camera_preview_device_path(void);
 
 int yui_camera_stream_open(const char *device_path, yui_camera_pixel_format_t init_fmt);
+esp_err_t yui_camera_stream_get_frame_info(uint32_t *width, uint32_t *height, size_t *frame_len);
 esp_err_t yui_camera_stream_set_buffers(int video_fd, uint32_t fb_num, const void **fb);
 esp_err_t yui_camera_stream_get_buffers(int fb_num, void **fb);
 esp_err_t yui_camera_stream_register_frame_cb(yui_camera_frame_cb_t frame_cb);

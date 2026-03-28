@@ -38,6 +38,7 @@ translations:
       cards.humidity: "Humidity"
       cards.pressure: "Pressure"
       panel.controls: "Interactive Controls"
+      panel.camera: "Camera Preview"
       panel.profile: "Profile"
       panel.activity: "Recent Activity"
       actions.sync: "Trigger Sync"
@@ -78,6 +79,7 @@ translations:
       cards.humidity: "Humedad"
       cards.pressure: "Presión"
       panel.controls: "Controles interactivos"
+      panel.camera: "Vista de cÃ¡mara"
       panel.profile: "Perfil"
       panel.activity: "Actividad reciente"
       actions.sync: "Iniciar sincronización"
@@ -455,6 +457,17 @@ screens:
                 max: 100
                 value: "{{state.display.brightness}}"
                 on_change: set(display.brightness, {{value}})
+
+          - type: panel
+            style: card
+            props:
+              title_key: "panel.camera"
+            layout:
+              type: column
+              gap: 8
+            widgets:
+              - type: camera_preview
+                height: 260
 
           - type: row
             layout:

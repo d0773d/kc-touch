@@ -240,3 +240,10 @@ const char *yui_camera_device_path(void)
     return NULL;
 #endif
 }
+
+const char *yui_camera_preview_device_path(void)
+{
+    /* esp_video's ISP node is metadata/statistics-oriented on this platform.
+     * Live preview frames still come from the camera capture device path. */
+    return yui_camera_device_path();
+}

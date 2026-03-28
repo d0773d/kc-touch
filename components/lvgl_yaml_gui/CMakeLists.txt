@@ -7,5 +7,5 @@ idf_component_register(
         "src/fonts/yui_font_20.c"
         "src/fonts/yui_font_32.c"
     INCLUDE_DIRS "include"
-    REQUIRES yaml_core yaml_ui ui_schemas sensor_manager kc_touch_display lvgl esp_timer
+    REQUIRES yaml_core yaml_ui ui_schemas sensor_manager kc_touch_display kc_touch_gui yui_camera lvgl esp_timer
 )
