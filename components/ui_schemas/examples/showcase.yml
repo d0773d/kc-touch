@@ -11,6 +11,7 @@ state:
   ui:
     dark_mode: "false"
     locale: "en"
+    keyboard_visible: "false"
     brightness: "72"
     temperature: "22"
     humidity: "48"
@@ -483,12 +484,9 @@ screens:
                     id: profile-note
                     text: "{{state.profile.note}}"
                     placeholder_key: "labels.profile_note"
+                    on_focus: set(ui.keyboard_visible, true)
+                    on_blur: set(ui.keyboard_visible, false)
                     on_change: set(profile.note, {{value}})
-                  - type: label
-                    text_key: "labels.keyboard"
-                    style: stat-label
-                  - type: keyboard
-                    target: profile-note
               - type: panel
                 grow: 1
                 style: card
@@ -509,12 +507,27 @@ screens:
                         text_key: "activity.two"
                       - type: label
                         text_key: "activity.three"
-                  - type: label
-                    text: "{{labels.sync_count}}: {{state.ui.sync_count}}"
-                    style: stat-label
+                  - type: row
+                    layout:
+                      type: row
+                      gap: 8
+                      align: center
+                    widgets:
+                      - type: label
+                        text_key: "labels.sync_count"
+                        style: stat-label
+                      - type: label
+                        text: "{{state.ui.sync_count}}"
+                        style: body
                   - type: label
                     text_key: "{{state.welcome_message}}"
                     style: body
+
+          - type: keyboard
+            overlay: true
+            visible_if: state.ui.keyboard_visible
+            height: 300
+            target: profile-note
 
   details:
     name: details

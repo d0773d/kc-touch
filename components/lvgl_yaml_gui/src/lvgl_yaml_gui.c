@@ -2271,9 +2271,23 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
     }
     if (strcmp(type, "keyboard") == 0) {
 #if LV_USE_KEYBOARD
-        lv_obj_t *kb = lv_keyboard_create(parent);
+        bool overlay = yui_node_resolved_bool(node, "overlay", scope, false);
+        lv_obj_t *kb_parent = overlay ? lv_obj_get_screen(parent) : parent;
+        lv_obj_t *kb = lv_keyboard_create(kb_parent);
         yui_register_widget_id(node, kb);
         yui_apply_common_widget_attrs(kb, node, schema);
+        if (overlay) {
+            if (!yui_node_has_child(node, "width")) {
+                lv_obj_set_width(kb, LV_PCT(100));
+            }
+            if (!yui_node_has_child(node, "height")) {
+                lv_obj_set_height(kb, 300);
+            }
+            lv_obj_add_flag(kb, LV_OBJ_FLAG_FLOATING);
+            lv_obj_add_flag(kb, LV_OBJ_FLAG_IGNORE_LAYOUT);
+            lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+            lv_obj_move_foreground(kb);
+        }
         const char *target_id = yui_node_scalar(node, "target");
         if (target_id && target_id[0] != '\0') {
             lv_obj_t *target_obj = yui_widget_ref_find(target_id);
