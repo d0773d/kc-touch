@@ -12,6 +12,7 @@ state:
     dark_mode: "false"
     locale: "en"
     keyboard_visible: "false"
+    alerts_enabled: "true"
     temperature: "22"
     humidity: "48"
     pressure: "1012"
@@ -48,6 +49,7 @@ translations:
       actions.spanish: "Español"
       labels.theme: "Dark Theme"
       labels.auto_start: "Auto-start"
+      labels.alerts: "Enable Alerts"
       labels.security: "Security"
       labels.brightness: "Brightness"
       labels.profile_name: "Node Name"
@@ -89,6 +91,7 @@ translations:
       actions.spanish: "Español"
       labels.theme: "Tema oscuro"
       labels.auto_start: "Inicio automático"
+      labels.alerts: "Habilitar alertas"
       labels.security: "Seguridad"
       labels.brightness: "Brillo"
       labels.profile_name: "Nombre del nodo"
@@ -415,6 +418,10 @@ screens:
                   - type: switch
                     value: "{{state.network.auto_start}}"
                     on_change: set(network.auto_start, {{checked}})
+                  - type: checkbox
+                    text_key: "labels.alerts"
+                    value: "{{state.ui.alerts_enabled}}"
+                    on_change: set(ui.alerts_enabled, {{checked}})
                   - type: spacer
                     size: 16
                   - type: label

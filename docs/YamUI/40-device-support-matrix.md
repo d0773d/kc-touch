@@ -40,7 +40,7 @@ Companion export format to that contract.
 | `component` | partial | Runtime component system works with current YamUI prop convention, but does not yet match the Companion's richer component schema 1:1. |
 | `list` | partial | Companion emits it; runtime support path is not yet proven as a first-class device widget contract. |
 | `spacer` | missing | Present in Companion type system, not implemented in current device renderer. |
-| `checkbox` | missing | Not yet implemented in current device renderer. |
+| `checkbox` | working | Checked state and `{{checked}}` event binding work like other boolean inputs. |
 
 ## Layout Support
 

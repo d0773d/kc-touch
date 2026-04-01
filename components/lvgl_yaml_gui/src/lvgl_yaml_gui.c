@@ -38,6 +38,7 @@ typedef enum {
     YUI_VALUE_BIND_NONE = 0,
     YUI_VALUE_BIND_TEXTAREA,
     YUI_VALUE_BIND_SWITCH,
+    YUI_VALUE_BIND_CHECKBOX,
     YUI_VALUE_BIND_SLIDER,
     YUI_VALUE_BIND_BAR,
     YUI_VALUE_BIND_ARC,
@@ -1437,7 +1438,8 @@ static void yui_widget_refresh_value(yui_widget_runtime_t *runtime)
             lv_textarea_set_text(runtime->value_target, buffer);
 #endif
             break;
-        case YUI_VALUE_BIND_SWITCH: {
+        case YUI_VALUE_BIND_SWITCH:
+        case YUI_VALUE_BIND_CHECKBOX: {
             bool checked = yui_parse_bool(buffer, false);
             if (checked) {
                 lv_obj_add_state(runtime->value_target, LV_STATE_CHECKED);
@@ -2472,6 +2474,34 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
 #else
         yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'switch' unavailable: LV_USE_SWITCH=0");
+        return ESP_OK;
+#endif
+    }
+    if (strcmp(type, "checkbox") == 0) {
+#if LV_USE_CHECKBOX
+        lv_obj_t *cb = lv_checkbox_create(parent);
+        yui_register_widget_id(node, cb);
+        yui_apply_common_widget_attrs(cb, node, schema);
+        char text_buf[YUI_TEXT_BUFFER_MAX];
+        const char *text = yui_node_resolved_localized_scalar(node, "text", "text_key", scope, text_buf, sizeof(text_buf));
+        if (text) {
+            lv_checkbox_set_text(cb, text);
+        }
+        if (yui_node_resolved_bool(node, "value", scope, false)) {
+            lv_obj_add_state(cb, LV_STATE_CHECKED);
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(cb, scope);
+        if (runtime) {
+            const char *value_tmpl = yui_node_scalar(node, "value");
+            if (value_tmpl) {
+                (void)yui_widget_bind_value(runtime, value_tmpl, cb, YUI_VALUE_BIND_CHECKBOX);
+            }
+            (void)yui_widget_bind_conditions(runtime, node, cb);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'checkbox' unavailable: LV_USE_CHECKBOX=0");
         return ESP_OK;
 #endif
     }

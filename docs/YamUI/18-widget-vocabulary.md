@@ -220,7 +220,26 @@ lv_switch_create(parent);
 
 ---
 
-## 3.4 `slider`
+## 3.4 `checkbox`
+
+Checkbox with integrated label text.
+
+```yaml
+- type: checkbox
+  text: "Enable Alerts"
+  value: "{{settings.alerts}}"
+  on_change: set(settings.alerts, {{checked}})
+```
+
+LVGL mapping:
+
+```c
+lv_checkbox_create(parent);
+```
+
+---
+
+## 3.5 `slider`
 
 Slider control.
 
