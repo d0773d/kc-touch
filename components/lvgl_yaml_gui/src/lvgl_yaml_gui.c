@@ -143,7 +143,6 @@ static const yui_style_t *yui_resolve_style(const yui_schema_t *schema, const ch
 static const yml_node_t *yui_find_event_node(const yml_node_t *node, const char *yaml_key, const char *companion_key);
 static const char *yui_translate_key(const char *key);
 static const char *yui_canonicalize_state_key(const char *key);
-static bool yui_binding_key_requires_screen_refresh(const char *key);
 static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, lv_obj_t *placeholder);
 static void yui_camera_preview_stop(void);
 
@@ -195,15 +194,6 @@ static const char *yui_canonicalize_state_key(const char *key)
         return key + 6;
     }
     return key;
-}
-
-static bool yui_binding_key_requires_screen_refresh(const char *key)
-{
-    const char *canonical = yui_canonicalize_state_key(key);
-    if (!canonical || canonical[0] == '\0') {
-        return false;
-    }
-    return strcmp(canonical, "ui.sync_count") == 0 || strcmp(canonical, "welcome_message") == 0;
 }
 
 static const char *yui_symbol_lookup(const char *name)
@@ -1399,10 +1389,6 @@ static void yui_widget_refresh_text(yui_widget_runtime_t *runtime)
     }
     char buffer[YUI_TEXT_BUFFER_MAX];
     yui_format_text(runtime->text_template, runtime->scope, buffer, sizeof(buffer));
-    if (strstr(runtime->text_template, "sync_count") != NULL) {
-        yamui_log(YAMUI_LOG_LEVEL_INFO, YAMUI_LOG_CAT_LVGL, "refresh_text tmpl='%s' value='%s'",
-                  runtime->text_template, buffer);
-    }
     lv_label_set_text(runtime->text_target, buffer);
     lv_obj_mark_layout_as_dirty(runtime->text_target);
     lv_obj_invalidate(runtime->text_target);
@@ -1593,16 +1579,9 @@ static void yui_widget_refresh_binding_async_cb(void *user_data)
 static void yui_widget_state_cb(const char *key, const char *value, void *user_ctx)
 {
     (void)value;
+    (void)key;
     yui_widget_runtime_t *runtime = (yui_widget_runtime_t *)user_ctx;
     if (!runtime || runtime->disposed) {
-        return;
-    }
-    if (runtime->text_template && strstr(runtime->text_template, "sync_count") != NULL) {
-        yamui_log(YAMUI_LOG_LEVEL_INFO, YAMUI_LOG_CAT_LVGL, "state_cb key='%s' value='%s' tmpl='%s'",
-                  key ? key : "", value ? value : "", runtime->text_template);
-    }
-    if (runtime->text_template && yui_binding_key_requires_screen_refresh(key)) {
-        (void)yui_nav_queue_submit(YUI_NAV_REQUEST_REFRESH, NULL);
         return;
     }
     if (lv_async_call(yui_widget_refresh_binding_async_cb, runtime) != LV_RESULT_OK) {
@@ -2188,6 +2167,12 @@ static void yui_apply_common_widget_attrs(lv_obj_t *obj, const yml_node_t *node,
 {
     if (!obj || !node || !schema) {
         return;
+    }
+    const char *widget_type = yui_node_scalar(node, "type");
+    const char *theme_style_name = yui_schema_get_theme_default_style(&schema->schema, widget_type);
+    if (theme_style_name) {
+        const yui_style_t *theme_style = yui_resolve_style(&schema->schema, theme_style_name);
+        yui_apply_style(obj, theme_style);
     }
     const char *style_name = yui_node_scalar(node, "style");
     if (style_name) {

@@ -112,6 +112,14 @@ translations:
       activity.three: "Traducciones cargadas"
     metadata: {}
 
+theme:
+  defaults:
+    label: body
+    panel: card
+    button: ghost
+    textarea: card
+    keyboard: card
+
 styles:
   light.card:
     name: "Card"

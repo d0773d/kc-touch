@@ -167,6 +167,15 @@ static esp_err_t yui_parse_app(const yml_node_t *node, yui_schema_t *schema)
     return ESP_OK;
 }
 
+static void yui_kv_pair_free(yui_kv_pair_t *pair)
+{
+    if (!pair) {
+        return;
+    }
+    free(pair->name);
+    free(pair->value);
+}
+
 static void yui_style_free(yui_style_t *style)
 {
     if (!style) {
@@ -178,6 +187,69 @@ static void yui_style_free(yui_style_t *style)
     free(style->accent_color);
     free(style->text_font);
     free(style->align);
+}
+
+static esp_err_t yui_parse_theme_defaults(const yml_node_t *node, yui_schema_t *schema)
+{
+    if (!schema) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!node) {
+        return ESP_OK;
+    }
+    if (!yui_node_is_mapping(node)) {
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "theme defaults must be a mapping");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t count = yml_node_child_count(node);
+    if (count == 0U) {
+        return ESP_OK;
+    }
+
+    schema->theme_defaults = (yui_kv_pair_t *)calloc(count, sizeof(yui_kv_pair_t));
+    if (!schema->theme_defaults) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t idx = 0U;
+    for (const yml_node_t *child = yml_node_child_at(node, 0); child; child = yml_node_next(child)) {
+        const char *widget_type = yml_node_get_key(child);
+        const char *style_name = yml_node_get_scalar(child);
+        if (!widget_type || !style_name || style_name[0] == '\0') {
+            continue;
+        }
+
+        schema->theme_defaults[idx].name = yui_strdup(widget_type);
+        schema->theme_defaults[idx].value = yui_strdup(style_name);
+        if (!schema->theme_defaults[idx].name || !schema->theme_defaults[idx].value) {
+            return ESP_ERR_NO_MEM;
+        }
+        idx++;
+    }
+
+    schema->theme_default_count = idx;
+    return ESP_OK;
+}
+
+static esp_err_t yui_parse_theme(const yml_node_t *node, yui_schema_t *schema)
+{
+    if (!schema) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!node) {
+        return ESP_OK;
+    }
+    if (!yui_node_is_mapping(node)) {
+        yamui_log(YAMUI_LOG_LEVEL_ERROR, YAMUI_LOG_CAT_PARSER, "theme block must be a mapping");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const yml_node_t *defaults_node = yml_node_get_child(node, "defaults");
+    if (!defaults_node) {
+        defaults_node = yml_node_get_child(node, "widgets");
+    }
+    return yui_parse_theme_defaults(defaults_node, schema);
 }
 
 static void yui_translation_locale_free(yui_translation_locale_t *locale)
@@ -499,6 +571,13 @@ esp_err_t yui_schema_from_tree(const yml_node_t *root, yui_schema_t *out_schema)
         return err;
     }
 
+    out_schema->theme_node = yml_node_get_child(root, "theme");
+    err = yui_parse_theme(out_schema->theme_node, out_schema);
+    if (err != ESP_OK) {
+        yui_schema_free(out_schema);
+        return err;
+    }
+
     out_schema->styles_node = yml_node_get_child(root, "styles");
     err = yui_parse_styles(out_schema->styles_node, out_schema);
     if (err != ESP_OK) {
@@ -538,6 +617,15 @@ void yui_schema_free(yui_schema_t *schema)
     free(schema->app.locale);
     schema->app.locale = NULL;
 
+    if (schema->theme_defaults) {
+        for (size_t i = 0; i < schema->theme_default_count; ++i) {
+            yui_kv_pair_free(&schema->theme_defaults[i]);
+        }
+        free(schema->theme_defaults);
+    }
+    schema->theme_defaults = NULL;
+    schema->theme_default_count = 0U;
+
     if (schema->styles) {
         for (size_t i = 0; i < schema->style_count; ++i) {
             yui_style_free(&schema->styles[i]);
@@ -566,6 +654,7 @@ void yui_schema_free(yui_schema_t *schema)
     schema->component_count = 0;
 
     schema->root = NULL;
+    schema->theme_node = NULL;
     schema->styles_node = NULL;
     schema->components_node = NULL;
     schema->screens_node = NULL;
@@ -601,6 +690,19 @@ const yui_style_t *yui_schema_get_style(const yui_schema_t *schema, const char *
     for (size_t i = 0; i < schema->style_count; ++i) {
         if (schema->styles[i].name && strcmp(schema->styles[i].name, name) == 0) {
             return &schema->styles[i];
+        }
+    }
+    return NULL;
+}
+
+const char *yui_schema_get_theme_default_style(const yui_schema_t *schema, const char *widget_type)
+{
+    if (!schema || !schema->theme_defaults || !widget_type) {
+        return NULL;
+    }
+    for (size_t i = 0; i < schema->theme_default_count; ++i) {
+        if (schema->theme_defaults[i].name && strcmp(schema->theme_defaults[i].name, widget_type) == 0) {
+            return schema->theme_defaults[i].value;
         }
     }
     return NULL;
