@@ -13,6 +13,7 @@
 #include "yaml_ui.h"
 #include "yamui_events.h"
 #include "yamui_expr.h"
+#include "yamui_async.h"
 #include "yamui_logging.h"
 #include "yamui_runtime.h"
 #include "yamui_state.h"
@@ -65,6 +66,7 @@ typedef struct {
     lv_obj_t *container;
     lv_obj_t *image;
     lv_obj_t *placeholder;
+    lv_obj_t *scroll_host;
     lv_draw_buf_t *draw_buf;
     uint8_t *staging_buf;
     size_t frame_len;
@@ -78,6 +80,7 @@ typedef struct {
     bool frame_ready;
     bool update_queued;
     bool active;
+    bool suspended;
 } yui_camera_preview_t;
 
 struct yui_component_prop {
@@ -146,6 +149,8 @@ static const char *yui_translate_key(const char *key);
 static const char *yui_canonicalize_state_key(const char *key);
 static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, lv_obj_t *placeholder);
 static void yui_camera_preview_stop(void);
+static void yui_expr_value_set_coerced_scalar(yui_expr_value_t *out, const char *value);
+static lv_obj_t *yui_find_scroll_host(lv_obj_t *obj);
 
 typedef struct {
     const char *yaml_key;
@@ -391,6 +396,10 @@ static void yui_camera_preview_apply_frame(void *ctx)
         s_camera_preview.update_queued = false;
         return;
     }
+    if (s_camera_preview.suspended) {
+        s_camera_preview.update_queued = false;
+        return;
+    }
 
     if (xSemaphoreTake(s_camera_preview.frame_lock, 0) == pdTRUE) {
         if (s_camera_preview.frame_ready && s_camera_preview.staging_buf && s_camera_preview.draw_buf->data) {
@@ -418,7 +427,7 @@ static void yui_camera_preview_frame_cb(uint8_t *frame_buf,
     (void)width;
     (void)height;
 
-    if (!s_camera_preview.active || !frame_buf || !s_camera_preview.staging_buf || !s_camera_preview.frame_lock) {
+    if (!s_camera_preview.active || s_camera_preview.suspended || !frame_buf || !s_camera_preview.staging_buf || !s_camera_preview.frame_lock) {
         return;
     }
 
@@ -493,6 +502,7 @@ static void yui_camera_preview_stop(void)
     s_camera_preview.container = NULL;
     s_camera_preview.image = NULL;
     s_camera_preview.placeholder = NULL;
+    s_camera_preview.scroll_host = NULL;
     s_camera_preview.frame_len = 0U;
     s_camera_preview.frame_width = 0U;
     s_camera_preview.frame_height = 0U;
@@ -502,7 +512,49 @@ static void yui_camera_preview_stop(void)
     s_camera_preview.update_queued = false;
     s_camera_preview.stream_started = false;
     s_camera_preview.active = false;
+    s_camera_preview.suspended = false;
     s_camera_preview_last_frame_us = 0;
+}
+
+static void yui_camera_preview_scroll_cb(lv_event_t *event)
+{
+    if (!event || !s_camera_preview.active) {
+        return;
+    }
+
+    lv_obj_t *target = lv_event_get_target(event);
+    if (target != s_camera_preview.scroll_host) {
+        return;
+    }
+
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_SCROLL_BEGIN) {
+        s_camera_preview.suspended = true;
+        s_camera_preview.update_queued = false;
+        return;
+    }
+
+    if (code == LV_EVENT_SCROLL_END) {
+        s_camera_preview.suspended = false;
+        if (s_camera_preview.frame_ready && !s_camera_preview.update_queued) {
+            s_camera_preview.update_queued = true;
+            if (kc_touch_gui_dispatch(yui_camera_preview_apply_frame, NULL, 0) != ESP_OK) {
+                s_camera_preview.update_queued = false;
+            }
+        }
+    }
+}
+
+static lv_obj_t *yui_find_scroll_host(lv_obj_t *obj)
+{
+    lv_obj_t *cursor = obj;
+    while (cursor) {
+        if (lv_obj_has_flag(cursor, LV_OBJ_FLAG_SCROLLABLE)) {
+            return cursor;
+        }
+        cursor = lv_obj_get_parent(cursor);
+    }
+    return NULL;
 }
 
 static void yui_camera_preview_delete_cb(lv_event_t *event)
@@ -621,6 +673,7 @@ static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, 
     s_camera_preview.container = container;
     s_camera_preview.image = image;
     s_camera_preview.placeholder = placeholder;
+    s_camera_preview.scroll_host = yui_find_scroll_host(container);
     s_camera_preview.draw_buf = draw_buf;
     s_camera_preview.staging_buf = staging;
     s_camera_preview.frame_len = draw_buf->data_size;
@@ -634,6 +687,7 @@ static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, 
     s_camera_preview.update_queued = false;
     s_camera_preview.stream_started = false;
     s_camera_preview.active = true;
+    s_camera_preview.suspended = false;
 
     lv_image_set_src(image, draw_buf);
     lv_obj_set_size(image, (int32_t)preview_width, (int32_t)preview_height);
@@ -650,6 +704,11 @@ static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, 
     if (err != ESP_OK) {
         yui_camera_preview_stop();
         return err;
+    }
+
+    if (s_camera_preview.scroll_host) {
+        lv_obj_add_event_cb(s_camera_preview.scroll_host, yui_camera_preview_scroll_cb, LV_EVENT_SCROLL_BEGIN, NULL);
+        lv_obj_add_event_cb(s_camera_preview.scroll_host, yui_camera_preview_scroll_cb, LV_EVENT_SCROLL_END, NULL);
     }
 
     return ESP_OK;
@@ -994,8 +1053,42 @@ static bool yui_expression_symbol_resolver(const char *identifier, void *ctx, yu
     if (!value) {
         value = "";
     }
-    yui_expr_value_set_string_ref(out, value);
+    yui_expr_value_set_coerced_scalar(out, value);
     return true;
+}
+
+static void yui_expr_value_set_coerced_scalar(yui_expr_value_t *out, const char *value)
+{
+    if (!out) {
+        return;
+    }
+    if (!value) {
+        yui_expr_value_set_string_ref(out, "");
+        return;
+    }
+
+    if (strcasecmp(value, "true") == 0) {
+        yui_expr_value_set_bool(out, true);
+        return;
+    }
+    if (strcasecmp(value, "false") == 0) {
+        yui_expr_value_set_bool(out, false);
+        return;
+    }
+
+    char *end = NULL;
+    double number = strtod(value, &end);
+    if (end && end != value) {
+        while (*end != '\0' && isspace((unsigned char)*end)) {
+            end++;
+        }
+        if (*end == '\0') {
+            yui_expr_value_set_number(out, number);
+            return;
+        }
+    }
+
+    yui_expr_value_set_string_ref(out, value);
 }
 
 static const char *yui_event_resolve_value(const yui_event_resolver_ctx_t *ctx, char *buffer, size_t buffer_len)
@@ -2417,6 +2510,31 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         }
         return ESP_OK;
     }
+    if (strcmp(type, "spinner") == 0) {
+#if LV_USE_SPINNER
+        lv_obj_t *spinner = lv_spinner_create(parent);
+        yui_register_widget_id(node, spinner);
+        if (!yui_node_has_child(node, "width")) {
+            lv_obj_set_width(spinner, 32);
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(spinner, 32);
+        }
+        yui_apply_common_widget_attrs(spinner, node, schema);
+        uint32_t duration = (uint32_t)yui_node_resolved_i32(node, "duration", scope, 1000);
+        uint32_t arc_sweep = (uint32_t)yui_node_resolved_i32(node, "arc_sweep", scope, 240);
+        lv_spinner_set_anim_params(spinner, duration, arc_sweep);
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(spinner, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, spinner);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'spinner' unavailable: LV_USE_SPINNER=0");
+        return ESP_OK;
+#endif
+    }
     if (strcmp(type, "textarea") == 0) {
 #if LV_USE_TEXTAREA
         lv_obj_t *ta = lv_textarea_create(parent);
@@ -3164,11 +3282,65 @@ static void yui_native_fn_pop(int argc, const char **argv)
     (void)yui_runtime_pop_screen();
 }
 
+static void yui_native_fn_async_reset(int argc, const char **argv)
+{
+    if (argc <= 0 || !argv || !argv[0]) {
+        return;
+    }
+    const char *message = (argc > 1 && argv[1]) ? argv[1] : NULL;
+    (void)yamui_async_reset(argv[0], message);
+}
+
+static void yui_native_fn_async_begin(int argc, const char **argv)
+{
+    if (argc <= 0 || !argv || !argv[0]) {
+        return;
+    }
+    const char *message = (argc > 1 && argv[1]) ? argv[1] : NULL;
+    (void)yamui_async_begin(argv[0], message);
+}
+
+static void yui_native_fn_async_progress(int argc, const char **argv)
+{
+    if (argc <= 0 || !argv || !argv[0]) {
+        return;
+    }
+    int32_t progress = 0;
+    if (argc > 1 && argv[1]) {
+        progress = (int32_t)strtol(argv[1], NULL, 10);
+    }
+    const char *message = (argc > 2 && argv[2]) ? argv[2] : NULL;
+    (void)yamui_async_progress(argv[0], progress, message);
+}
+
+static void yui_native_fn_async_complete(int argc, const char **argv)
+{
+    if (argc <= 0 || !argv || !argv[0]) {
+        return;
+    }
+    const char *message = (argc > 1 && argv[1]) ? argv[1] : NULL;
+    (void)yamui_async_complete(argv[0], message);
+}
+
+static void yui_native_fn_async_fail(int argc, const char **argv)
+{
+    if (argc <= 0 || !argv || !argv[0]) {
+        return;
+    }
+    const char *message = (argc > 1 && argv[1]) ? argv[1] : NULL;
+    (void)yamui_async_fail(argv[0], message);
+}
+
 static void yui_register_builtin_natives(void)
 {
     yamui_runtime_register_function("ui_goto", yui_native_fn_goto);
     yamui_runtime_register_function("ui_push", yui_native_fn_push);
     yamui_runtime_register_function("ui_pop", yui_native_fn_pop);
+    yamui_runtime_register_function("ui_async_reset", yui_native_fn_async_reset);
+    yamui_runtime_register_function("ui_async_begin", yui_native_fn_async_begin);
+    yamui_runtime_register_function("ui_async_progress", yui_native_fn_async_progress);
+    yamui_runtime_register_function("ui_async_complete", yui_native_fn_async_complete);
+    yamui_runtime_register_function("ui_async_fail", yui_native_fn_async_fail);
 }
 
 static esp_err_t yui_runtime_prepare(void)

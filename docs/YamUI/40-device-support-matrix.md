@@ -27,9 +27,11 @@ Companion export format to that contract.
 | `label` | working | Text bindings work. |
 | `button` | working | Real LVGL `lv_button` path restored and stable. |
 | `img` | partial | Symbol images like `symbol:wifi` work. General asset/image pipeline still needs broader validation. |
+| `camera_preview` | working | Uses the board camera service with a decimated live preview path suitable for device rendering. |
 | `row` | working | Flex row layout supported. |
 | `column` | working | Flex column layout supported. |
 | `panel` | working | Container works; titles are not auto-rendered from `props.title`. |
+| `spinner` | working | LVGL spinner widget available for loading states and async feedback. |
 | `textarea` | working | Bound text and keyboard integration working on device. |
 | `keyboard` | working | Targets textarea by widget `id`. |
 | `switch` | working | Bound boolean-like state works. |
@@ -39,7 +41,7 @@ Companion export format to that contract.
 | `dropdown` | working | Sequence `options` list is supported. |
 | `component` | partial | Runtime component system works with current YamUI prop convention, but does not yet match the Companion's richer component schema 1:1. |
 | `list` | working | Uses a real LVGL list container on device and supports nested YamUI child widgets. |
-| `spacer` | missing | Present in Companion type system, not implemented in current device renderer. |
+| `spacer` | working | Simple space block for layout rhythm and separation. |
 | `checkbox` | working | Checked state and `{{checked}}` event binding work like other boolean inputs. |
 
 ## Layout Support
@@ -188,11 +190,36 @@ That does not match the device runtime contract directly yet.
 - `pop()`
 - `modal(component)`
 - `close_modal()`
+- `call(function, ...)`
+- built-in helper natives:
+  - `ui_async_reset(operation, message?)`
+  - `ui_async_begin(operation, message?)`
+  - `ui_async_progress(operation, progress)`
+  - `ui_async_complete(operation, message?)`
+  - `ui_async_fail(operation, message?)`
 
 ### Partial
 
 - `emit(...)` exists as a runtime concept, but device-side workflows currently
   rely more on direct actions than event bus composition.
+- full `await(call(...))` sequencing is not implemented yet; the device runtime
+  currently models async flows through state updates and conditional UI.
+
+## Async State Contract
+
+YamUI now supports a simple state-driven async contract for native actions.
+
+For an operation key like `sync_demo`, the runtime uses:
+
+- `async.sync_demo.running`
+- `async.sync_demo.progress`
+- `async.sync_demo.status`
+- `async.sync_demo.message`
+- `async.sync_demo.error`
+
+This pairs with existing `visible_if`, `enabled_if`, `label`, `bar`, and
+`spinner` support to build loading and progress UX without forcing full screen
+rerenders.
 
 ## Component System
 
@@ -238,6 +265,7 @@ avoid dual-task `lv_timer_handler()` access.
 ### Working
 
 - light/dark mode state toggle
+- top-level `theme.defaults` widget-style mapping
 - themed style lookup:
   - `light.<style>`
   - `dark.<style>`
@@ -248,8 +276,8 @@ avoid dual-task `lv_timer_handler()` access.
 ### Partial
 
 - not all widgets are fully polished for theme parity yet
-- current support is a proof-of-concept theme layer, not yet the future
-  project-level YamUI theme-default system
+- theme defaults currently map widget type -> style name and do not yet cover a
+  richer token-driven project theme model
 
 ## Companion Export Alignment Gaps
 

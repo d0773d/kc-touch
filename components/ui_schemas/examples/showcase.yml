@@ -8,6 +8,7 @@ app:
   locale: en
 
 state:
+  welcome_message: "status.ready"
   ui:
     dark_mode: "false"
     locale: "en"
@@ -28,6 +29,19 @@ state:
     auto_start: "true"
   status:
     banner: "status.ready"
+  async:
+    sync_demo:
+      running: "false"
+      progress: "0"
+      status: "idle"
+      message: "status.sync_idle"
+      error: ""
+  activity:
+    latest: "activity.nine"
+    previous: "activity.ten"
+    oldest: "activity.eleven"
+  detail:
+    last_sync: "detail.sync_waiting"
 
 translations:
   en:
@@ -43,6 +57,8 @@ translations:
       panel.profile: "Profile"
       panel.activity: "Recent Activity"
       actions.sync: "Trigger Sync"
+      actions.reset: "Reset Demo"
+      actions.open_camera: "Open Camera"
       actions.details: "Open Details"
       actions.modal: "Open Modal"
       actions.english: "English"
@@ -55,6 +71,8 @@ translations:
       labels.profile_name: "Node Name"
       labels.profile_note: "Operator Note"
       labels.sync_count: "Sync Count"
+      labels.sync_status: "Sync Status"
+      labels.progress: "Progress"
       labels.network: "Network"
       labels.keyboard: "Keyboard Input"
       modal.title: "Start Routine"
@@ -62,12 +80,22 @@ translations:
       modal.close: "Close"
       modal.start: "Start"
       screen.details: "Device Details"
+      screen.camera: "Camera Preview"
       screen.back: "Back"
       detail.status: "Current Status"
       detail.syncs: "Total Syncs"
+      detail.sync_waiting: "No async sync has completed yet."
+      detail.sync_complete: "Async sync completed successfully."
       status.ready: "Ready for interaction"
       status.synced: "Last action: sync triggered"
       status.modal: "Last action: modal opened"
+      status.sync_idle: "Async sync is idle"
+      status.sync_starting: "Preparing async sync..."
+      status.sync_preparing: "Collecting device changes..."
+      status.sync_uploading: "Uploading batched updates..."
+      status.sync_finalizing: "Finalizing sync state..."
+      status.sync_done: "Last action: async sync completed"
+      status.sync_failed: "Async sync could not start"
       activity.one: "Display initialized"
       activity.two: "Theme engine active"
       activity.three: "Translations loaded"
@@ -76,6 +104,9 @@ translations:
       activity.six: "Keyboard overlay ready"
       activity.seven: "Brightness sync verified"
       activity.eight: "List widget validation pending"
+      activity.nine: "Async sync helpers ready"
+      activity.ten: "Progress widgets bound"
+      activity.eleven: "Await-style UX staged"
     metadata: {}
   es:
     label: "Español"
@@ -90,6 +121,7 @@ translations:
       panel.profile: "Perfil"
       panel.activity: "Actividad reciente"
       actions.sync: "Iniciar sincronización"
+      actions.open_camera: "Abrir cámara"
       actions.details: "Abrir detalles"
       actions.modal: "Abrir modal"
       actions.english: "Inglés"
@@ -109,6 +141,7 @@ translations:
       modal.close: "Cerrar"
       modal.start: "Iniciar"
       screen.details: "Detalles del dispositivo"
+      screen.camera: "Vista de cámara"
       screen.back: "Regresar"
       detail.status: "Estado actual"
       detail.syncs: "Sincronizaciones totales"
@@ -123,6 +156,21 @@ translations:
       activity.six: "Superposición del teclado lista"
       activity.seven: "Sincronización de brillo verificada"
       activity.eight: "Validación del widget de lista pendiente"
+      actions.reset: "Restablecer demo"
+      labels.sync_status: "Estado de sincronización"
+      labels.progress: "Progreso"
+      detail.sync_waiting: "Aún no se ha completado ninguna sincronización asíncrona."
+      detail.sync_complete: "La sincronización asíncrona se completó correctamente."
+      status.sync_idle: "La sincronización asíncrona está inactiva"
+      status.sync_starting: "Preparando sincronización asíncrona..."
+      status.sync_preparing: "Recopilando cambios del dispositivo..."
+      status.sync_uploading: "Subiendo actualizaciones por lotes..."
+      status.sync_finalizing: "Finalizando el estado de sincronización..."
+      status.sync_done: "Última acción: sincronización asíncrona completada"
+      status.sync_failed: "No se pudo iniciar la sincronización asíncrona"
+      activity.nine: "Ayudantes de sincronización asíncrona listos"
+      activity.ten: "Widgets de progreso enlazados"
+      activity.eleven: "UX estilo await preparada"
     metadata: {}
 
 theme:
@@ -453,9 +501,17 @@ screens:
                   - type: button
                     text_key: "actions.sync"
                     style: cta
+                    enabled_if: "!state.async.sync_demo.running"
                     on_click:
-                      - increment(ui.sync_count, 1)
-                      - set(welcome_message, status.synced)
+                      - call(ui_async_reset, sync_demo)
+                      - call(demo_async_sync, sync_demo)
+                  - type: button
+                    text_key: "actions.reset"
+                    style: ghost
+                    enabled_if: "!state.async.sync_demo.running"
+                    on_click:
+                      - call(ui_async_reset, sync_demo, status.sync_idle)
+                      - set(welcome_message, status.ready)
                   - type: button
                     text_key: "actions.details"
                     style: ghost
@@ -482,6 +538,12 @@ screens:
                 max: 100
                 value: "{{state.display.brightness}}"
                 on_change: set(display.brightness, {{value}})
+              - type: label
+                text: "Sync status: {{state.async.sync_demo.status}}"
+                style: body
+              - type: label
+                text: "Progress: {{state.async.sync_demo.progress}}%"
+                style: body
 
           - type: panel
             style: card
@@ -491,8 +553,13 @@ screens:
               type: column
               gap: 8
             widgets:
-              - type: camera_preview
-                height: 260
+              - type: label
+                text: "Camera preview loads only when opened."
+                style: body
+              - type: button
+                text_key: "actions.open_camera"
+                style: cta
+                on_click: push(camera)
 
           - type: row
             layout:
@@ -573,6 +640,9 @@ screens:
                   - type: label
                     text_key: "{{state.welcome_message}}"
                     style: body
+                  - type: label
+                    text: "Progress: {{state.async.sync_demo.progress}}%"
+                    style: body
 
           - type: keyboard
             overlay: true
@@ -603,8 +673,34 @@ screens:
             text_key: "{{state.welcome_message}}"
             style: body
           - type: label
+            text: "Progress: {{state.async.sync_demo.progress}}%"
+            style: body
+          - type: label
             text: "Sync Count: {{state.ui.sync_count}}"
             style: body
+          - type: button
+            text_key: "screen.back"
+            style: cta
+            on_click: pop()
+
+  camera:
+    name: camera
+    title: "Camera"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text_key: "screen.camera"
+            style: heading
+          - type: camera_preview
+            height: 260
           - type: button
             text_key: "screen.back"
             style: cta

@@ -152,6 +152,33 @@ lv_obj_create(parent);
 
 ---
 
+## 2.6 `spinner`
+
+Animated loading indicator for async operations.
+
+```yaml
+- type: spinner
+  width: 24
+  height: 24
+  duration: 800
+```
+
+Supports:
+
+- `width`
+- `height`
+- `duration`
+- `arc_sweep`
+- `visible_if`
+
+LVGL mapping:
+
+```c
+lv_spinner_create(parent);
+```
+
+---
+
 # 3. Input Widgets
 
 Used for Wi-Fi provisioning, settings, forms, etc.
