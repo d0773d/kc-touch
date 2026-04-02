@@ -38,7 +38,7 @@ Companion export format to that contract.
 | `arc` | partial | Runtime support exists; schema/device coverage still needs broader validation. |
 | `dropdown` | working | Sequence `options` list is supported. |
 | `component` | partial | Runtime component system works with current YamUI prop convention, but does not yet match the Companion's richer component schema 1:1. |
-| `list` | partial | Companion emits it; runtime support path is not yet proven as a first-class device widget contract. |
+| `list` | working | Uses a real LVGL list container on device and supports nested YamUI child widgets. |
 | `spacer` | missing | Present in Companion type system, not implemented in current device renderer. |
 | `checkbox` | working | Checked state and `{{checked}}` event binding work like other boolean inputs. |
 

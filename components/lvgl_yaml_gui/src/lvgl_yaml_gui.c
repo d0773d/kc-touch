@@ -2692,7 +2692,7 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
 #endif
     }
-    if (strcmp(type, "row") == 0 || strcmp(type, "column") == 0 || strcmp(type, "list") == 0) {
+    if (strcmp(type, "row") == 0 || strcmp(type, "column") == 0) {
         lv_obj_t *container = lv_obj_create(parent);
         yui_register_widget_id(node, container);
         yui_prepare_layout_container(container);
@@ -2701,14 +2701,47 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
             lv_obj_set_width(container, LV_PCT(100));
         }
-        const char *layout_type = strcmp(type, "list") == 0 ? "column" : type;
-        yui_apply_layout(container, yml_node_get_child(node, "layout"), layout_type);
+        yui_apply_layout(container, yml_node_get_child(node, "layout"), type);
         yui_apply_common_widget_attrs(container, node, schema);
         yui_widget_runtime_t *runtime = yui_widget_runtime_create(container, scope);
         if (runtime) {
             (void)yui_widget_bind_conditions(runtime, node, container);
         }
         return yui_render_widget_list(yml_node_get_child(node, "widgets"), schema, container, scope);
+    }
+    if (strcmp(type, "list") == 0) {
+#if LV_USE_LIST
+        lv_obj_t *list = lv_list_create(parent);
+        yui_register_widget_id(node, list);
+        lv_obj_set_size(list, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_scroll_dir(list, LV_DIR_VER);
+        lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+        lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLL_ELASTIC);
+        lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+        lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_opa(list, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
+        lv_obj_set_style_outline_opa(list, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(list, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_radius(list, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(list, 0, LV_PART_MAIN);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(list, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(list, LV_SIZE_CONTENT);
+        }
+        yui_apply_layout(list, yml_node_get_child(node, "layout"), "column");
+        yui_apply_common_widget_attrs(list, node, schema);
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(list, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, list);
+        }
+        return yui_render_widget_list(yml_node_get_child(node, "widgets"), schema, list, scope);
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'list' unavailable: LV_USE_LIST=0");
+        return ESP_OK;
+#endif
     }
     if (strcmp(type, "panel") == 0) {
         lv_obj_t *panel = lv_obj_create(parent);

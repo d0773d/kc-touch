@@ -429,7 +429,28 @@ lv_obj_set_scroll_dir(obj, LV_DIR_VER);
 
 ---
 
-## 5.6 `tabview`
+## 5.6 `list`
+
+Scrollable vertical list container for grouped items or activity feeds.
+
+```yaml
+- type: list
+  widgets:
+    - type: label
+      text: "Item one"
+    - type: label
+      text: "Item two"
+```
+
+LVGL mapping:
+
+```c
+lv_list_create(parent);
+```
+
+---
+
+## 5.7 `tabview`
 
 Tabbed interface.
 

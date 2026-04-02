@@ -71,6 +71,11 @@ translations:
       activity.one: "Display initialized"
       activity.two: "Theme engine active"
       activity.three: "Translations loaded"
+      activity.four: "Camera preview started"
+      activity.five: "Live bindings connected"
+      activity.six: "Keyboard overlay ready"
+      activity.seven: "Brightness sync verified"
+      activity.eight: "List widget validation pending"
     metadata: {}
   es:
     label: "Español"
@@ -113,6 +118,11 @@ translations:
       activity.one: "Pantalla inicializada"
       activity.two: "Motor de temas activo"
       activity.three: "Traducciones cargadas"
+      activity.four: "Vista de cámara iniciada"
+      activity.five: "Vínculos en vivo conectados"
+      activity.six: "Superposición del teclado lista"
+      activity.seven: "Sincronización de brillo verificada"
+      activity.eight: "Validación del widget de lista pendiente"
     metadata: {}
 
 theme:
@@ -527,6 +537,7 @@ screens:
                   gap: 8
                 widgets:
                   - type: list
+                    height: 96
                     layout:
                       type: column
                       gap: 8
@@ -537,6 +548,16 @@ screens:
                         text_key: "activity.two"
                       - type: label
                         text_key: "activity.three"
+                      - type: label
+                        text_key: "activity.four"
+                      - type: label
+                        text_key: "activity.five"
+                      - type: label
+                        text_key: "activity.six"
+                      - type: label
+                        text_key: "activity.seven"
+                      - type: label
+                        text_key: "activity.eight"
                   - type: row
                     layout:
                       type: row
