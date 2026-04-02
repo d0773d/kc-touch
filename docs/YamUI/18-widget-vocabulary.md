@@ -263,6 +263,39 @@ lv_table_create(parent);
 
 ---
 
+## 2.10 `chart`
+
+Displays structured series data as a line or bar chart.
+
+```yaml
+- type: chart
+  chart_type: line
+  point_count: 7
+  min: 0
+  max: 100
+  series:
+    - color: "#22d3ee"
+      values: [18, 36, 52, 47, 61, 74, 68]
+```
+
+Supports:
+
+- `chart_type`
+- `point_count`
+- `min`
+- `max`
+- `horizontal_dividers`
+- `vertical_dividers`
+- `series`
+
+LVGL mapping:
+
+```c
+lv_chart_create(parent);
+```
+
+---
+
 # 3. Input Widgets
 
 Used for Wi-Fi provisioning, settings, forms, etc.

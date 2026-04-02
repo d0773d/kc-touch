@@ -64,6 +64,7 @@ translations:
       actions.open_camera: "Open Camera"
       actions.open_widgets: "Open Widgets"
       actions.open_table: "Open Table"
+      actions.open_chart: "Open Chart"
       actions.details: "Open Details"
       actions.modal: "Open Modal"
       actions.english: "English"
@@ -88,6 +89,7 @@ translations:
       screen.camera: "Camera Preview"
       screen.widgets: "Widget Gallery"
       screen.table: "Table Demo"
+      screen.chart: "Chart Demo"
       screen.back: "Back"
       detail.status: "Current Status"
       detail.syncs: "Total Syncs"
@@ -131,6 +133,7 @@ translations:
       actions.open_camera: "Abrir cámara"
       actions.open_widgets: "Abrir widgets"
       actions.open_table: "Abrir tabla"
+      actions.open_chart: "Abrir gráfico"
       actions.details: "Abrir detalles"
       actions.modal: "Abrir modal"
       actions.english: "Inglés"
@@ -153,6 +156,7 @@ translations:
       screen.camera: "Vista de cámara"
       screen.widgets: "Galería de widgets"
       screen.table: "Demo de tabla"
+      screen.chart: "Demo de gráfico"
       screen.back: "Regresar"
       detail.status: "Estado actual"
       detail.syncs: "Sincronizaciones totales"
@@ -806,6 +810,21 @@ screens:
             text_key: "actions.open_table"
             style: ghost
             on_click: push(table_demo)
+      - type: panel
+        style: card
+        props:
+          title: "Chart"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Chart is isolated on its own screen while we validate structured series rendering."
+            style: body
+          - type: button
+            text_key: "actions.open_chart"
+            style: ghost
+            on_click: push(chart_demo)
       - type: button
         text_key: "screen.back"
         style: cta
@@ -841,6 +860,56 @@ screens:
                 second: "{{state.demo.led_level}}"
               - first: Camera
                 second: On demand
+          - type: button
+            text_key: "screen.back"
+            style: cta
+            on_click: pop()
+
+  chart_demo:
+    name: chart_demo
+    title: "Chart"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text_key: "screen.chart"
+            style: heading
+          - type: chart
+            height: 220
+            chart_type: line
+            point_count: 7
+            min: 0
+            max: 100
+            horizontal_dividers: 5
+            vertical_dividers: 7
+            series:
+              - color: "#22d3ee"
+                axis: primary_y
+                values:
+                  - 18
+                  - 36
+                  - 52
+                  - 47
+                  - 61
+                  - 74
+                  - 68
+              - color: "#f59e0b"
+                axis: primary_y
+                values:
+                  - 10
+                  - 22
+                  - 34
+                  - 58
+                  - 49
+                  - 63
+                  - 81
           - type: button
             text_key: "screen.back"
             style: cta

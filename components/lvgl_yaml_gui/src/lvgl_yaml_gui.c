@@ -134,6 +134,9 @@ static esp_err_t yui_widget_watch_all_state(yui_widget_runtime_t *runtime);
 static bool yui_expr_value_is_truthy(const yui_expr_value_t *value);
 static void yui_format_text(const char *tmpl, yui_component_scope_t *scope, char *out, size_t out_len);
 static bool yui_format_node_text(const yml_node_t *node, yui_component_scope_t *scope, char *out, size_t out_len);
+static lv_chart_type_t yui_chart_type_from_string(const char *value);
+static lv_chart_update_mode_t yui_chart_update_mode_from_string(const char *value);
+static lv_chart_axis_t yui_chart_axis_from_string(const char *value);
 static char *yui_strdup_local(const char *value);
 static esp_err_t yui_collect_bindings_from_text(const char *text, char ***out_tokens, size_t *out_count);
 static esp_err_t yui_collect_bindings_from_expr(const char *expr, char ***out_tokens, size_t *out_count);
@@ -1520,6 +1523,54 @@ static bool yui_format_node_text(const yml_node_t *node, yui_component_scope_t *
     }
 
     return false;
+}
+
+static lv_chart_type_t yui_chart_type_from_string(const char *value)
+{
+    if (!value) {
+        return LV_CHART_TYPE_LINE;
+    }
+    if (strcasecmp(value, "bar") == 0) {
+        return LV_CHART_TYPE_BAR;
+    }
+    if (strcasecmp(value, "scatter") == 0) {
+        return LV_CHART_TYPE_SCATTER;
+    }
+    if (strcasecmp(value, "curve") == 0) {
+        return LV_CHART_TYPE_CURVE;
+    }
+    if (strcasecmp(value, "stacked") == 0) {
+        return LV_CHART_TYPE_STACKED;
+    }
+    if (strcasecmp(value, "none") == 0) {
+        return LV_CHART_TYPE_NONE;
+    }
+    return LV_CHART_TYPE_LINE;
+}
+
+static lv_chart_update_mode_t yui_chart_update_mode_from_string(const char *value)
+{
+    if (value && strcasecmp(value, "circular") == 0) {
+        return LV_CHART_UPDATE_MODE_CIRCULAR;
+    }
+    return LV_CHART_UPDATE_MODE_SHIFT;
+}
+
+static lv_chart_axis_t yui_chart_axis_from_string(const char *value)
+{
+    if (!value) {
+        return LV_CHART_AXIS_PRIMARY_Y;
+    }
+    if (strcasecmp(value, "secondary_y") == 0 || strcasecmp(value, "y2") == 0) {
+        return LV_CHART_AXIS_SECONDARY_Y;
+    }
+    if (strcasecmp(value, "primary_x") == 0 || strcasecmp(value, "x1") == 0) {
+        return LV_CHART_AXIS_PRIMARY_X;
+    }
+    if (strcasecmp(value, "secondary_x") == 0 || strcasecmp(value, "x2") == 0) {
+        return LV_CHART_AXIS_SECONDARY_X;
+    }
+    return LV_CHART_AXIS_PRIMARY_Y;
 }
 
 static uint32_t yui_table_row_column_count(const yml_node_t *row_node)
@@ -3012,6 +3063,90 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
 #else
         yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'led' unavailable: LV_USE_LED=0");
+        return ESP_OK;
+#endif
+    }
+    if (strcmp(type, "chart") == 0) {
+#if LV_USE_CHART
+        lv_obj_t *chart = lv_chart_create(parent);
+        yui_register_widget_id(node, chart);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(chart, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(chart, 180);
+        }
+        yui_apply_common_widget_attrs(chart, node, schema);
+        lv_chart_set_type(chart, yui_chart_type_from_string(yui_node_scalar(node, "chart_type")));
+        lv_chart_set_update_mode(chart, yui_chart_update_mode_from_string(yui_node_scalar(node, "update_mode")));
+        lv_chart_set_point_count(chart, (uint32_t)yui_node_resolved_i32(node, "point_count", scope, 7));
+        lv_chart_set_div_line_count(chart,
+                                    (uint32_t)yui_node_resolved_i32(node, "horizontal_dividers", scope, 4),
+                                    (uint32_t)yui_node_resolved_i32(node, "vertical_dividers", scope, 6));
+
+        int32_t y_min = yui_node_resolved_i32(node, "min", scope, 0);
+        int32_t y_max = yui_node_resolved_i32(node, "max", scope, 100);
+        lv_chart_set_axis_range(chart, LV_CHART_AXIS_PRIMARY_Y, y_min, y_max);
+
+        const yml_node_t *series_node = yml_node_get_child(node, "series");
+        if (series_node && yml_node_get_type(series_node) == YML_NODE_SEQUENCE) {
+            uint32_t series_count = (uint32_t)yml_node_child_count(series_node);
+            for (uint32_t i = 0; i < series_count; ++i) {
+                const yml_node_t *series_item = yml_node_child_at(series_node, i);
+                if (!series_item || yml_node_get_type(series_item) != YML_NODE_MAPPING) {
+                    continue;
+                }
+
+                const char *color_text = yui_node_scalar(series_item, "color");
+                lv_color_t color = yui_color_from_string(color_text, lv_palette_main((lv_palette_t)(LV_PALETTE_BLUE + (i % 5))));
+                lv_chart_axis_t axis = yui_chart_axis_from_string(yui_node_scalar(series_item, "axis"));
+                lv_chart_series_t *ser = lv_chart_add_series(chart, color, axis);
+                if (!ser) {
+                    continue;
+                }
+
+                const yml_node_t *values_node = yml_node_get_child(series_item, "values");
+                if (values_node && yml_node_get_type(values_node) == YML_NODE_SEQUENCE) {
+                    uint32_t value_count = (uint32_t)yml_node_child_count(values_node);
+                    int32_t *series_values = lv_chart_get_series_y_array(chart, ser);
+                    uint32_t point_count = lv_chart_get_point_count(chart);
+                    if (series_values) {
+                        for (uint32_t point = 0; point < point_count; ++point) {
+                            series_values[point] = 0;
+                        }
+                        for (uint32_t point = 0; point < value_count && point < point_count; ++point) {
+                            const yml_node_t *value_node = yml_node_child_at(values_node, point);
+                            char value_buf[32];
+                            const char *value_text = yui_format_node_text(value_node, scope, value_buf, sizeof(value_buf)) ? value_buf : NULL;
+                            if (value_text && value_text[0] != '\0') {
+                                series_values[point] = atoi(value_text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        lv_obj_set_style_bg_color(chart, lv_color_hex(0x0F172A), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(chart, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_color(chart, lv_color_hex(0x334155), LV_PART_MAIN);
+        lv_obj_set_style_border_width(chart, 1, LV_PART_MAIN);
+        lv_obj_set_style_radius(chart, 12, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(chart, 8, LV_PART_MAIN);
+        lv_obj_set_style_line_color(chart, lv_color_hex(0x334155), LV_PART_MAIN);
+        lv_obj_set_style_line_opa(chart, LV_OPA_60, LV_PART_MAIN);
+        lv_obj_set_style_text_color(chart, lv_color_hex(0xCBD5E1), LV_PART_MAIN);
+        lv_obj_set_style_size(chart, 0, 0, LV_PART_INDICATOR);
+        lv_chart_refresh(chart);
+
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(chart, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, chart);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'chart' unavailable: LV_USE_CHART=0");
         return ESP_OK;
 #endif
     }
