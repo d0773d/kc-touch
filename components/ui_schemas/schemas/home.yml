@@ -29,6 +29,9 @@ state:
     auto_start: "true"
   status:
     banner: "status.ready"
+  demo:
+    led_level: "180"
+    mode: "Balanced"
   async:
     sync_demo:
       running: "false"
@@ -59,6 +62,8 @@ translations:
       actions.sync: "Trigger Sync"
       actions.reset: "Reset Demo"
       actions.open_camera: "Open Camera"
+      actions.open_widgets: "Open Widgets"
+      actions.open_table: "Open Table"
       actions.details: "Open Details"
       actions.modal: "Open Modal"
       actions.english: "English"
@@ -81,6 +86,8 @@ translations:
       modal.start: "Start"
       screen.details: "Device Details"
       screen.camera: "Camera Preview"
+      screen.widgets: "Widget Gallery"
+      screen.table: "Table Demo"
       screen.back: "Back"
       detail.status: "Current Status"
       detail.syncs: "Total Syncs"
@@ -122,6 +129,8 @@ translations:
       panel.activity: "Actividad reciente"
       actions.sync: "Iniciar sincronización"
       actions.open_camera: "Abrir cámara"
+      actions.open_widgets: "Abrir widgets"
+      actions.open_table: "Abrir tabla"
       actions.details: "Abrir detalles"
       actions.modal: "Abrir modal"
       actions.english: "Inglés"
@@ -142,6 +151,8 @@ translations:
       modal.start: "Iniciar"
       screen.details: "Detalles del dispositivo"
       screen.camera: "Vista de cámara"
+      screen.widgets: "Galería de widgets"
+      screen.table: "Demo de tabla"
       screen.back: "Regresar"
       detail.status: "Estado actual"
       detail.syncs: "Sincronizaciones totales"
@@ -560,6 +571,10 @@ screens:
                 text_key: "actions.open_camera"
                 style: cta
                 on_click: push(camera)
+              - type: button
+                text_key: "actions.open_widgets"
+                style: ghost
+                on_click: push(widgets)
 
           - type: row
             layout:
@@ -679,6 +694,10 @@ screens:
             text: "Sync Count: {{state.ui.sync_count}}"
             style: body
           - type: button
+            text_key: "actions.open_widgets"
+            style: ghost
+            on_click: push(widgets)
+          - type: button
             text_key: "screen.back"
             style: cta
             on_click: pop()
@@ -701,6 +720,127 @@ screens:
             style: heading
           - type: camera_preview
             height: 260
+          - type: button
+            text_key: "screen.back"
+            style: cta
+            on_click: pop()
+
+  widgets:
+    name: widgets
+    title: "Widgets"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text_key: "screen.widgets"
+            style: heading
+          - type: label
+            text: "Lightweight LVGL widgets can be grouped here without living on the home screen."
+            style: body
+      - type: panel
+        style: card
+        props:
+          title: "Roller"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: roller
+            visible_row_count: 3
+            options:
+              - Eco
+              - Balanced
+              - Boost
+              - Silent
+            value: "{{state.demo.mode}}"
+            on_change: set(demo.mode, {{value}})
+          - type: label
+            text: "Selected mode: {{state.demo.mode}}"
+            style: body
+      - type: panel
+        style: card
+        props:
+          title: "LED"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: row
+            layout:
+              type: row
+              gap: 12
+              align: center
+            widgets:
+              - type: led
+                width: 26
+                height: 26
+                color: "#22d3ee"
+                value: "{{state.demo.led_level}}"
+              - type: label
+                text: "LED level: {{state.demo.led_level}}"
+                style: body
+          - type: slider
+            min: 0
+            max: 255
+            value: "{{state.demo.led_level}}"
+            on_change: set(demo.led_level, {{value}})
+      - type: panel
+        style: card
+        props:
+          title: "Table"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Table is isolated on its own screen while we finish stabilizing it."
+            style: body
+          - type: button
+            text_key: "actions.open_table"
+            style: ghost
+            on_click: push(table_demo)
+      - type: button
+        text_key: "screen.back"
+        style: cta
+        on_click: pop()
+
+  table_demo:
+    name: table_demo
+    title: "Table"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text_key: "screen.table"
+            style: heading
+          - type: table
+            height: 180
+            column_widths:
+              - 150
+              - 150
+            rows:
+              - first: Widget
+                second: State
+              - first: Roller
+                second: "{{state.demo.mode}}"
+              - first: LED
+                second: "{{state.demo.led_level}}"
+              - first: Camera
+                second: On demand
           - type: button
             text_key: "screen.back"
             style: cta

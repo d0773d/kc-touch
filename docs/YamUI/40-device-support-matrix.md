@@ -39,6 +39,9 @@ Companion export format to that contract.
 | `bar` | working | Reactive to bound numeric state. |
 | `arc` | partial | Runtime support exists; schema/device coverage still needs broader validation. |
 | `dropdown` | working | Sequence `options` list is supported. |
+| `roller` | working | Supports option lists, visible row count, and bound selection changes. |
+| `led` | working | Useful lightweight status indicator; supports bound boolean or brightness-like values. |
+| `table` | working | Supports YAML-defined rows and column widths for compact data displays. |
 | `component` | partial | Runtime component system works with current YamUI prop convention, but does not yet match the Companion's richer component schema 1:1. |
 | `list` | working | Uses a real LVGL list container on device and supports nested YamUI child widgets. |
 | `spacer` | working | Simple space block for layout rhythm and separation. |

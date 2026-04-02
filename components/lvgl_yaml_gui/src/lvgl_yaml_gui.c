@@ -44,6 +44,8 @@ typedef enum {
     YUI_VALUE_BIND_BAR,
     YUI_VALUE_BIND_ARC,
     YUI_VALUE_BIND_DROPDOWN,
+    YUI_VALUE_BIND_ROLLER,
+    YUI_VALUE_BIND_LED,
 } yui_value_bind_kind_t;
 
 typedef struct {
@@ -131,6 +133,7 @@ static void yui_widget_schedule_condition_refresh(yui_widget_runtime_t *runtime)
 static esp_err_t yui_widget_watch_all_state(yui_widget_runtime_t *runtime);
 static bool yui_expr_value_is_truthy(const yui_expr_value_t *value);
 static void yui_format_text(const char *tmpl, yui_component_scope_t *scope, char *out, size_t out_len);
+static bool yui_format_node_text(const yml_node_t *node, yui_component_scope_t *scope, char *out, size_t out_len);
 static char *yui_strdup_local(const char *value);
 static esp_err_t yui_collect_bindings_from_text(const char *text, char ***out_tokens, size_t *out_count);
 static esp_err_t yui_collect_bindings_from_expr(const char *expr, char ***out_tokens, size_t *out_count);
@@ -138,6 +141,7 @@ static void yui_apply_layout(lv_obj_t *obj, const yml_node_t *layout_node, const
 static lv_flex_align_t yui_flex_align_from_string(const char *value, lv_flex_align_t def);
 static esp_err_t yui_render_widget_list(const yml_node_t *widgets_node, yui_schema_runtime_t *schema, lv_obj_t *parent, yui_component_scope_t *scope);
 static bool yui_dropdown_select_value(lv_obj_t *dropdown, const char *value);
+static bool yui_roller_select_value(lv_obj_t *roller, const char *value);
 static esp_err_t yui_widget_bind_conditions(yui_widget_runtime_t *runtime, const yml_node_t *node, lv_obj_t *target);
 static bool yui_theme_is_dark(void);
 static lv_color_t yui_theme_screen_bg_color(void);
@@ -1121,6 +1125,12 @@ static const char *yui_event_resolve_value(const yui_event_resolver_ctx_t *ctx, 
         return buffer;
     }
 #endif
+#if LV_USE_ROLLER
+    if (lv_obj_check_type(target, &lv_roller_class)) {
+        lv_roller_get_selected_str(target, buffer, buffer_len);
+        return buffer;
+    }
+#endif
 #if LV_USE_SLIDER
     if (lv_obj_check_type(target, &lv_slider_class)) {
         int32_t value = lv_slider_get_value(target);
@@ -1476,6 +1486,110 @@ static void yui_format_text(const char *tmpl, yui_component_scope_t *scope, char
     out[pos] = '\0';
 }
 
+static bool yui_format_node_text(const yml_node_t *node, yui_component_scope_t *scope, char *out, size_t out_len)
+{
+    if (!out || out_len == 0U) {
+        return false;
+    }
+    out[0] = '\0';
+    if (!node) {
+        return false;
+    }
+
+    const char *raw_text = yml_node_get_scalar(node);
+    if (raw_text) {
+        yui_format_text(raw_text, scope, out, out_len);
+        return true;
+    }
+
+    if (yml_node_get_type(node) == YML_NODE_MAPPING) {
+        const yml_node_t *value_node = yml_node_get_child(node, "value");
+        if (!value_node) {
+            value_node = yml_node_get_child(node, "text");
+        }
+        if (value_node) {
+            return yui_format_node_text(value_node, scope, out, out_len);
+        }
+    }
+
+    if (yml_node_get_type(node) == YML_NODE_SEQUENCE && yml_node_child_count(node) == 1U) {
+        const yml_node_t *child = yml_node_child_at(node, 0);
+        if (child) {
+            return yui_format_node_text(child, scope, out, out_len);
+        }
+    }
+
+    return false;
+}
+
+static uint32_t yui_table_row_column_count(const yml_node_t *row_node)
+{
+    if (!row_node) {
+        return 0U;
+    }
+
+    const yml_node_t *cells_node = row_node;
+    if (yml_node_get_type(row_node) == YML_NODE_MAPPING) {
+        const yml_node_t *explicit_cells = yml_node_get_child(row_node, "cells");
+        if (explicit_cells) {
+            cells_node = explicit_cells;
+        }
+    }
+
+    if (cells_node && yml_node_get_type(cells_node) == YML_NODE_SEQUENCE) {
+        return (uint32_t)yml_node_child_count(cells_node);
+    }
+
+    if (yml_node_get_type(row_node) == YML_NODE_MAPPING) {
+        uint32_t count = 0U;
+        for (const yml_node_t *child = yml_node_child_at(row_node, 0); child; child = yml_node_next(child)) {
+            const char *key = yml_node_get_key(child);
+            if (key && strcmp(key, "cells") == 0) {
+                continue;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    return 0U;
+}
+
+static const yml_node_t *yui_table_row_cell_at(const yml_node_t *row_node, uint32_t col)
+{
+    if (!row_node) {
+        return NULL;
+    }
+
+    const yml_node_t *cells_node = row_node;
+    if (yml_node_get_type(row_node) == YML_NODE_MAPPING) {
+        const yml_node_t *explicit_cells = yml_node_get_child(row_node, "cells");
+        if (explicit_cells) {
+            cells_node = explicit_cells;
+        }
+    }
+
+    if (cells_node && yml_node_get_type(cells_node) == YML_NODE_SEQUENCE) {
+        return yml_node_child_at(cells_node, col);
+    }
+
+    if (yml_node_get_type(row_node) == YML_NODE_MAPPING) {
+        uint32_t idx = 0U;
+        for (const yml_node_t *child = yml_node_child_at(row_node, 0); child; child = yml_node_next(child)) {
+            const char *key = yml_node_get_key(child);
+            if (key && strcmp(key, "cells") == 0) {
+                continue;
+            }
+            if (idx == col) {
+                return child;
+            }
+            idx++;
+        }
+    }
+
+    return NULL;
+}
+
 static void yui_widget_refresh_text(yui_widget_runtime_t *runtime)
 {
     if (!runtime || runtime->disposed || !runtime->text_target || !runtime->text_template) {
@@ -1512,6 +1626,28 @@ static bool yui_dropdown_select_value(lv_obj_t *dropdown, const char *value)
     }
 #else
     (void)dropdown;
+    (void)value;
+#endif
+    return false;
+}
+
+static bool yui_roller_select_value(lv_obj_t *roller, const char *value)
+{
+#if LV_USE_ROLLER
+    if (!roller || !value || value[0] == '\0') {
+        return false;
+    }
+    if (lv_roller_set_selected_str(roller, value, LV_ANIM_OFF)) {
+        return true;
+    }
+    uint32_t option_count = lv_roller_get_option_count(roller);
+    int idx = atoi(value);
+    if (idx >= 0 && idx < (int)option_count) {
+        lv_roller_set_selected(roller, (uint32_t)idx, LV_ANIM_OFF);
+        return true;
+    }
+#else
+    (void)roller;
     (void)value;
 #endif
     return false;
@@ -1559,6 +1695,35 @@ static void yui_widget_refresh_value(yui_widget_runtime_t *runtime)
         case YUI_VALUE_BIND_DROPDOWN:
 #if LV_USE_DROPDOWN
             (void)yui_dropdown_select_value(runtime->value_target, buffer);
+#endif
+            break;
+        case YUI_VALUE_BIND_ROLLER:
+#if LV_USE_ROLLER
+            (void)yui_roller_select_value(runtime->value_target, buffer);
+#endif
+            break;
+        case YUI_VALUE_BIND_LED:
+#if LV_USE_LED
+            if (yui_parse_bool(buffer, false)) {
+                lv_led_on(runtime->value_target);
+            } else {
+                char *end = NULL;
+                long bright = strtol(buffer, &end, 10);
+                if (end && end != buffer) {
+                    if (bright < 0) {
+                        bright = 0;
+                    }
+                    if (bright > 255) {
+                        bright = 255;
+                    }
+                    lv_led_set_brightness(runtime->value_target, (uint8_t)bright);
+                    if (bright <= 0) {
+                        lv_led_off(runtime->value_target);
+                    }
+                } else {
+                    lv_led_off(runtime->value_target);
+                }
+            }
 #endif
             break;
         case YUI_VALUE_BIND_NONE:
@@ -2756,6 +2921,186 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
 #else
         yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'dropdown' unavailable: LV_USE_DROPDOWN=0");
+        return ESP_OK;
+#endif
+    }
+    if (strcmp(type, "roller") == 0) {
+#if LV_USE_ROLLER
+        lv_obj_t *roller = lv_roller_create(parent);
+        yui_register_widget_id(node, roller);
+        yui_apply_common_widget_attrs(roller, node, schema);
+        char *options_joined = yui_node_join_sequence_scalar(node, "options");
+        const char *options = options_joined ? options_joined : yui_node_scalar(node, "options");
+        if (options && options[0] != '\0') {
+            const char *mode = yui_node_scalar(node, "mode");
+            lv_roller_set_options(roller,
+                                  options,
+                                  (mode && strcasecmp(mode, "infinite") == 0) ? LV_ROLLER_MODE_INFINITE : LV_ROLLER_MODE_NORMAL);
+        }
+        uint32_t visible_rows = (uint32_t)yui_node_resolved_i32(node, "visible_row_count", scope, 3);
+        if (visible_rows > 0U) {
+            lv_roller_set_visible_row_count(roller, visible_rows);
+        }
+        char value_buf[YUI_TEXT_BUFFER_MAX];
+        const char *value = yui_node_resolved_scalar(node, "value", scope, value_buf, sizeof(value_buf));
+        if (value && value[0] != '\0') {
+            (void)yui_roller_select_value(roller, value);
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(roller, scope);
+        if (runtime) {
+            const char *value_tmpl = yui_node_scalar(node, "value");
+            if (value_tmpl) {
+                (void)yui_widget_bind_value(runtime, value_tmpl, roller, YUI_VALUE_BIND_ROLLER);
+            }
+            (void)yui_widget_bind_conditions(runtime, node, roller);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        free(options_joined);
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'roller' unavailable: LV_USE_ROLLER=0");
+        return ESP_OK;
+#endif
+    }
+    if (strcmp(type, "led") == 0) {
+#if LV_USE_LED
+        lv_obj_t *led = lv_led_create(parent);
+        yui_register_widget_id(node, led);
+        if (!yui_node_has_child(node, "width")) {
+            lv_obj_set_width(led, 24);
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(led, 24);
+        }
+        yui_apply_common_widget_attrs(led, node, schema);
+        char color_buf[YUI_TEXT_BUFFER_MAX];
+        const char *color = yui_node_resolved_scalar(node, "color", scope, color_buf, sizeof(color_buf));
+        if (color && color[0] != '\0') {
+            lv_led_set_color(led, yui_color_from_string(color, lv_color_hex(0x22D3EE)));
+        }
+        char value_buf[YUI_TEXT_BUFFER_MAX];
+        const char *value = yui_node_resolved_scalar(node, "value", scope, value_buf, sizeof(value_buf));
+        if (value && value[0] != '\0') {
+            char *end = NULL;
+            long bright = strtol(value, &end, 10);
+            if (end && end != value) {
+                if (bright < 0) {
+                    bright = 0;
+                }
+                if (bright > 255) {
+                    bright = 255;
+                }
+                lv_led_set_brightness(led, (uint8_t)bright);
+                if (bright <= 0) {
+                    lv_led_off(led);
+                }
+            } else if (yui_parse_bool(value, false)) {
+                lv_led_on(led);
+            } else {
+                lv_led_off(led);
+            }
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(led, scope);
+        if (runtime) {
+            const char *value_tmpl = yui_node_scalar(node, "value");
+            if (value_tmpl) {
+                (void)yui_widget_bind_value(runtime, value_tmpl, led, YUI_VALUE_BIND_LED);
+            }
+            (void)yui_widget_bind_conditions(runtime, node, led);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'led' unavailable: LV_USE_LED=0");
+        return ESP_OK;
+#endif
+    }
+    if (strcmp(type, "table") == 0) {
+#if LV_USE_TABLE
+        lv_obj_t *table = lv_table_create(parent);
+        yui_register_widget_id(node, table);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(table, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(table, 160);
+        }
+        yui_apply_common_widget_attrs(table, node, schema);
+        lv_obj_clear_flag(table, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(table, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(table, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+        lv_obj_remove_flag(table, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+        lv_obj_remove_flag(table, LV_OBJ_FLAG_SCROLL_ELASTIC);
+        lv_obj_remove_flag(table, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+        lv_obj_set_style_bg_color(table, lv_color_hex(0x0F172A), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(table, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_color(table, lv_color_hex(0x334155), LV_PART_MAIN);
+        lv_obj_set_style_border_width(table, 1, LV_PART_MAIN);
+        lv_obj_set_style_radius(table, 12, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(table, 6, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(table, lv_color_hex(0x0F172A), LV_PART_ITEMS);
+        lv_obj_set_style_bg_opa(table, LV_OPA_COVER, LV_PART_ITEMS);
+        lv_obj_set_style_text_color(table, lv_color_hex(0xE2E8F0), LV_PART_ITEMS);
+        lv_obj_set_style_border_color(table, lv_color_hex(0x334155), LV_PART_ITEMS);
+        lv_obj_set_style_border_width(table, 1, LV_PART_ITEMS);
+
+        const yml_node_t *widths_node = yml_node_get_child(node, "column_widths");
+        uint32_t max_cols = 0U;
+        if (widths_node && yml_node_get_type(widths_node) == YML_NODE_SEQUENCE) {
+            max_cols = (uint32_t)yml_node_child_count(widths_node);
+        }
+
+        if (widths_node && yml_node_get_type(widths_node) == YML_NODE_SEQUENCE) {
+            uint32_t width_count = (uint32_t)yml_node_child_count(widths_node);
+            max_cols = width_count > max_cols ? width_count : max_cols;
+        }
+
+        const yml_node_t *rows_node = yml_node_get_child(node, "rows");
+        if (rows_node && yml_node_get_type(rows_node) == YML_NODE_SEQUENCE) {
+            uint32_t row_count = (uint32_t)yml_node_child_count(rows_node);
+            lv_table_set_row_count(table, row_count);
+            for (uint32_t row = 0; row < row_count; ++row) {
+                const yml_node_t *row_node = yml_node_child_at(rows_node, row);
+                uint32_t col_count = yui_table_row_column_count(row_node);
+                if (col_count > max_cols) {
+                    max_cols = col_count;
+                }
+            }
+
+            if (max_cols > 0U) {
+                lv_table_set_column_count(table, max_cols);
+            }
+            if (widths_node && yml_node_get_type(widths_node) == YML_NODE_SEQUENCE) {
+                uint32_t width_count = (uint32_t)yml_node_child_count(widths_node);
+                for (uint32_t i = 0; i < width_count; ++i) {
+                    const yml_node_t *width_node = yml_node_child_at(widths_node, i);
+                    const char *width_text = width_node ? yml_node_get_scalar(width_node) : NULL;
+                    if (width_text && width_text[0] != '\0') {
+                        lv_table_set_column_width(table, i, atoi(width_text));
+                    }
+                }
+            }
+
+            for (uint32_t row = 0; row < row_count; ++row) {
+                const yml_node_t *row_node = yml_node_child_at(rows_node, row);
+                uint32_t col_count = yui_table_row_column_count(row_node);
+                for (uint32_t col = 0; col < col_count; ++col) {
+                    const yml_node_t *cell_node = yui_table_row_cell_at(row_node, col);
+                    char cell_buf[YUI_TEXT_BUFFER_MAX];
+                    const char *cell_text = yui_format_node_text(cell_node, scope, cell_buf, sizeof(cell_buf)) ? cell_buf : "";
+                    lv_table_set_cell_value(table, row, col, cell_text ? cell_text : "");
+                }
+            }
+        }
+
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(table, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, table);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'table' unavailable: LV_USE_TABLE=0");
         return ESP_OK;
 #endif
     }

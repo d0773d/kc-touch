@@ -179,6 +179,90 @@ lv_spinner_create(parent);
 
 ---
 
+## 2.7 `roller`
+
+Scrollable option picker for compact mode/status selection.
+
+```yaml
+- type: roller
+  options:
+    - Eco
+    - Balanced
+    - Boost
+  visible_row_count: 3
+  value: "{{state.demo.mode}}"
+  on_change: set(demo.mode, {{value}})
+```
+
+Supports:
+
+- `options`
+- `mode`
+- `visible_row_count`
+- `value`
+- `on_change`
+
+LVGL mapping:
+
+```c
+lv_roller_create(parent);
+lv_roller_set_options(obj, "Eco\nBalanced\nBoost", LV_ROLLER_MODE_NORMAL);
+```
+
+---
+
+## 2.8 `led`
+
+Lightweight status indicator for online/offline or intensity state.
+
+```yaml
+- type: led
+  color: "#22d3ee"
+  value: "{{state.demo.led_level}}"
+```
+
+Supports:
+
+- `color`
+- `value`
+- `width`
+- `height`
+
+LVGL mapping:
+
+```c
+lv_led_create(parent);
+```
+
+---
+
+## 2.9 `table`
+
+Compact grid for structured read-only data.
+
+```yaml
+- type: table
+  column_widths: [150, 120]
+  rows:
+    - cells: ["Widget", "State"]
+    - cells: ["Camera", "On demand"]
+```
+
+Supports:
+
+- `rows`
+- `column_widths`
+- `width`
+- `height`
+
+LVGL mapping:
+
+```c
+lv_table_create(parent);
+```
+
+---
+
 # 3. Input Widgets
 
 Used for Wi-Fi provisioning, settings, forms, etc.
