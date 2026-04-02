@@ -65,6 +65,7 @@ translations:
       actions.open_widgets: "Open Widgets"
       actions.open_table: "Open Table"
       actions.open_chart: "Open Chart"
+      actions.open_calendar: "Open Calendar"
       actions.details: "Open Details"
       actions.modal: "Open Modal"
       actions.english: "English"
@@ -90,6 +91,7 @@ translations:
       screen.widgets: "Widget Gallery"
       screen.table: "Table Demo"
       screen.chart: "Chart Demo"
+      screen.calendar: "Calendar Demo"
       screen.back: "Back"
       detail.status: "Current Status"
       detail.syncs: "Total Syncs"
@@ -134,6 +136,7 @@ translations:
       actions.open_widgets: "Abrir widgets"
       actions.open_table: "Abrir tabla"
       actions.open_chart: "Abrir gráfico"
+      actions.open_calendar: "Abrir calendario"
       actions.details: "Abrir detalles"
       actions.modal: "Abrir modal"
       actions.english: "Inglés"
@@ -157,6 +160,7 @@ translations:
       screen.widgets: "Galería de widgets"
       screen.table: "Demo de tabla"
       screen.chart: "Demo de gráfico"
+      screen.calendar: "Demo de calendario"
       screen.back: "Regresar"
       detail.status: "Estado actual"
       detail.syncs: "Sincronizaciones totales"
@@ -825,6 +829,21 @@ screens:
             text_key: "actions.open_chart"
             style: ghost
             on_click: push(chart_demo)
+      - type: panel
+        style: card
+        props:
+          title: "Calendar"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Calendar stays on its own screen while we validate date rendering and highlighted days."
+            style: body
+          - type: button
+            text_key: "actions.open_calendar"
+            style: ghost
+            on_click: push(calendar_demo)
       - type: button
         text_key: "screen.back"
         style: cta
@@ -910,6 +929,36 @@ screens:
                   - 49
                   - 63
                   - 81
+          - type: button
+            text_key: "screen.back"
+            style: cta
+            on_click: pop()
+
+  calendar_demo:
+    name: calendar_demo
+    title: "Calendar"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text_key: "screen.calendar"
+            style: heading
+          - type: calendar
+            height: 280
+            today: "2026-04-02"
+            shown_month: "2026-04-01"
+            highlighted_dates:
+              - "2026-04-02"
+              - "2026-04-07"
+              - "2026-04-18"
+              - "2026-04-26"
           - type: button
             text_key: "screen.back"
             style: cta

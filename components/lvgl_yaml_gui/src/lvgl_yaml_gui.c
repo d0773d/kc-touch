@@ -158,6 +158,7 @@ static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, 
 static void yui_camera_preview_stop(void);
 static void yui_expr_value_set_coerced_scalar(yui_expr_value_t *out, const char *value);
 static lv_obj_t *yui_find_scroll_host(lv_obj_t *obj);
+static bool yui_parse_calendar_date_string(const char *value, lv_calendar_date_t *out_date);
 
 typedef struct {
     const char *yaml_key;
@@ -382,6 +383,10 @@ static yui_state_watch_handle_t s_locale_watch;
 typedef struct {
     lv_obj_t *overlay;
 } yui_modal_frame_t;
+typedef struct {
+    lv_calendar_date_t *highlighted_dates;
+    size_t highlighted_count;
+} yui_calendar_runtime_t;
 static yui_modal_frame_t *s_modal_stack;
 static size_t s_modal_count;
 static size_t s_modal_capacity;
@@ -574,6 +579,21 @@ static void yui_camera_preview_delete_cb(lv_event_t *event)
     if (target == s_camera_preview.container) {
         yui_camera_preview_stop();
     }
+}
+
+static void yui_calendar_delete_cb(lv_event_t *event)
+{
+    if (!event || lv_event_get_code(event) != LV_EVENT_DELETE) {
+        return;
+    }
+
+    yui_calendar_runtime_t *runtime = (yui_calendar_runtime_t *)lv_event_get_user_data(event);
+    if (!runtime) {
+        return;
+    }
+
+    free(runtime->highlighted_dates);
+    free(runtime);
 }
 
 static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, lv_obj_t *placeholder)
@@ -1571,6 +1591,28 @@ static lv_chart_axis_t yui_chart_axis_from_string(const char *value)
         return LV_CHART_AXIS_SECONDARY_X;
     }
     return LV_CHART_AXIS_PRIMARY_Y;
+}
+
+static bool yui_parse_calendar_date_string(const char *value, lv_calendar_date_t *out_date)
+{
+    if (!value || !out_date) {
+        return false;
+    }
+
+    unsigned int year = 0U;
+    unsigned int month = 0U;
+    unsigned int day = 0U;
+    if (sscanf(value, "%u-%u-%u", &year, &month, &day) != 3) {
+        return false;
+    }
+    if (month < 1U || month > 12U || day < 1U || day > 31U || year > 65535U) {
+        return false;
+    }
+
+    out_date->year = (uint16_t)year;
+    out_date->month = (uint8_t)month;
+    out_date->day = (uint8_t)day;
+    return true;
 }
 
 static uint32_t yui_table_row_column_count(const yml_node_t *row_node)
@@ -3147,6 +3189,95 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
 #else
         yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'chart' unavailable: LV_USE_CHART=0");
+        return ESP_OK;
+#endif
+    }
+    if (strcmp(type, "calendar") == 0) {
+#if LV_USE_CALENDAR
+        lv_obj_t *calendar = lv_calendar_create(parent);
+        yui_register_widget_id(node, calendar);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(calendar, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(calendar, 260);
+        }
+        yui_apply_common_widget_attrs(calendar, node, schema);
+
+        lv_obj_set_style_bg_color(calendar, lv_color_hex(0x0F172A), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(calendar, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_color(calendar, lv_color_hex(0x334155), LV_PART_MAIN);
+        lv_obj_set_style_border_width(calendar, 1, LV_PART_MAIN);
+        lv_obj_set_style_radius(calendar, 12, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(calendar, 8, LV_PART_MAIN);
+        lv_obj_set_style_text_color(calendar, lv_color_hex(0xE2E8F0), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(calendar, lv_color_hex(0x1E293B), LV_PART_ITEMS);
+        lv_obj_set_style_bg_opa(calendar, LV_OPA_COVER, LV_PART_ITEMS);
+        lv_obj_set_style_border_color(calendar, lv_color_hex(0x334155), LV_PART_ITEMS);
+        lv_obj_set_style_border_width(calendar, 1, LV_PART_ITEMS);
+        lv_obj_set_style_text_color(calendar, lv_color_hex(0xE2E8F0), LV_PART_ITEMS);
+
+        lv_calendar_date_t parsed_date;
+        char date_buf[32];
+        const char *today_text = yui_node_resolved_scalar(node, "today", scope, date_buf, sizeof(date_buf));
+        if (today_text && yui_parse_calendar_date_string(today_text, &parsed_date)) {
+            lv_calendar_set_today_date(calendar, parsed_date.year, parsed_date.month, parsed_date.day);
+        }
+
+        char shown_buf[32];
+        const char *shown_text = yui_node_resolved_scalar(node, "shown_month", scope, shown_buf, sizeof(shown_buf));
+        if (shown_text && yui_parse_calendar_date_string(shown_text, &parsed_date)) {
+            lv_calendar_set_month_shown(calendar, parsed_date.year, parsed_date.month);
+        } else if (today_text && yui_parse_calendar_date_string(today_text, &parsed_date)) {
+            lv_calendar_set_month_shown(calendar, parsed_date.year, parsed_date.month);
+        }
+
+        const yml_node_t *highlights_node = yml_node_get_child(node, "highlighted_dates");
+        if (highlights_node && yml_node_get_type(highlights_node) == YML_NODE_SEQUENCE) {
+            size_t highlight_count = yml_node_child_count(highlights_node);
+            if (highlight_count > 0U) {
+                yui_calendar_runtime_t *calendar_runtime = (yui_calendar_runtime_t *)calloc(1, sizeof(yui_calendar_runtime_t));
+                if (calendar_runtime) {
+                    calendar_runtime->highlighted_dates = (lv_calendar_date_t *)calloc(highlight_count, sizeof(lv_calendar_date_t));
+                    if (calendar_runtime->highlighted_dates) {
+                        size_t resolved_count = 0U;
+                        for (size_t i = 0; i < highlight_count; ++i) {
+                            const yml_node_t *highlight_node = yml_node_child_at(highlights_node, i);
+                            char highlight_buf[32];
+                            const char *highlight_text = yui_format_node_text(highlight_node, scope, highlight_buf, sizeof(highlight_buf)) ? highlight_buf : NULL;
+                            if (highlight_text && yui_parse_calendar_date_string(highlight_text, &calendar_runtime->highlighted_dates[resolved_count])) {
+                                resolved_count++;
+                            }
+                        }
+                        if (resolved_count > 0U) {
+                            calendar_runtime->highlighted_count = resolved_count;
+                            lv_calendar_set_highlighted_dates(calendar, calendar_runtime->highlighted_dates, calendar_runtime->highlighted_count);
+                            lv_obj_add_event_cb(calendar, yui_calendar_delete_cb, LV_EVENT_DELETE, calendar_runtime);
+                            calendar_runtime = NULL;
+                        }
+                    }
+                    if (calendar_runtime) {
+                        free(calendar_runtime->highlighted_dates);
+                        free(calendar_runtime);
+                    }
+                }
+            }
+        }
+
+#if LV_USE_CALENDAR_HEADER_ARROW
+        lv_calendar_add_header_arrow(calendar);
+#elif LV_USE_CALENDAR_HEADER_DROPDOWN
+        lv_calendar_add_header_dropdown(calendar);
+#endif
+
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(calendar, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, calendar);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'calendar' unavailable: LV_USE_CALENDAR=0");
         return ESP_OK;
 #endif
     }

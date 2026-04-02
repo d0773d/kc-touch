@@ -296,6 +296,35 @@ lv_chart_create(parent);
 
 ---
 
+## 2.11 `calendar`
+
+Displays a monthly calendar with optional today and highlighted dates.
+
+```yaml
+- type: calendar
+  today: "2026-04-02"
+  shown_month: "2026-04-01"
+  highlighted_dates:
+    - "2026-04-07"
+    - "2026-04-18"
+```
+
+Supports:
+
+- `today`
+- `shown_month`
+- `highlighted_dates`
+- `width`
+- `height`
+
+LVGL mapping:
+
+```c
+lv_calendar_create(parent);
+```
+
+---
+
 # 3. Input Widgets
 
 Used for Wi-Fi provisioning, settings, forms, etc.
