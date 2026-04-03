@@ -66,6 +66,7 @@ translations:
       actions.open_table: "Open Table"
       actions.open_chart: "Open Chart"
       actions.open_calendar: "Open Calendar"
+      actions.open_tabview: "Open Tabs"
       actions.details: "Open Details"
       actions.modal: "Open Modal"
       actions.english: "English"
@@ -92,6 +93,7 @@ translations:
       screen.table: "Table Demo"
       screen.chart: "Chart Demo"
       screen.calendar: "Calendar Demo"
+      screen.tabview: "Tabview Demo"
       screen.back: "Back"
       detail.status: "Current Status"
       detail.syncs: "Total Syncs"
@@ -137,6 +139,7 @@ translations:
       actions.open_table: "Abrir tabla"
       actions.open_chart: "Abrir gráfico"
       actions.open_calendar: "Abrir calendario"
+      actions.open_tabview: "Abrir pestañas"
       actions.details: "Abrir detalles"
       actions.modal: "Abrir modal"
       actions.english: "Inglés"
@@ -161,6 +164,7 @@ translations:
       screen.table: "Demo de tabla"
       screen.chart: "Demo de gráfico"
       screen.calendar: "Demo de calendario"
+      screen.tabview: "Demo de pestañas"
       screen.back: "Regresar"
       detail.status: "Estado actual"
       detail.syncs: "Sincronizaciones totales"
@@ -844,6 +848,21 @@ screens:
             text_key: "actions.open_calendar"
             style: ghost
             on_click: push(calendar_demo)
+      - type: panel
+        style: card
+        props:
+          title: "Tabview"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Tabview is isolated on its own screen while we validate nested widget rendering inside tabs."
+            style: body
+          - type: button
+            text_key: "actions.open_tabview"
+            style: ghost
+            on_click: push(tabview_demo)
       - type: button
         text_key: "screen.back"
         style: cta
@@ -959,6 +978,64 @@ screens:
               - "2026-04-07"
               - "2026-04-18"
               - "2026-04-26"
+          - type: button
+            text_key: "screen.back"
+            style: cta
+            on_click: pop()
+
+  tabview_demo:
+    name: tabview_demo
+    title: "Tabview"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text_key: "screen.tabview"
+            style: heading
+          - type: tabview
+            height: 280
+            tab_bar_position: top
+            tab_bar_size: 44
+            active_tab: 0
+            tabs:
+              - title: "Status"
+                widgets:
+                  - type: label
+                    text: "Device mode: {{state.demo.mode}}"
+                    style: body
+                  - type: label
+                    text: "LED level: {{state.demo.led_level}}"
+                    style: body
+              - title: "Controls"
+                widgets:
+                  - type: slider
+                    min: 0
+                    max: 255
+                    value: "{{state.demo.led_level}}"
+                    on_change: set(demo.led_level, {{value}})
+                  - type: checkbox
+                    text_key: "labels.alerts"
+                    value: "{{state.ui.alerts_enabled}}"
+                    on_change: set(ui.alerts_enabled, {{checked}})
+              - title: "Notes"
+                widgets:
+                  - type: label
+                    text: "Tab content can host normal YamUI widgets, not just plain labels."
+                    style: body
+                  - type: button
+                    text_key: "actions.sync"
+                    style: ghost
+                    enabled_if: "!state.async.sync_demo.running"
+                    on_click:
+                      - call(ui_async_reset, sync_demo)
+                      - call(demo_async_sync, sync_demo)
           - type: button
             text_key: "screen.back"
             style: cta

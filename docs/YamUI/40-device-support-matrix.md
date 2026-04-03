@@ -44,6 +44,7 @@ Companion export format to that contract.
 | `table` | working | Supports YAML-defined rows and column widths for compact data displays. |
 | `chart` | working | Supports static YAML-defined series data, axis range, and basic line/bar rendering. |
 | `calendar` | working | Supports shown month, today, and highlighted dates with LVGL calendar headers when enabled. |
+| `tabview` | working | Supports YAML-defined tabs with nested YamUI widgets and configurable tab bar placement. |
 | `component` | partial | Runtime component system works with current YamUI prop convention, but does not yet match the Companion's richer component schema 1:1. |
 | `list` | working | Uses a real LVGL list container on device and supports nested YamUI child widgets. |
 | `spacer` | working | Simple space block for layout rhythm and separation. |

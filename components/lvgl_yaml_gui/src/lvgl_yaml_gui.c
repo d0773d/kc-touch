@@ -137,6 +137,7 @@ static bool yui_format_node_text(const yml_node_t *node, yui_component_scope_t *
 static lv_chart_type_t yui_chart_type_from_string(const char *value);
 static lv_chart_update_mode_t yui_chart_update_mode_from_string(const char *value);
 static lv_chart_axis_t yui_chart_axis_from_string(const char *value);
+static lv_dir_t yui_dir_from_string(const char *value, lv_dir_t def);
 static char *yui_strdup_local(const char *value);
 static esp_err_t yui_collect_bindings_from_text(const char *text, char ***out_tokens, size_t *out_count);
 static esp_err_t yui_collect_bindings_from_expr(const char *expr, char ***out_tokens, size_t *out_count);
@@ -1591,6 +1592,26 @@ static lv_chart_axis_t yui_chart_axis_from_string(const char *value)
         return LV_CHART_AXIS_SECONDARY_X;
     }
     return LV_CHART_AXIS_PRIMARY_Y;
+}
+
+static lv_dir_t yui_dir_from_string(const char *value, lv_dir_t def)
+{
+    if (!value) {
+        return def;
+    }
+    if (strcasecmp(value, "top") == 0) {
+        return LV_DIR_TOP;
+    }
+    if (strcasecmp(value, "bottom") == 0) {
+        return LV_DIR_BOTTOM;
+    }
+    if (strcasecmp(value, "left") == 0) {
+        return LV_DIR_LEFT;
+    }
+    if (strcasecmp(value, "right") == 0) {
+        return LV_DIR_RIGHT;
+    }
+    return def;
 }
 
 static bool yui_parse_calendar_date_string(const char *value, lv_calendar_date_t *out_date)
@@ -3278,6 +3299,85 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
 #else
         yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'calendar' unavailable: LV_USE_CALENDAR=0");
+        return ESP_OK;
+#endif
+    }
+    if (strcmp(type, "tabview") == 0) {
+#if LV_USE_TABVIEW
+        lv_obj_t *tabview = lv_tabview_create(parent);
+        yui_register_widget_id(node, tabview);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(tabview, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(tabview, 280);
+        }
+        yui_apply_common_widget_attrs(tabview, node, schema);
+
+        lv_tabview_set_tab_bar_position(tabview, yui_dir_from_string(yui_node_scalar(node, "tab_bar_position"), LV_DIR_TOP));
+        lv_tabview_set_tab_bar_size(tabview, yui_node_resolved_i32(node, "tab_bar_size", scope, 44));
+
+        lv_obj_set_style_bg_color(tabview, lv_color_hex(0x0F172A), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(tabview, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_color(tabview, lv_color_hex(0x334155), LV_PART_MAIN);
+        lv_obj_set_style_border_width(tabview, 1, LV_PART_MAIN);
+        lv_obj_set_style_radius(tabview, 12, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(tabview, 0, LV_PART_MAIN);
+
+        lv_obj_t *tab_bar = lv_tabview_get_tab_bar(tabview);
+        if (tab_bar) {
+            lv_obj_set_style_bg_color(tab_bar, lv_color_hex(0x111827), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(tab_bar, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_border_width(tab_bar, 0, LV_PART_MAIN);
+            lv_obj_set_style_text_color(tab_bar, lv_color_hex(0xCBD5E1), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(tab_bar, lv_color_hex(0x22D3EE), LV_PART_ITEMS | LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(tab_bar, lv_color_hex(0x0F172A), LV_PART_ITEMS | LV_STATE_CHECKED);
+        }
+
+        lv_obj_t *content = lv_tabview_get_content(tabview);
+        if (content) {
+            lv_obj_set_style_bg_color(content, lv_color_hex(0x0F172A), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(content, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
+        }
+
+        const yml_node_t *tabs_node = yml_node_get_child(node, "tabs");
+        if (tabs_node && yml_node_get_type(tabs_node) == YML_NODE_SEQUENCE) {
+            size_t tab_count = yml_node_child_count(tabs_node);
+            for (size_t i = 0; i < tab_count; ++i) {
+                const yml_node_t *tab_node = yml_node_child_at(tabs_node, i);
+                if (!tab_node || yml_node_get_type(tab_node) != YML_NODE_MAPPING) {
+                    continue;
+                }
+
+                char title_buf[YUI_TEXT_BUFFER_MAX];
+                const char *tab_title = yui_node_resolved_localized_scalar(tab_node, "title", "title_key", scope, title_buf, sizeof(title_buf));
+                if (!tab_title || tab_title[0] == '\0') {
+                    tab_title = "Tab";
+                }
+
+                lv_obj_t *tab = lv_tabview_add_tab(tabview, tab_title);
+                lv_obj_set_style_bg_color(tab, lv_color_hex(0x0F172A), LV_PART_MAIN);
+                lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, LV_PART_MAIN);
+                lv_obj_set_style_pad_all(tab, 12, LV_PART_MAIN);
+                yui_apply_layout(tab, yml_node_get_child(tab_node, "layout"), "column");
+                esp_err_t render_err = yui_render_widget_list(yml_node_get_child(tab_node, "widgets"), schema, tab, scope);
+                if (render_err != ESP_OK) {
+                    return render_err;
+                }
+            }
+        }
+
+        lv_tabview_set_active(tabview, (uint32_t)yui_node_resolved_i32(node, "active_tab", scope, 0), LV_ANIM_OFF);
+
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(tabview, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, tabview);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'tabview' unavailable: LV_USE_TABVIEW=0");
         return ESP_OK;
 #endif
     }

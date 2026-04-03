@@ -325,6 +325,38 @@ lv_calendar_create(parent);
 
 ---
 
+## 2.12 `tabview`
+
+Displays multiple child panels behind a tab bar.
+
+```yaml
+- type: tabview
+  active_tab: 0
+  tabs:
+    - title: "Status"
+      widgets:
+        - type: label
+          text: "Overview"
+```
+
+Supports:
+
+- `tabs`
+- `active_tab`
+- `tab_bar_position`
+- `tab_bar_size`
+- `width`
+- `height`
+
+LVGL mapping:
+
+```c
+lv_tabview_create(parent);
+lv_tabview_add_tab(obj, "Status");
+```
+
+---
+
 # 3. Input Widgets
 
 Used for Wi-Fi provisioning, settings, forms, etc.
