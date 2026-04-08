@@ -118,6 +118,7 @@ struct yui_widget_runtime {
     yui_component_scope_t *scope;
     yui_widget_events_t events;
     bool disposed;
+    bool binding_refresh_pending;
     bool condition_refresh_pending;
     bool condition_refreshing;
     bool has_visible_state;
@@ -1997,6 +1998,7 @@ static void yui_widget_refresh_binding_async_cb(void *user_data)
     if (!runtime || runtime->disposed) {
         return;
     }
+    runtime->binding_refresh_pending = false;
     yui_widget_refresh_text(runtime);
     yui_widget_refresh_value(runtime);
     yui_widget_schedule_condition_refresh(runtime);
@@ -2010,7 +2012,12 @@ static void yui_widget_state_cb(const char *key, const char *value, void *user_c
     if (!runtime || runtime->disposed) {
         return;
     }
+    if (runtime->binding_refresh_pending) {
+        return;
+    }
+    runtime->binding_refresh_pending = true;
     if (lv_async_call(yui_widget_refresh_binding_async_cb, runtime) != LV_RESULT_OK) {
+        runtime->binding_refresh_pending = false;
         yui_widget_refresh_text(runtime);
         yui_widget_refresh_value(runtime);
         yui_widget_schedule_condition_refresh(runtime);
@@ -2160,9 +2167,11 @@ static esp_err_t yui_widget_bind_text(yui_widget_runtime_t *runtime, const char 
             }
         }
     }
-    err = yui_widget_watch_all_state(runtime);
-    if (err != ESP_OK) {
-        return err;
+    if (runtime->binding_count == 0U) {
+        err = yui_widget_watch_all_state(runtime);
+        if (err != ESP_OK) {
+            return err;
+        }
     }
     yui_widget_refresh_text(runtime);
     return ESP_OK;
@@ -2254,9 +2263,11 @@ static esp_err_t yui_widget_bind_value(yui_widget_runtime_t *runtime, const char
             }
         }
     }
-    err = yui_widget_watch_all_state(runtime);
-    if (err != ESP_OK) {
-        return err;
+    if (runtime->binding_count == 0U) {
+        err = yui_widget_watch_all_state(runtime);
+        if (err != ESP_OK) {
+            return err;
+        }
     }
     yui_widget_refresh_value(runtime);
     return ESP_OK;
@@ -2343,9 +2354,11 @@ static esp_err_t yui_widget_bind_conditions(yui_widget_runtime_t *runtime, const
         }
     }
     free(tokens);
-    err = yui_widget_watch_all_state(runtime);
-    if (err != ESP_OK) {
-        return err;
+    if (token_count == 0U) {
+        err = yui_widget_watch_all_state(runtime);
+        if (err != ESP_OK) {
+            return err;
+        }
     }
     yui_widget_schedule_condition_refresh(runtime);
     return ESP_OK;
