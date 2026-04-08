@@ -67,6 +67,7 @@ translations:
       actions.open_chart: "Open Chart"
       actions.open_calendar: "Open Calendar"
       actions.open_tabview: "Open Tabs"
+      actions.open_menu: "Open Menu"
       actions.details: "Open Details"
       actions.modal: "Open Modal"
       actions.english: "English"
@@ -94,6 +95,7 @@ translations:
       screen.chart: "Chart Demo"
       screen.calendar: "Calendar Demo"
       screen.tabview: "Tabview Demo"
+      screen.menu: "Menu Demo"
       screen.back: "Back"
       detail.status: "Current Status"
       detail.syncs: "Total Syncs"
@@ -140,6 +142,7 @@ translations:
       actions.open_chart: "Abrir gráfico"
       actions.open_calendar: "Abrir calendario"
       actions.open_tabview: "Abrir pestañas"
+      actions.open_menu: "Abrir menú"
       actions.details: "Abrir detalles"
       actions.modal: "Abrir modal"
       actions.english: "Inglés"
@@ -165,6 +168,7 @@ translations:
       screen.chart: "Demo de gráfico"
       screen.calendar: "Demo de calendario"
       screen.tabview: "Demo de pestañas"
+      screen.menu: "Demo de menú"
       screen.back: "Regresar"
       detail.status: "Estado actual"
       detail.syncs: "Sincronizaciones totales"
@@ -398,6 +402,30 @@ components:
                   - close_modal()
 
 screens:
+  showcase_diag:
+    name: showcase_diag
+    title: "Menu Path Diagnostic"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text: "Menu Path Diagnostic"
+            style: heading
+          - type: label
+            text: "This screen keeps the dashboard path minimal while preserving showcase -> widgets -> menu navigation."
+            style: body
+          - type: button
+            text_key: "actions.open_widgets"
+            style: cta
+            on_click: push(widgets)
+
   showcase:
     name: showcase
     title: "YamUI Showcase"
@@ -588,94 +616,57 @@ screens:
                 style: ghost
                 on_click: push(widgets)
 
-          - type: row
+          - type: panel
+            grow: 1
+            style: card
+            props:
+              title_key: "panel.profile"
             layout:
-              type: row
-              gap: 12
-            width: "100%"
+              type: column
+              gap: 8
             widgets:
-              - type: panel
-                grow: 1
-                style: card
-                props:
-                  title_key: "panel.profile"
+              - type: label
+                text_key: "labels.profile_name"
+                style: stat-label
+              - type: textarea
+                id: profile-name
+                text: "{{state.profile.name}}"
+                placeholder_key: "labels.profile_name"
+                on_change: set(profile.name, {{value}})
+              - type: label
+                text_key: "labels.profile_note"
+                style: stat-label
+              - type: textarea
+                id: profile-note
+                text: "{{state.profile.note}}"
+                placeholder_key: "labels.profile_note"
+                on_focus: set(ui.keyboard_visible, true)
+                on_blur: set(ui.keyboard_visible, false)
+                on_change: set(profile.note, {{value}})
+          - type: panel
+            grow: 1
+            style: card
+            props:
+              title_key: "panel.activity"
+            layout:
+              type: column
+              gap: 8
+            widgets:
+              - type: row
                 layout:
-                  type: column
+                  type: row
                   gap: 8
+                  align: center
                 widgets:
                   - type: label
-                    text_key: "labels.profile_name"
+                    text_key: "labels.sync_count"
                     style: stat-label
-                  - type: textarea
-                    id: profile-name
-                    text: "{{state.profile.name}}"
-                    placeholder_key: "labels.profile_name"
-                    on_change: set(profile.name, {{value}})
                   - type: label
-                    text_key: "labels.profile_note"
-                    style: stat-label
-                  - type: textarea
-                    id: profile-note
-                    text: "{{state.profile.note}}"
-                    placeholder_key: "labels.profile_note"
-                    on_focus: set(ui.keyboard_visible, true)
-                    on_blur: set(ui.keyboard_visible, false)
-                    on_change: set(profile.note, {{value}})
-              - type: panel
-                grow: 1
-                style: card
-                props:
-                  title_key: "panel.activity"
-                layout:
-                  type: column
-                  gap: 8
-                widgets:
-                  - type: list
-                    height: 96
-                    layout:
-                      type: column
-                      gap: 8
-                    widgets:
-                      - type: label
-                        text_key: "activity.one"
-                      - type: label
-                        text_key: "activity.two"
-                      - type: label
-                        text_key: "activity.three"
-                      - type: label
-                        text_key: "activity.four"
-                      - type: label
-                        text_key: "activity.five"
-                      - type: label
-                        text_key: "activity.six"
-                      - type: label
-                        text_key: "activity.seven"
-                      - type: label
-                        text_key: "activity.eight"
-                  - type: row
-                    layout:
-                      type: row
-                      gap: 8
-                      align: center
-                    widgets:
-                      - type: label
-                        text_key: "labels.sync_count"
-                        style: stat-label
-                      - type: label
-                        text: "{{state.ui.sync_count}}"
-                        style: body
-                  - type: label
-                    text_key: "{{state.welcome_message}}"
+                    text: "{{state.ui.sync_count}}"
                     style: body
-                  - type: label
-                    text: "Progress: {{state.async.sync_demo.progress}}%"
-                    style: body
-
-          - type: keyboard
-            overlay: true
-            visible_if: state.ui.keyboard_visible
-            height: 300
-            target: profile-note
+              - type: label
+                text_key: "{{state.welcome_message}}"
+                style: body
 
   details:
     name: details
@@ -863,6 +854,21 @@ screens:
             text_key: "actions.open_tabview"
             style: ghost
             on_click: push(tabview_demo)
+      - type: panel
+        style: card
+        props:
+          title: "Menu"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Menu works in a simplified isolated screen and is being validated there."
+            style: body
+          - type: button
+            text_key: "actions.open_menu"
+            style: ghost
+            on_click: push(menu_demo)
       - type: button
         text_key: "screen.back"
         style: cta
@@ -1040,3 +1046,58 @@ screens:
             text_key: "screen.back"
             style: cta
             on_click: pop()
+
+  menu_demo:
+    name: menu_demo
+    title: "Menu"
+    layout:
+      type: column
+      gap: 12
+    widgets:
+      - type: label
+        text_key: "screen.menu"
+        style: heading
+      - type: label
+        text: "Menu works in isolation. This screen is the next step in validating it from the normal app flow."
+        style: body
+      - type: menu
+        width: "100%"
+        height: 620
+        root_title: "Settings"
+        header_mode: top_fixed
+        root_back_button: false
+        items:
+          - title: "Connectivity"
+            page:
+              title: "Connectivity"
+              widgets:
+                - type: label
+                  text: "SSID: {{state.network.ssid}}"
+                  style: body
+                - type: label
+                  text: "Security: {{state.network.security}}"
+                  style: body
+          - title: "Display"
+            page:
+              title: "Display"
+              widgets:
+                - type: label
+                  text: "Brightness: {{state.display.brightness}}"
+                  style: body
+                - type: label
+                  text: "Dark theme: {{state.ui.dark_mode}}"
+                  style: body
+          - title: "Status"
+            page:
+              title: "Status"
+              widgets:
+                - type: label
+                  text: "Sync Count: {{state.ui.sync_count}}"
+                  style: body
+                - type: label
+                  text: "Mode: {{state.demo.mode}}"
+                  style: body
+      - type: button
+        text_key: "screen.back"
+        style: cta
+        on_click: pop()

@@ -104,6 +104,7 @@ struct yui_widget_runtime {
     lv_obj_t *event_target;
     lv_obj_t *text_target;
     char *text_template;
+    bool text_template_is_translation_key;
     lv_obj_t *value_target;
     char *value_template;
     lv_obj_t *condition_target;
@@ -138,6 +139,8 @@ static lv_chart_type_t yui_chart_type_from_string(const char *value);
 static lv_chart_update_mode_t yui_chart_update_mode_from_string(const char *value);
 static lv_chart_axis_t yui_chart_axis_from_string(const char *value);
 static lv_dir_t yui_dir_from_string(const char *value, lv_dir_t def);
+static lv_menu_mode_header_t yui_menu_header_mode_from_string(const char *value);
+static lv_menu_mode_root_back_button_t yui_menu_root_back_button_mode_from_string(const char *value);
 static char *yui_strdup_local(const char *value);
 static esp_err_t yui_collect_bindings_from_text(const char *text, char ***out_tokens, size_t *out_count);
 static esp_err_t yui_collect_bindings_from_expr(const char *expr, char ***out_tokens, size_t *out_count);
@@ -160,6 +163,7 @@ static void yui_camera_preview_stop(void);
 static void yui_expr_value_set_coerced_scalar(yui_expr_value_t *out, const char *value);
 static lv_obj_t *yui_find_scroll_host(lv_obj_t *obj);
 static bool yui_parse_calendar_date_string(const char *value, lv_calendar_date_t *out_date);
+static void yui_disable_shadows_recursive(lv_obj_t *obj);
 
 typedef struct {
     const char *yaml_key;
@@ -1614,6 +1618,32 @@ static lv_dir_t yui_dir_from_string(const char *value, lv_dir_t def)
     return def;
 }
 
+static lv_menu_mode_header_t yui_menu_header_mode_from_string(const char *value)
+{
+    if (!value || value[0] == '\0') {
+        return LV_MENU_HEADER_TOP_FIXED;
+    }
+    if (strcasecmp(value, "top_unfixed") == 0 || strcasecmp(value, "unfixed") == 0) {
+        return LV_MENU_HEADER_TOP_UNFIXED;
+    }
+    if (strcasecmp(value, "bottom_fixed") == 0 || strcasecmp(value, "bottom") == 0) {
+        return LV_MENU_HEADER_BOTTOM_FIXED;
+    }
+    return LV_MENU_HEADER_TOP_FIXED;
+}
+
+static lv_menu_mode_root_back_button_t yui_menu_root_back_button_mode_from_string(const char *value)
+{
+    if (!value || value[0] == '\0') {
+        return LV_MENU_ROOT_BACK_BUTTON_DISABLED;
+    }
+    if (strcasecmp(value, "true") == 0 || strcmp(value, "1") == 0 ||
+        strcasecmp(value, "enabled") == 0 || strcasecmp(value, "show") == 0) {
+        return LV_MENU_ROOT_BACK_BUTTON_ENABLED;
+    }
+    return LV_MENU_ROOT_BACK_BUTTON_DISABLED;
+}
+
 static bool yui_parse_calendar_date_string(const char *value, lv_calendar_date_t *out_date)
 {
     if (!value || !out_date) {
@@ -1634,6 +1664,23 @@ static bool yui_parse_calendar_date_string(const char *value, lv_calendar_date_t
     out_date->month = (uint8_t)month;
     out_date->day = (uint8_t)day;
     return true;
+}
+
+static void yui_disable_shadows_recursive(lv_obj_t *obj)
+{
+    if (!obj) {
+        return;
+    }
+    lv_obj_set_style_shadow_width(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(obj, 0, LV_PART_ITEMS);
+    lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, LV_PART_ITEMS);
+
+    uint32_t child_count = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < child_count; ++i) {
+        lv_obj_t *child = lv_obj_get_child(obj, (int32_t)i);
+        yui_disable_shadows_recursive(child);
+    }
 }
 
 static uint32_t yui_table_row_column_count(const yml_node_t *row_node)
@@ -1711,7 +1758,12 @@ static void yui_widget_refresh_text(yui_widget_runtime_t *runtime)
     }
     char buffer[YUI_TEXT_BUFFER_MAX];
     yui_format_text(runtime->text_template, runtime->scope, buffer, sizeof(buffer));
-    lv_label_set_text(runtime->text_target, buffer);
+    const char *final_text = buffer;
+    if (runtime->text_template_is_translation_key) {
+        const char *translated = yui_translate_key(buffer);
+        final_text = translated ? translated : "";
+    }
+    lv_label_set_text(runtime->text_target, final_text);
     lv_obj_mark_layout_as_dirty(runtime->text_target);
     lv_obj_invalidate(runtime->text_target);
     lv_obj_t *parent = lv_obj_get_parent(runtime->text_target);
@@ -2068,12 +2120,13 @@ static esp_err_t yui_widget_watch_state(yui_widget_runtime_t *runtime, const cha
     return ESP_OK;
 }
 
-static esp_err_t yui_widget_bind_text(yui_widget_runtime_t *runtime, const char *text, lv_obj_t *target)
+static esp_err_t yui_widget_bind_text(yui_widget_runtime_t *runtime, const char *text, lv_obj_t *target, bool is_translation_key)
 {
     if (!runtime || !text || !target) {
         return ESP_OK;
     }
     runtime->text_target = target;
+    runtime->text_template_is_translation_key = is_translation_key;
     runtime->text_template = yui_strdup_local(text);
     if (!runtime->text_template) {
         return ESP_ERR_NO_MEM;
@@ -2655,12 +2708,18 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         yui_register_widget_id(node, label);
         yui_apply_common_widget_attrs(label, node, schema);
         const char *raw_text = yui_node_scalar(node, "text");
+        const char *raw_text_key = yui_node_scalar(node, "text_key");
         char text_buf[YUI_TEXT_BUFFER_MAX];
         const char *text = yui_node_resolved_localized_scalar(node, "text", "text_key", scope, text_buf, sizeof(text_buf));
         yui_widget_runtime_t *runtime = yui_widget_runtime_create(label, scope);
         if (runtime && text) {
-            const char *bind_text = (raw_text && strstr(raw_text, "{{") && strstr(raw_text, "}}")) ? raw_text : text;
-            (void)yui_widget_bind_text(runtime, bind_text, label);
+            if (raw_text && strstr(raw_text, "{{") && strstr(raw_text, "}}")) {
+                (void)yui_widget_bind_text(runtime, raw_text, label, false);
+            } else if (raw_text_key && strstr(raw_text_key, "{{") && strstr(raw_text_key, "}}")) {
+                (void)yui_widget_bind_text(runtime, raw_text_key, label, true);
+            } else {
+                lv_label_set_text(label, text);
+            }
         } else if (text) {
             lv_label_set_text(label, text);
         }
@@ -2742,11 +2801,14 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
     }
     if (strcmp(type, "button") == 0) {
         char text_buf[YUI_TEXT_BUFFER_MAX];
+        const char *raw_text = yui_node_scalar(node, "text");
+        const char *raw_text_key = yui_node_scalar(node, "text_key");
         const char *text = yui_node_resolved_localized_scalar(node, "text", "text_key", scope, text_buf, sizeof(text_buf));
         lv_obj_t *btn = lv_button_create(parent);
         lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
         yui_register_widget_id(node, btn);
-        bool text_is_dynamic = text && strstr(text, "{{") && strstr(text, "}}");
+        bool text_is_dynamic = (raw_text && strstr(raw_text, "{{") && strstr(raw_text, "}}"))
+            || (raw_text_key && strstr(raw_text_key, "{{") && strstr(raw_text_key, "}}"));
         if (!yui_node_has_child(node, "width")) {
             lv_flex_flow_t parent_flow = lv_obj_get_style_flex_flow(parent, LV_PART_MAIN);
             if (parent_flow == LV_FLEX_FLOW_COLUMN || parent_flow == LV_FLEX_FLOW_COLUMN_WRAP) {
@@ -2766,7 +2828,11 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         if (runtime) {
             runtime->text_target = label;
             if (text && text_is_dynamic) {
-                (void)yui_widget_bind_text(runtime, text, label);
+                if (raw_text && strstr(raw_text, "{{") && strstr(raw_text, "}}")) {
+                    (void)yui_widget_bind_text(runtime, raw_text, label, false);
+                } else if (raw_text_key && strstr(raw_text_key, "{{") && strstr(raw_text_key, "}}")) {
+                    (void)yui_widget_bind_text(runtime, raw_text_key, label, true);
+                }
             }
             (void)yui_widget_bind_conditions(runtime, node, btn);
             (void)yui_widget_parse_events(node, runtime);
@@ -3299,6 +3365,181 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
         return ESP_OK;
 #else
         yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'calendar' unavailable: LV_USE_CALENDAR=0");
+        return ESP_OK;
+#endif
+    }
+    if (strcmp(type, "menu") == 0) {
+#if LV_USE_MENU
+        lv_obj_t *menu = lv_menu_create(parent);
+        yui_register_widget_id(node, menu);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(menu, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(menu, 320);
+        }
+        yui_apply_common_widget_attrs(menu, node, schema);
+
+        lv_menu_set_mode_header(menu, yui_menu_header_mode_from_string(yui_node_scalar(node, "header_mode")));
+        lv_menu_set_mode_root_back_button(menu,
+                                          yui_menu_root_back_button_mode_from_string(yui_node_scalar(node, "root_back_button")));
+
+        lv_obj_set_style_bg_color(menu, lv_color_hex(0x0F172A), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(menu, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_width(menu, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(menu, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(menu, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(menu, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_opa(menu, LV_OPA_TRANSP, LV_PART_MAIN);
+
+        lv_obj_t *main_header = lv_menu_get_main_header(menu);
+        if (main_header) {
+            lv_obj_set_style_bg_color(main_header, lv_color_hex(0x111827), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(main_header, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_border_width(main_header, 0, LV_PART_MAIN);
+            lv_obj_set_style_text_color(main_header, lv_color_hex(0xE2E8F0), LV_PART_MAIN);
+            lv_obj_set_style_shadow_width(main_header, 0, LV_PART_MAIN);
+            lv_obj_set_style_shadow_opa(main_header, LV_OPA_TRANSP, LV_PART_MAIN);
+        }
+
+        char root_title_buf[YUI_TEXT_BUFFER_MAX];
+        const char *root_title = yui_node_resolved_localized_scalar(node,
+                                                                    "root_title",
+                                                                    "root_title_key",
+                                                                    scope,
+                                                                    root_title_buf,
+                                                                    sizeof(root_title_buf));
+        lv_obj_t *root_page = lv_menu_page_create(menu, root_title && root_title[0] != '\0' ? root_title : NULL);
+        if (root_page) {
+            lv_obj_set_style_bg_color(root_page, lv_color_hex(0x0F172A), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(root_page, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_pad_all(root_page, 8, LV_PART_MAIN);
+            lv_obj_set_style_shadow_width(root_page, 0, LV_PART_MAIN);
+            lv_obj_set_style_shadow_opa(root_page, LV_OPA_TRANSP, LV_PART_MAIN);
+        }
+
+        lv_obj_t *root_section = root_page ? lv_menu_section_create(root_page) : NULL;
+        if (root_section) {
+            lv_obj_set_style_bg_opa(root_section, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_set_style_border_width(root_section, 0, LV_PART_MAIN);
+            lv_obj_set_style_pad_all(root_section, 0, LV_PART_MAIN);
+            lv_obj_set_style_shadow_width(root_section, 0, LV_PART_MAIN);
+            lv_obj_set_style_shadow_opa(root_section, LV_OPA_TRANSP, LV_PART_MAIN);
+        }
+
+        const yml_node_t *items_node = yml_node_get_child(node, "items");
+        if (root_page && root_section && items_node && yml_node_get_type(items_node) == YML_NODE_SEQUENCE) {
+            size_t item_count = yml_node_child_count(items_node);
+            for (size_t i = 0; i < item_count; ++i) {
+                const yml_node_t *item_node = yml_node_child_at(items_node, i);
+                if (!item_node || yml_node_get_type(item_node) != YML_NODE_MAPPING) {
+                    continue;
+                }
+
+                char item_title_buf[YUI_TEXT_BUFFER_MAX];
+                const char *item_title = yui_node_resolved_localized_scalar(item_node,
+                                                                            "title",
+                                                                            "title_key",
+                                                                            scope,
+                                                                            item_title_buf,
+                                                                            sizeof(item_title_buf));
+                if (!item_title || item_title[0] == '\0') {
+                    item_title = "Item";
+                }
+
+                lv_obj_t *dest_page = NULL;
+                const yml_node_t *page_node = yml_node_get_child(item_node, "page");
+                if (page_node && yml_node_get_type(page_node) == YML_NODE_MAPPING) {
+                    char page_title_buf[YUI_TEXT_BUFFER_MAX];
+                    const char *page_title = yui_node_resolved_localized_scalar(page_node,
+                                                                                "title",
+                                                                                "title_key",
+                                                                                scope,
+                                                                                page_title_buf,
+                                                                                sizeof(page_title_buf));
+                    if (!page_title || page_title[0] == '\0') {
+                        page_title = item_title;
+                    }
+
+                    dest_page = lv_menu_page_create(menu, page_title);
+                    if (dest_page) {
+                        lv_obj_set_style_bg_color(dest_page, lv_color_hex(0x0F172A), LV_PART_MAIN);
+                        lv_obj_set_style_bg_opa(dest_page, LV_OPA_COVER, LV_PART_MAIN);
+                        lv_obj_set_style_pad_all(dest_page, 12, LV_PART_MAIN);
+                        lv_obj_set_style_shadow_width(dest_page, 0, LV_PART_MAIN);
+                        lv_obj_set_style_shadow_opa(dest_page, LV_OPA_TRANSP, LV_PART_MAIN);
+                        lv_obj_t *page_section = lv_menu_section_create(dest_page);
+                        if (page_section) {
+                            lv_obj_set_style_bg_opa(page_section, LV_OPA_TRANSP, LV_PART_MAIN);
+                            lv_obj_set_style_border_width(page_section, 0, LV_PART_MAIN);
+                            lv_obj_set_style_pad_all(page_section, 0, LV_PART_MAIN);
+                            lv_obj_set_style_shadow_width(page_section, 0, LV_PART_MAIN);
+                            lv_obj_set_style_shadow_opa(page_section, LV_OPA_TRANSP, LV_PART_MAIN);
+
+                            lv_obj_t *page_container = lv_menu_cont_create(page_section);
+                            if (page_container) {
+                                lv_obj_set_style_bg_color(page_container, lv_color_hex(0x0F172A), LV_PART_MAIN);
+                                lv_obj_set_style_bg_opa(page_container, LV_OPA_COVER, LV_PART_MAIN);
+                                lv_obj_set_style_border_width(page_container, 0, LV_PART_MAIN);
+                                lv_obj_set_style_pad_all(page_container, 0, LV_PART_MAIN);
+                                lv_obj_set_style_shadow_width(page_container, 0, LV_PART_MAIN);
+                                lv_obj_set_style_shadow_opa(page_container, LV_OPA_TRANSP, LV_PART_MAIN);
+                                yui_apply_layout(page_container, yml_node_get_child(page_node, "layout"), "column");
+                                esp_err_t render_err = yui_render_widget_list(yml_node_get_child(page_node, "widgets"), schema, page_container, scope);
+                                if (render_err != ESP_OK) {
+                                    return render_err;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                lv_obj_t *cont = lv_menu_cont_create(root_section);
+                if (!cont) {
+                    continue;
+                }
+                lv_obj_set_style_bg_color(cont, lv_color_hex(0x111827), LV_PART_MAIN);
+                lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, LV_PART_MAIN);
+                lv_obj_set_style_border_width(cont, 0, LV_PART_MAIN);
+                lv_obj_set_style_radius(cont, 0, LV_PART_MAIN);
+                lv_obj_set_style_pad_all(cont, 10, LV_PART_MAIN);
+                lv_obj_set_style_shadow_width(cont, 0, LV_PART_MAIN);
+                lv_obj_set_style_shadow_opa(cont, LV_OPA_TRANSP, LV_PART_MAIN);
+
+                lv_obj_t *label = lv_label_create(cont);
+                lv_label_set_text(label, item_title);
+                lv_obj_set_style_text_color(label, lv_color_hex(0xE2E8F0), LV_PART_MAIN);
+
+                char subtitle_buf[YUI_TEXT_BUFFER_MAX];
+                const char *subtitle = yui_node_resolved_localized_scalar(item_node,
+                                                                          "subtitle",
+                                                                          "subtitle_key",
+                                                                          scope,
+                                                                          subtitle_buf,
+                                                                          sizeof(subtitle_buf));
+                if (subtitle && subtitle[0] != '\0') {
+                    lv_obj_t *sub = lv_label_create(cont);
+                    lv_label_set_text(sub, subtitle);
+                    lv_obj_set_style_text_color(sub, lv_color_hex(0x94A3B8), LV_PART_MAIN);
+                }
+
+                if (dest_page) {
+                    lv_menu_set_load_page_event(menu, cont, dest_page);
+                }
+            }
+        }
+
+        lv_menu_set_page(menu, root_page);
+        yui_disable_shadows_recursive(menu);
+
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(menu, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, menu);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'menu' unavailable: LV_USE_MENU=0");
         return ESP_OK;
 #endif
     }

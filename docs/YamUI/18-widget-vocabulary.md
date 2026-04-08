@@ -357,6 +357,43 @@ lv_tabview_add_tab(obj, "Status");
 
 ---
 
+## 2.13 `menu`
+
+Displays a multi-page LVGL menu with a root page and drill-down entries.
+
+```yaml
+- type: menu
+  root_title: "Settings"
+  items:
+    - title: "Connectivity"
+      subtitle: "Wi-Fi and security"
+      page:
+        title: "Connectivity"
+        widgets:
+          - type: label
+            text: "SSID: {{state.network.ssid}}"
+```
+
+Supports:
+
+- `root_title`
+- `root_title_key`
+- `header_mode`
+- `root_back_button`
+- `items`
+- `width`
+- `height`
+
+LVGL mapping:
+
+```c
+lv_menu_create(parent);
+lv_menu_page_create(menu, "Settings");
+lv_menu_set_load_page_event(menu, cont, page);
+```
+
+---
+
 # 3. Input Widgets
 
 Used for Wi-Fi provisioning, settings, forms, etc.
