@@ -4371,6 +4371,26 @@ esp_err_t lvgl_yaml_gui_load_default(void)
     return lvgl_yaml_gui_load_named(default_schema);
 }
 
+esp_err_t lvgl_yaml_gui_load_from_buffer(const char *data, size_t length,
+                                         const char *name)
+{
+    if (!data || length == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = yui_runtime_prepare();
+    if (err != ESP_OK) {
+        return err;
+    }
+    yml_node_t *root = NULL;
+    err = yaml_core_parse_buffer(data, length, &root);
+    if (err != ESP_OK) {
+        return err;
+    }
+    yui_schema_runtime_t *schema = yui_schema_runtime_attach(
+        name ? name : "buffer", root);
+    return yui_boot_loaded_schema(schema);
+}
+
 
 
 

@@ -12,6 +12,8 @@ extern "C" {
 esp_err_t lvgl_yaml_gui_load_default(void);
 esp_err_t lvgl_yaml_gui_load_named(const char *schema_name);
 esp_err_t lvgl_yaml_gui_load_from_file(const char *path);
+esp_err_t lvgl_yaml_gui_load_from_buffer(const char *data, size_t length,
+                                         const char *name);
 
 #ifdef __cplusplus
 }
