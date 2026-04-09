@@ -599,27 +599,6 @@ screens:
           - type: panel
             style: card
             props:
-              title_key: "panel.camera"
-            layout:
-              type: column
-              gap: 8
-            widgets:
-              - type: label
-                text: "Camera preview loads only when opened."
-                style: body
-              - type: button
-                text_key: "actions.open_camera"
-                style: cta
-                on_click: push(camera)
-              - type: button
-                text_key: "actions.open_widgets"
-                style: ghost
-                on_click: push(widgets)
-
-          - type: panel
-            grow: 1
-            style: card
-            props:
               title_key: "panel.profile"
             layout:
               type: column
@@ -643,30 +622,34 @@ screens:
                 on_focus: set(ui.keyboard_visible, true)
                 on_blur: set(ui.keyboard_visible, false)
                 on_change: set(profile.note, {{value}})
+
           - type: panel
-            grow: 1
             style: card
             props:
-              title_key: "panel.activity"
+              title_key: "panel.camera"
             layout:
               type: column
               gap: 8
             widgets:
-              - type: row
-                layout:
-                  type: row
-                  gap: 8
-                  align: center
-                widgets:
-                  - type: label
-                    text_key: "labels.sync_count"
-                    style: stat-label
-                  - type: label
-                    text: "{{state.ui.sync_count}}"
-                    style: body
               - type: label
-                text_key: "{{state.welcome_message}}"
+                text: "Camera preview loads only when opened."
                 style: body
+              - type: button
+                text_key: "actions.open_camera"
+                style: cta
+                enabled_if: "!state.async.sync_demo.running"
+                on_click: push(camera)
+              - type: button
+                text_key: "actions.open_widgets"
+                style: ghost
+                enabled_if: "!state.async.sync_demo.running"
+                on_click: push(widgets)
+
+      - type: keyboard
+        overlay: true
+        visible_if: state.ui.keyboard_visible
+        height: 300
+        target: profile-note
 
   details:
     name: details
@@ -808,6 +791,7 @@ screens:
           - type: button
             text_key: "actions.open_table"
             style: ghost
+            enabled_if: "!state.async.sync_demo.running"
             on_click: push(table_demo)
       - type: panel
         style: card
@@ -823,6 +807,7 @@ screens:
           - type: button
             text_key: "actions.open_chart"
             style: ghost
+            enabled_if: "!state.async.sync_demo.running"
             on_click: push(chart_demo)
       - type: panel
         style: card
@@ -838,6 +823,7 @@ screens:
           - type: button
             text_key: "actions.open_calendar"
             style: ghost
+            enabled_if: "!state.async.sync_demo.running"
             on_click: push(calendar_demo)
       - type: panel
         style: card
@@ -853,6 +839,7 @@ screens:
           - type: button
             text_key: "actions.open_tabview"
             style: ghost
+            enabled_if: "!state.async.sync_demo.running"
             on_click: push(tabview_demo)
       - type: panel
         style: card
@@ -868,6 +855,7 @@ screens:
           - type: button
             text_key: "actions.open_menu"
             style: ghost
+            enabled_if: "!state.async.sync_demo.running"
             on_click: push(menu_demo)
       - type: button
         text_key: "screen.back"

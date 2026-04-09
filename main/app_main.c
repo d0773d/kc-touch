@@ -36,11 +36,6 @@ static void yui_demo_sync_apply(void *arg)
     const char *operation = ctx->operation[0] != '\0' ? ctx->operation : "sync_demo";
 
     if (ctx->mark_complete) {
-        (void)yui_state_set("welcome_message", ctx->message);
-        (void)yui_state_set("activity.latest", "activity.nine");
-        (void)yui_state_set("activity.previous", "activity.ten");
-        (void)yui_state_set("activity.oldest", "activity.eleven");
-        (void)yui_state_set("detail.last_sync", "detail.sync_complete");
         if (ctx->increment_sync_count) {
             (void)yui_state_set_int("ui.sync_count", yui_state_get_int("ui.sync_count", 0) + 1);
         }
@@ -50,7 +45,6 @@ static void yui_demo_sync_apply(void *arg)
     }
 
     if (ctx->mark_failed) {
-        (void)yui_state_set("welcome_message", ctx->message);
         (void)yamui_async_fail(operation, ctx->message);
         free(ctx);
         return;
@@ -61,7 +55,6 @@ static void yui_demo_sync_apply(void *arg)
     } else {
         (void)yamui_async_progress(operation, ctx->progress, ctx->message);
     }
-    (void)yui_state_set("welcome_message", ctx->message);
     free(ctx);
 }
 
@@ -101,17 +94,12 @@ static void yui_demo_sync_task(void *arg)
     }
     vTaskDelay(pdMS_TO_TICKS(350));
 
-    if (!yui_demo_sync_dispatch_step(operation, 20, "status.sync_preparing", false, false, false)) {
-        goto fail;
-    }
-    vTaskDelay(pdMS_TO_TICKS(350));
-
-    if (!yui_demo_sync_dispatch_step(operation, 55, "status.sync_uploading", false, false, false)) {
+    if (!yui_demo_sync_dispatch_step(operation, 50, "status.sync_preparing", false, false, false)) {
         goto fail;
     }
     vTaskDelay(pdMS_TO_TICKS(450));
 
-    if (!yui_demo_sync_dispatch_step(operation, 85, "status.sync_finalizing", false, false, false)) {
+    if (!yui_demo_sync_dispatch_step(operation, 90, "status.sync_finalizing", false, false, false)) {
         goto fail;
     }
     vTaskDelay(pdMS_TO_TICKS(350));
@@ -138,7 +126,6 @@ static void yui_native_fn_demo_async_sync(int argc, const char **argv)
     yui_demo_sync_ctx_t *ctx = (yui_demo_sync_ctx_t *)calloc(1, sizeof(yui_demo_sync_ctx_t));
     if (!ctx) {
         (void)yamui_async_fail(operation, "status.sync_failed");
-        (void)yui_state_set("welcome_message", "status.sync_failed");
         return;
     }
     snprintf(ctx->operation, sizeof(ctx->operation), "%s", operation);
@@ -152,7 +139,6 @@ static void yui_native_fn_demo_async_sync(int argc, const char **argv)
     if (created != pdPASS) {
         free(ctx);
         (void)yamui_async_fail(operation, "status.sync_failed");
-        (void)yui_state_set("welcome_message", "status.sync_failed");
     }
 }
 
