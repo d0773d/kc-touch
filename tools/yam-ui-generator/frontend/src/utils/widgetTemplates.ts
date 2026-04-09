@@ -36,6 +36,18 @@ const widgetFactories: Record<WidgetType, () => WidgetNode> = {
   menu: () => ({ ...baseWidget(), type: "menu", props: { root_title: "Menu", header_mode: "top_fixed", items: [] } }),
   keyboard: () => ({ ...baseWidget(), type: "keyboard", props: { overlay: true, target: "" } }),
   led: () => ({ ...baseWidget(), type: "led", props: { color: "#22d3ee", width: 26, height: 26 } }),
+  spinner: () => ({ ...baseWidget(), type: "spinner", props: { duration: 1000, arc_sweep: 240 } }),
+  line: () => ({ ...baseWidget(), type: "line", props: { points: [[0, 0], [100, 50], [200, 0]], y_invert: false } }),
+  qrcode: () => ({ ...baseWidget(), type: "qrcode", props: { data: "https://example.com", size: 150 } }),
+  spinbox: () => ({ ...baseWidget(), type: "spinbox", props: { value: 0, min: -100, max: 100, step: 1, digit_count: 5, decimal_pos: 0 } }),
+  scale: () => ({ ...baseWidget(), type: "scale", props: { mode: "horizontal", range_min: 0, range_max: 100, tick_count: 21, major_tick_every: 5, label_show: true } }),
+  buttonmatrix: () => ({ ...baseWidget(), type: "buttonmatrix", props: { map: ["Btn1", "Btn2", "\n", "Btn3", "Btn4"], one_checked: false } }),
+  imagebutton: () => ({ ...baseWidget(), type: "imagebutton", props: { src_released: "", src_pressed: "", src_disabled: "" } }),
+  msgbox: () => ({ ...baseWidget(), type: "msgbox", props: { title: "Alert", content_text: "Are you sure?", close_button: true, buttons: ["OK", "Cancel"] } }),
+  tileview: () => ({ ...baseWidget(), type: "tileview", widgets: [], props: { active_col: 0, active_row: 0 } }),
+  win: () => ({ ...baseWidget(), type: "win", widgets: [], props: { title: "Window", header_height: 40 } }),
+  span: () => ({ ...baseWidget(), type: "span", props: { mode: "break", spans: [{ text: "Hello " }, { text: "world" }] } }),
+  animimg: () => ({ ...baseWidget(), type: "animimg", props: { sources: [], duration: 500, repeat_count: -1 } }),
   component: () => ({ ...baseWidget(), type: "component", props: { component: "" } }),
 };
 

@@ -22,6 +22,18 @@ export type WidgetType =
   | "menu"
   | "keyboard"
   | "led"
+  | "spinner"
+  | "line"
+  | "qrcode"
+  | "spinbox"
+  | "scale"
+  | "buttonmatrix"
+  | "imagebutton"
+  | "msgbox"
+  | "tileview"
+  | "win"
+  | "span"
+  | "animimg"
   | "component";
 
 export interface WidgetNode {

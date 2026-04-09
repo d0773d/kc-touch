@@ -3,7 +3,7 @@ import { useProject } from "../context/ProjectContext";
 import { ValidationIssue, WidgetNode, WidgetPath, WidgetType } from "../types/yamui";
 import { buildTranslationExpression, extractTranslationKey, suggestTranslationKey } from "../utils/translation";
 
-const CONTAINER_TYPES: WidgetType[] = ["row", "column", "panel", "list", "tabview", "menu"];
+const CONTAINER_TYPES: WidgetType[] = ["row", "column", "panel", "list", "tabview", "menu", "tileview", "win"];
 
 interface CanvasProps {
   issues: ValidationIssue[];

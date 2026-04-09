@@ -147,6 +147,9 @@ static esp_err_t yui_collect_bindings_from_text(const char *text, char ***out_to
 static esp_err_t yui_collect_bindings_from_expr(const char *expr, char ***out_tokens, size_t *out_count);
 static void yui_apply_layout(lv_obj_t *obj, const yml_node_t *layout_node, const char *default_type);
 static lv_flex_align_t yui_flex_align_from_string(const char *value, lv_flex_align_t def);
+static lv_grid_align_t yui_grid_align_from_string(const char *value, lv_grid_align_t def);
+static void yui_generic_free_cb(lv_event_t *event);
+static void yui_btnmatrix_delete_cb(lv_event_t *event);
 static esp_err_t yui_render_widget_list(const yml_node_t *widgets_node, yui_schema_runtime_t *schema, lv_obj_t *parent, yui_component_scope_t *scope);
 static bool yui_dropdown_select_value(lv_obj_t *dropdown, const char *value);
 static bool yui_roller_select_value(lv_obj_t *roller, const char *value);
@@ -600,6 +603,32 @@ static void yui_calendar_delete_cb(lv_event_t *event)
 
     free(runtime->highlighted_dates);
     free(runtime);
+}
+
+static void yui_generic_free_cb(lv_event_t *event)
+{
+    if (!event || lv_event_get_code(event) != LV_EVENT_DELETE) {
+        return;
+    }
+    void *data = lv_event_get_user_data(event);
+    free(data);
+}
+
+static void yui_btnmatrix_delete_cb(lv_event_t *event)
+{
+    if (!event || lv_event_get_code(event) != LV_EVENT_DELETE) {
+        return;
+    }
+    const char **map = (const char **)lv_event_get_user_data(event);
+    if (!map) {
+        return;
+    }
+    /* Free each strdup'd label, then the array itself.
+       The last entry is the static "" terminator -- don't free it. */
+    for (size_t i = 0; map[i] != NULL && map[i][0] != '\0'; ++i) {
+        free((void *)map[i]);
+    }
+    free(map);
 }
 
 static esp_err_t yui_camera_preview_start(lv_obj_t *container, lv_obj_t *image, lv_obj_t *placeholder)
@@ -2483,10 +2512,114 @@ static void yui_apply_style(lv_obj_t *obj, const yui_style_t *style)
     }
 }
 
+static int32_t yui_parse_grid_track(const char *value)
+{
+    if (!value || value[0] == '\0') {
+        return 0;
+    }
+    /* Check for fractional unit e.g. "1fr", "2fr" */
+    size_t len = strlen(value);
+    if (len >= 3 && value[len - 2] == 'f' && value[len - 1] == 'r') {
+        int fr = atoi(value);
+        if (fr < 1) fr = 1;
+        return LV_GRID_FR((uint8_t)fr);
+    }
+    /* Check for "content" keyword */
+    if (strcmp(value, "content") == 0) {
+        return LV_GRID_CONTENT;
+    }
+    /* Otherwise treat as pixel value */
+    return (int32_t)atoi(value);
+}
+
+static int32_t *yui_parse_grid_template(const yml_node_t *arr_node, size_t *out_count)
+{
+    if (!arr_node || yml_node_get_type(arr_node) != YML_NODE_SEQUENCE) {
+        *out_count = 0;
+        return NULL;
+    }
+    size_t count = yml_node_child_count(arr_node);
+    /* allocate count + 1 for LV_GRID_TEMPLATE_LAST terminator */
+    int32_t *dsc = (int32_t *)calloc(count + 1, sizeof(int32_t));
+    if (!dsc) {
+        *out_count = 0;
+        return NULL;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        const yml_node_t *entry = yml_node_child_at(arr_node, i);
+        const char *val = entry ? yml_node_get_scalar(entry) : NULL;
+        dsc[i] = yui_parse_grid_track(val);
+    }
+    dsc[count] = LV_GRID_TEMPLATE_LAST;
+    *out_count = count;
+    return dsc;
+}
+
+static lv_grid_align_t yui_grid_align_from_string(const char *value, lv_grid_align_t def)
+{
+    if (!value || value[0] == '\0') return def;
+    if (strcmp(value, "start") == 0) return LV_GRID_ALIGN_START;
+    if (strcmp(value, "center") == 0) return LV_GRID_ALIGN_CENTER;
+    if (strcmp(value, "end") == 0) return LV_GRID_ALIGN_END;
+    if (strcmp(value, "stretch") == 0) return LV_GRID_ALIGN_STRETCH;
+    if (strcmp(value, "space_evenly") == 0) return LV_GRID_ALIGN_SPACE_EVENLY;
+    if (strcmp(value, "space_around") == 0) return LV_GRID_ALIGN_SPACE_AROUND;
+    if (strcmp(value, "space_between") == 0) return LV_GRID_ALIGN_SPACE_BETWEEN;
+    return def;
+}
+
+typedef struct {
+    int32_t *col_dsc;
+    int32_t *row_dsc;
+} yui_grid_runtime_t;
+
+static void yui_grid_delete_cb(lv_event_t *event)
+{
+    if (!event || lv_event_get_code(event) != LV_EVENT_DELETE) return;
+    yui_grid_runtime_t *gr = (yui_grid_runtime_t *)lv_event_get_user_data(event);
+    if (!gr) return;
+    free(gr->col_dsc);
+    free(gr->row_dsc);
+    free(gr);
+}
+
 static void yui_apply_layout(lv_obj_t *obj, const yml_node_t *layout_node, const char *default_type)
 {
     const char *type = layout_node ? yui_node_scalar(layout_node, "type") : NULL;
     const char *mode = type ? type : default_type;
+
+#if LV_USE_GRID
+    if (mode && strcmp(mode, "grid") == 0) {
+        size_t col_count = 0, row_count = 0;
+        int32_t *col_dsc = yui_parse_grid_template(yml_node_get_child(layout_node, "columns"), &col_count);
+        int32_t *row_dsc = yui_parse_grid_template(yml_node_get_child(layout_node, "rows"), &row_count);
+        if (col_dsc && row_dsc) {
+            lv_obj_set_layout(obj, LV_LAYOUT_GRID);
+            lv_obj_set_grid_dsc_array(obj, col_dsc, row_dsc);
+            const char *col_align = yui_node_scalar(layout_node, "col_align");
+            const char *row_align = yui_node_scalar(layout_node, "row_align");
+            lv_obj_set_grid_align(obj,
+                yui_grid_align_from_string(col_align, LV_GRID_ALIGN_START),
+                yui_grid_align_from_string(row_align, LV_GRID_ALIGN_START));
+            int32_t col_gap = yui_node_i32(layout_node, "column_gap", 0);
+            int32_t row_gap = yui_node_i32(layout_node, "row_gap", 0);
+            if (col_gap > 0) lv_obj_set_style_pad_column(obj, col_gap, 0);
+            if (row_gap > 0) lv_obj_set_style_pad_row(obj, row_gap, 0);
+            /* Store descriptors for cleanup */
+            yui_grid_runtime_t *gr = (yui_grid_runtime_t *)calloc(1, sizeof(yui_grid_runtime_t));
+            if (gr) {
+                gr->col_dsc = col_dsc;
+                gr->row_dsc = row_dsc;
+                lv_obj_add_event_cb(obj, yui_grid_delete_cb, LV_EVENT_DELETE, gr);
+            }
+        } else {
+            free(col_dsc);
+            free(row_dsc);
+        }
+        return;
+    }
+#endif
+
     if (!mode || strcmp(mode, "column") == 0) {
         lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
     } else if (strcmp(mode, "row") == 0) {
@@ -2634,6 +2767,18 @@ static void yui_apply_common_widget_attrs(lv_obj_t *obj, const yml_node_t *node,
     if (grow >= 0) {
         lv_obj_set_flex_grow(obj, (uint8_t)grow);
     }
+#if LV_USE_GRID
+    const yml_node_t *grid_cell = yml_node_get_child(node, "grid_cell");
+    if (grid_cell && yml_node_get_type(grid_cell) == YML_NODE_MAPPING) {
+        int32_t col = yui_node_i32(grid_cell, "col", 0);
+        int32_t row = yui_node_i32(grid_cell, "row", 0);
+        int32_t col_span = yui_node_i32(grid_cell, "col_span", 1);
+        int32_t row_span = yui_node_i32(grid_cell, "row_span", 1);
+        lv_grid_align_t ca = yui_grid_align_from_string(yui_node_scalar(grid_cell, "col_align"), LV_GRID_ALIGN_START);
+        lv_grid_align_t ra = yui_grid_align_from_string(yui_node_scalar(grid_cell, "row_align"), LV_GRID_ALIGN_START);
+        lv_obj_set_grid_cell(obj, ca, col, col_span, ra, row, row_span);
+    }
+#endif
 }
 
 static bool yui_parent_flows_column(lv_obj_t *parent)
@@ -3907,6 +4052,460 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
             (void)yui_widget_bind_conditions(runtime, node, spacer);
         }
         return ESP_OK;
+    }
+    /* ---- line ---- */
+    if (strcmp(type, "line") == 0) {
+#if LV_USE_LINE
+        lv_obj_t *line = lv_line_create(parent);
+        yui_register_widget_id(node, line);
+        yui_apply_common_widget_attrs(line, node, schema);
+        const yml_node_t *pts_node = yml_node_get_child(node, "points");
+        if (pts_node && yml_node_get_type(pts_node) == YML_NODE_SEQUENCE) {
+            size_t pt_count = yml_node_child_count(pts_node);
+            if (pt_count > 0) {
+                lv_point_precise_t *points = (lv_point_precise_t *)calloc(pt_count, sizeof(lv_point_precise_t));
+                if (points) {
+                    for (size_t i = 0; i < pt_count; ++i) {
+                        const yml_node_t *pair = yml_node_child_at(pts_node, i);
+                        if (pair && yml_node_get_type(pair) == YML_NODE_SEQUENCE && yml_node_child_count(pair) >= 2) {
+                            const yml_node_t *xn = yml_node_child_at(pair, 0);
+                            const yml_node_t *yn = yml_node_child_at(pair, 1);
+                            const char *xs = xn ? yml_node_get_scalar(xn) : NULL;
+                            const char *ys = yn ? yml_node_get_scalar(yn) : NULL;
+                            points[i].x = xs ? (lv_value_precise_t)atoi(xs) : 0;
+                            points[i].y = ys ? (lv_value_precise_t)atoi(ys) : 0;
+                        }
+                    }
+                    lv_line_set_points(line, points, pt_count);
+                    /* points array must live as long as the widget -- free on delete */
+                    lv_obj_add_event_cb(line, yui_generic_free_cb, LV_EVENT_DELETE, points);
+                }
+            }
+        }
+        const char *y_inv = yui_node_scalar(node, "y_invert");
+        if (y_inv && yui_parse_bool(y_inv, false)) {
+            lv_line_set_y_invert(line, true);
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(line, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, line);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'line' unavailable: LV_USE_LINE=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- qrcode ---- */
+    if (strcmp(type, "qrcode") == 0) {
+#if LV_USE_QRCODE
+        lv_obj_t *qr = lv_qrcode_create(parent);
+        yui_register_widget_id(node, qr);
+        int32_t size = yui_node_resolved_i32(node, "size", scope, 150);
+        lv_qrcode_set_size(qr, size);
+        char dark_buf[YUI_TEXT_BUFFER_MAX];
+        const char *dark = yui_node_resolved_scalar(node, "dark_color", scope, dark_buf, sizeof(dark_buf));
+        if (dark && dark[0] != '\0') {
+            lv_qrcode_set_dark_color(qr, yui_color_from_string(dark, lv_color_hex(0x000000)));
+        }
+        char light_buf[YUI_TEXT_BUFFER_MAX];
+        const char *light = yui_node_resolved_scalar(node, "light_color", scope, light_buf, sizeof(light_buf));
+        if (light && light[0] != '\0') {
+            lv_qrcode_set_light_color(qr, yui_color_from_string(light, lv_color_hex(0xFFFFFF)));
+        }
+        yui_apply_common_widget_attrs(qr, node, schema);
+        char data_buf[512];
+        const char *data = yui_node_resolved_scalar(node, "data", scope, data_buf, sizeof(data_buf));
+        if (data && data[0] != '\0') {
+            lv_qrcode_update(qr, data, strlen(data));
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(qr, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, qr);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'qrcode' unavailable: LV_USE_QRCODE=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- spinbox ---- */
+    if (strcmp(type, "spinbox") == 0) {
+#if LV_USE_SPINBOX
+        lv_obj_t *spinbox = lv_spinbox_create(parent);
+        yui_register_widget_id(node, spinbox);
+        if (!yui_node_has_child(node, "width")) {
+            lv_obj_set_width(spinbox, 100);
+        }
+        yui_apply_common_widget_attrs(spinbox, node, schema);
+        int32_t smin = yui_node_resolved_i32(node, "min", scope, -100);
+        int32_t smax = yui_node_resolved_i32(node, "max", scope, 100);
+        lv_spinbox_set_range(spinbox, smin, smax);
+        lv_spinbox_set_step(spinbox, (uint32_t)yui_node_resolved_i32(node, "step", scope, 1));
+        int32_t digits = yui_node_resolved_i32(node, "digit_count", scope, 5);
+        int32_t dec = yui_node_resolved_i32(node, "decimal_pos", scope, 0);
+        lv_spinbox_set_digit_format(spinbox, (uint32_t)digits, (uint32_t)dec);
+        const char *rollover = yui_node_scalar(node, "rollover");
+        if (rollover && yui_parse_bool(rollover, false)) {
+            lv_spinbox_set_rollover(spinbox, true);
+        }
+        lv_spinbox_set_value(spinbox, yui_node_resolved_i32(node, "value", scope, 0));
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(spinbox, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, spinbox);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'spinbox' unavailable: LV_USE_SPINBOX=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- scale ---- */
+    if (strcmp(type, "scale") == 0) {
+#if LV_USE_SCALE
+        lv_obj_t *scale = lv_scale_create(parent);
+        yui_register_widget_id(node, scale);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(scale, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(scale, 60);
+        }
+        yui_apply_common_widget_attrs(scale, node, schema);
+        const char *mode = yui_node_scalar(node, "mode");
+        if (mode) {
+            if (strcmp(mode, "horizontal") == 0) {
+                lv_scale_set_mode(scale, LV_SCALE_MODE_HORIZONTAL_BOTTOM);
+            } else if (strcmp(mode, "vertical") == 0) {
+                lv_scale_set_mode(scale, LV_SCALE_MODE_VERTICAL_LEFT);
+            } else if (strcmp(mode, "round") == 0) {
+                lv_scale_set_mode(scale, LV_SCALE_MODE_ROUND_INNER);
+                int32_t angle = yui_node_resolved_i32(node, "angle_range", scope, 270);
+                lv_scale_set_angle_range(scale, (uint32_t)angle);
+                int32_t rot = yui_node_resolved_i32(node, "rotation", scope, 135);
+                lv_scale_set_rotation(scale, rot);
+            }
+        }
+        int32_t rmin = yui_node_resolved_i32(node, "range_min", scope, 0);
+        int32_t rmax = yui_node_resolved_i32(node, "range_max", scope, 100);
+        lv_scale_set_range(scale, rmin, rmax);
+        lv_scale_set_total_tick_count(scale, (uint32_t)yui_node_resolved_i32(node, "tick_count", scope, 21));
+        lv_scale_set_major_tick_every(scale, (uint32_t)yui_node_resolved_i32(node, "major_tick_every", scope, 5));
+        const char *show_label = yui_node_scalar(node, "label_show");
+        lv_scale_set_label_show(scale, show_label ? yui_parse_bool(show_label, true) : true);
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(scale, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, scale);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'scale' unavailable: LV_USE_SCALE=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- buttonmatrix ---- */
+    if (strcmp(type, "buttonmatrix") == 0) {
+#if LV_USE_BUTTONMATRIX
+        lv_obj_t *btnm = lv_buttonmatrix_create(parent);
+        yui_register_widget_id(node, btnm);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(btnm, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(btnm, LV_SIZE_CONTENT);
+        }
+        yui_apply_common_widget_attrs(btnm, node, schema);
+        const yml_node_t *map_node = yml_node_get_child(node, "map");
+        if (map_node && yml_node_get_type(map_node) == YML_NODE_SEQUENCE) {
+            size_t count = yml_node_child_count(map_node);
+            /* allocate count+1 for the terminating empty string */
+            const char **map_arr = (const char **)calloc(count + 1, sizeof(const char *));
+            if (map_arr) {
+                for (size_t i = 0; i < count; ++i) {
+                    const yml_node_t *entry = yml_node_child_at(map_node, i);
+                    const char *val = entry ? yml_node_get_scalar(entry) : NULL;
+                    map_arr[i] = val ? strdup(val) : strdup("");
+                }
+                map_arr[count] = "";
+                lv_buttonmatrix_set_map(btnm, map_arr);
+                /* free on delete: free each string then the array */
+                lv_obj_add_event_cb(btnm, yui_btnmatrix_delete_cb, LV_EVENT_DELETE, (void *)map_arr);
+            }
+        }
+        const char *one_checked = yui_node_scalar(node, "one_checked");
+        if (one_checked && yui_parse_bool(one_checked, false)) {
+            lv_buttonmatrix_set_one_checked(btnm, true);
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(btnm, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, btnm);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'buttonmatrix' unavailable: LV_USE_BUTTONMATRIX=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- imagebutton ---- */
+    if (strcmp(type, "imagebutton") == 0) {
+#if LV_USE_IMAGEBUTTON
+        lv_obj_t *imgbtn = lv_imagebutton_create(parent);
+        yui_register_widget_id(node, imgbtn);
+        yui_apply_common_widget_attrs(imgbtn, node, schema);
+        /* For each state, set the mid-part source (full-width, not 3-part) */
+        char src_buf[YUI_TEXT_BUFFER_MAX];
+        const char *src_rel = yui_node_resolved_scalar(node, "src_released", scope, src_buf, sizeof(src_buf));
+        if (src_rel && src_rel[0] != '\0') {
+            lv_imagebutton_set_src(imgbtn, LV_IMAGEBUTTON_STATE_RELEASED, NULL, src_rel, NULL);
+        }
+        const char *src_pr = yui_node_resolved_scalar(node, "src_pressed", scope, src_buf, sizeof(src_buf));
+        if (src_pr && src_pr[0] != '\0') {
+            lv_imagebutton_set_src(imgbtn, LV_IMAGEBUTTON_STATE_PRESSED, NULL, src_pr, NULL);
+        }
+        const char *src_dis = yui_node_resolved_scalar(node, "src_disabled", scope, src_buf, sizeof(src_buf));
+        if (src_dis && src_dis[0] != '\0') {
+            lv_imagebutton_set_src(imgbtn, LV_IMAGEBUTTON_STATE_DISABLED, NULL, src_dis, NULL);
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(imgbtn, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, imgbtn);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'imagebutton' unavailable: LV_USE_IMAGEBUTTON=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- msgbox ---- */
+    if (strcmp(type, "msgbox") == 0) {
+#if LV_USE_MSGBOX
+        lv_obj_t *msgbox = lv_msgbox_create(parent);
+        yui_register_widget_id(node, msgbox);
+        yui_apply_common_widget_attrs(msgbox, node, schema);
+        char title_buf[YUI_TEXT_BUFFER_MAX];
+        const char *title = yui_node_resolved_localized_scalar(node, "title", "title_key", scope, title_buf, sizeof(title_buf));
+        if (title && title[0] != '\0') {
+            lv_msgbox_add_title(msgbox, title);
+        }
+        char content_buf[YUI_TEXT_BUFFER_MAX];
+        const char *content = yui_node_resolved_localized_scalar(node, "content_text", "content_text_key", scope, content_buf, sizeof(content_buf));
+        if (content && content[0] != '\0') {
+            lv_msgbox_add_text(msgbox, content);
+        }
+        const char *close_btn = yui_node_scalar(node, "close_button");
+        if (close_btn && yui_parse_bool(close_btn, false)) {
+            lv_msgbox_add_close_button(msgbox);
+        }
+        const yml_node_t *btns_node = yml_node_get_child(node, "buttons");
+        if (btns_node && yml_node_get_type(btns_node) == YML_NODE_SEQUENCE) {
+            size_t btn_count = yml_node_child_count(btns_node);
+            for (size_t i = 0; i < btn_count; ++i) {
+                const yml_node_t *bn = yml_node_child_at(btns_node, i);
+                const char *btn_text = bn ? yml_node_get_scalar(bn) : NULL;
+                if (btn_text && btn_text[0] != '\0') {
+                    lv_msgbox_add_footer_button(msgbox, btn_text);
+                }
+            }
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(msgbox, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, msgbox);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'msgbox' unavailable: LV_USE_MSGBOX=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- tileview ---- */
+    if (strcmp(type, "tileview") == 0) {
+#if LV_USE_TILEVIEW
+        lv_obj_t *tv = lv_tileview_create(parent);
+        yui_register_widget_id(node, tv);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(tv, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(tv, 280);
+        }
+        yui_apply_common_widget_attrs(tv, node, schema);
+        const yml_node_t *tiles_node = yml_node_get_child(node, "tiles");
+        lv_obj_t *first_active_tile = NULL;
+        int32_t active_col = yui_node_resolved_i32(node, "active_col", scope, 0);
+        int32_t active_row = yui_node_resolved_i32(node, "active_row", scope, 0);
+        if (tiles_node && yml_node_get_type(tiles_node) == YML_NODE_SEQUENCE) {
+            size_t tile_count = yml_node_child_count(tiles_node);
+            for (size_t i = 0; i < tile_count; ++i) {
+                const yml_node_t *tile_node = yml_node_child_at(tiles_node, i);
+                if (!tile_node || yml_node_get_type(tile_node) != YML_NODE_MAPPING) {
+                    continue;
+                }
+                int32_t col = yui_node_i32(tile_node, "col", (int32_t)i);
+                int32_t row = yui_node_i32(tile_node, "row", 0);
+                /* Parse direction flags from pipe-separated string */
+                lv_dir_t dir = LV_DIR_ALL;
+                const char *dir_str = yui_node_scalar(tile_node, "dir");
+                if (dir_str) {
+                    dir = 0;
+                    if (strstr(dir_str, "left")) dir |= LV_DIR_LEFT;
+                    if (strstr(dir_str, "right")) dir |= LV_DIR_RIGHT;
+                    if (strstr(dir_str, "top")) dir |= LV_DIR_TOP;
+                    if (strstr(dir_str, "bottom")) dir |= LV_DIR_BOTTOM;
+                    if (dir == 0) dir = LV_DIR_ALL;
+                }
+                lv_obj_t *tile = lv_tileview_add_tile(tv, (uint32_t)col, (uint32_t)row, dir);
+                yui_apply_layout(tile, yml_node_get_child(tile_node, "layout"), "column");
+                esp_err_t err = yui_render_widget_list(yml_node_get_child(tile_node, "widgets"), schema, tile, scope);
+                if (err != ESP_OK) {
+                    return err;
+                }
+                if (col == active_col && row == active_row) {
+                    first_active_tile = tile;
+                }
+            }
+        }
+        if (first_active_tile) {
+            lv_tileview_set_tile(tv, first_active_tile, LV_ANIM_OFF);
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(tv, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, tv);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'tileview' unavailable: LV_USE_TILEVIEW=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- win ---- */
+    if (strcmp(type, "win") == 0) {
+#if LV_USE_WIN
+        lv_obj_t *win = lv_win_create(parent);
+        yui_register_widget_id(node, win);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(win, LV_PCT(100));
+        }
+        if (!yui_node_has_child(node, "height")) {
+            lv_obj_set_height(win, 280);
+        }
+        yui_apply_common_widget_attrs(win, node, schema);
+        char win_title_buf[YUI_TEXT_BUFFER_MAX];
+        const char *win_title = yui_node_resolved_localized_scalar(node, "title", "title_key", scope, win_title_buf, sizeof(win_title_buf));
+        if (win_title && win_title[0] != '\0') {
+            lv_win_add_title(win, win_title);
+        }
+        lv_obj_t *content = lv_win_get_content(win);
+        if (content) {
+            yui_apply_layout(content, yml_node_get_child(node, "layout"), "column");
+            esp_err_t err = yui_render_widget_list(yml_node_get_child(node, "widgets"), schema, content, scope);
+            if (err != ESP_OK) {
+                return err;
+            }
+        }
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(win, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, win);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'win' unavailable: LV_USE_WIN=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- span (spangroup) ---- */
+    if (strcmp(type, "span") == 0) {
+#if LV_USE_SPAN
+        lv_obj_t *spangroup = lv_spangroup_create(parent);
+        yui_register_widget_id(node, spangroup);
+        if (!yui_node_has_child(node, "width") && yui_parent_flows_column(parent)) {
+            lv_obj_set_width(spangroup, LV_PCT(100));
+        }
+        yui_apply_common_widget_attrs(spangroup, node, schema);
+        const char *mode = yui_node_scalar(node, "mode");
+        if (mode) {
+            if (strcmp(mode, "expand") == 0) {
+                lv_spangroup_set_mode(spangroup, LV_SPAN_MODE_EXPAND);
+            } else if (strcmp(mode, "break") == 0) {
+                lv_spangroup_set_mode(spangroup, LV_SPAN_MODE_BREAK);
+            } else if (strcmp(mode, "fixed") == 0) {
+                lv_spangroup_set_mode(spangroup, LV_SPAN_MODE_FIXED);
+            }
+        }
+        const yml_node_t *spans_node = yml_node_get_child(node, "spans");
+        if (spans_node && yml_node_get_type(spans_node) == YML_NODE_SEQUENCE) {
+            size_t span_count = yml_node_child_count(spans_node);
+            for (size_t i = 0; i < span_count; ++i) {
+                const yml_node_t *sp_node = yml_node_child_at(spans_node, i);
+                if (!sp_node || yml_node_get_type(sp_node) != YML_NODE_MAPPING) {
+                    continue;
+                }
+                lv_span_t *span = lv_spangroup_new_span(spangroup);
+                if (!span) {
+                    continue;
+                }
+                char span_text_buf[YUI_TEXT_BUFFER_MAX];
+                const char *span_text = yui_node_resolved_localized_scalar(sp_node, "text", "text_key", scope, span_text_buf, sizeof(span_text_buf));
+                if (span_text && span_text[0] != '\0') {
+                    lv_span_set_text(span, span_text);
+                }
+                const char *span_style_name = yui_node_scalar(sp_node, "style");
+                if (span_style_name) {
+                    const yui_style_t *span_style = yui_resolve_style(&schema->schema, span_style_name);
+                    lv_style_t *lv_span_style = lv_span_get_style(span);
+                    if (span_style && span_style->text_color && lv_span_style) {
+                        lv_style_set_text_color(lv_span_style, yui_color_from_string(span_style->text_color, lv_color_hex(0xFFFFFF)));
+                    }
+                }
+            }
+        }
+        lv_spangroup_refr_mode(spangroup);
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(spangroup, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, spangroup);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'span' unavailable: LV_USE_SPAN=0");
+        return ESP_OK;
+#endif
+    }
+    /* ---- animimg ---- */
+    if (strcmp(type, "animimg") == 0) {
+#if LV_USE_ANIMIMG
+        lv_obj_t *animimg = lv_animimg_create(parent);
+        yui_register_widget_id(node, animimg);
+        yui_apply_common_widget_attrs(animimg, node, schema);
+        uint32_t duration = (uint32_t)yui_node_resolved_i32(node, "duration", scope, 500);
+        lv_animimg_set_duration(animimg, duration);
+        int32_t repeat = yui_node_resolved_i32(node, "repeat_count", scope, -1);
+        if (repeat < 0) {
+            lv_animimg_set_repeat_count(animimg, LV_ANIM_REPEAT_INFINITE);
+        } else {
+            lv_animimg_set_repeat_count(animimg, (uint32_t)repeat);
+        }
+        /* Note: actual image source array setup requires resolved asset paths,
+           which is deferred to asset-loading pipeline. For now just configure timing. */
+        lv_animimg_start(animimg);
+        yui_widget_runtime_t *runtime = yui_widget_runtime_create(animimg, scope);
+        if (runtime) {
+            (void)yui_widget_bind_conditions(runtime, node, animimg);
+            (void)yui_widget_parse_events(node, runtime);
+        }
+        return ESP_OK;
+#else
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Widget type 'animimg' unavailable: LV_USE_ANIMIMG=0");
+        return ESP_OK;
+#endif
     }
     yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_LVGL, "Unsupported widget type '%s'", type);
     return ESP_OK;

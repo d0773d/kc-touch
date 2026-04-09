@@ -257,7 +257,7 @@ function previewNode(
     case "led":
       return (
         <div key={key} className="live-preview__led" style={{ ...baseStyle, display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 14, height: 14, borderRadius: "50%", background: widget.props?.color ?? "#4caf50", display: "inline-block", boxShadow: `0 0 6px ${widget.props?.color ?? "#4caf50"}` }} />
+          <span style={{ width: 14, height: 14, borderRadius: "50%", background: (widget.props?.color as string) ?? "#4caf50", display: "inline-block", boxShadow: `0 0 6px ${(widget.props?.color as string) ?? "#4caf50"}` }} />
           <span>{resolveWidgetText(widget, project) || "LED"}</span>
         </div>
       );
@@ -285,7 +285,7 @@ function previewNode(
           <div style={{ display: "flex", borderBottom: "2px solid #e0e0e0", marginBottom: 4 }}>
             {(widget.widgets ?? []).map((tab, i) => (
               <span key={i} style={{ padding: "4px 12px", fontSize: 12, borderBottom: i === 0 ? "2px solid #4fc3f7" : "none", color: i === 0 ? "#4fc3f7" : "#999" }}>
-                {tab.props?.title ?? tab.id ?? `Tab ${i + 1}`}
+                {(tab.props?.title as string) ?? tab.id ?? `Tab ${i + 1}`}
               </span>
             ))}
           </div>
@@ -296,6 +296,130 @@ function previewNode(
       return (
         <div key={key} className="live-preview__menu" style={{ ...baseStyle, border: "1px solid #e0e0e0", borderRadius: 6 }}>
           {children.length > 0 ? children : <span style={{ padding: 8, display: "block", color: "#999", fontSize: 12 }}>Menu</span>}
+        </div>
+      );
+    case "spinner":
+      return (
+        <div key={key} className="live-preview__spinner" style={{ ...baseStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 48, height: 48 }}>
+          <svg width="32" height="32" viewBox="0 0 32 32" style={{ animation: "spin 1s linear infinite" }}>
+            <circle cx="16" cy="16" r="12" fill="none" stroke="#e0e0e0" strokeWidth="3" />
+            <circle cx="16" cy="16" r="12" fill="none" stroke="#4fc3f7" strokeWidth="3" strokeDasharray="50 26" strokeLinecap="round" />
+          </svg>
+        </div>
+      );
+    case "line":
+      return (
+        <div key={key} className="live-preview__line" style={{ ...baseStyle, padding: 4 }}>
+          <svg width="100%" height="24" viewBox="0 0 200 24">
+            <polyline points="0,20 60,4 140,20 200,4" fill="none" stroke="#999" strokeWidth="2" />
+          </svg>
+        </div>
+      );
+    case "qrcode":
+      return (
+        <div key={key} className="live-preview__qrcode" style={{ ...baseStyle, display: "inline-flex", flexDirection: "column", alignItems: "center", border: "1px solid #e0e0e0", borderRadius: 6, padding: 12, gap: 4 }}>
+          <span style={{ fontSize: 28 }}>&#9641;</span>
+          <span style={{ fontSize: 11, color: "#999" }}>QR Code</span>
+        </div>
+      );
+    case "spinbox":
+      return (
+        <div key={key} className="live-preview__spinbox" style={{ ...baseStyle, display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <button style={{ width: 24, height: 24, fontSize: 14, border: "1px solid #ccc", borderRadius: 4, background: "#f5f5f5" }}>-</button>
+          <span style={{ padding: "2px 8px", border: "1px solid #ccc", borderRadius: 4, fontFamily: "monospace", minWidth: 48, textAlign: "center" }}>
+            {typeof widget.props?.value === "number" ? widget.props.value : 0}
+          </span>
+          <button style={{ width: 24, height: 24, fontSize: 14, border: "1px solid #ccc", borderRadius: 4, background: "#f5f5f5" }}>+</button>
+        </div>
+      );
+    case "scale":
+      return (
+        <div key={key} className="live-preview__scale" style={{ ...baseStyle, border: "1px solid #e0e0e0", borderRadius: 6, padding: 12, textAlign: "center", color: "#999" }}>
+          <svg width="100%" height="40" viewBox="0 0 200 40">
+            {Array.from({ length: 11 }, (_, i) => {
+              const x = 10 + i * 18;
+              const isMajor = i % 5 === 0;
+              return <line key={i} x1={x} y1={isMajor ? 4 : 12} x2={x} y2={28} stroke="#999" strokeWidth={isMajor ? 2 : 1} />;
+            })}
+            <line x1="10" y1="28" x2="190" y2="28" stroke="#ccc" strokeWidth="1" />
+          </svg>
+        </div>
+      );
+    case "buttonmatrix": {
+      const map = Array.isArray(widget.props?.map) ? (widget.props.map as string[]) : ["Btn1", "Btn2", "Btn3"];
+      const rows: string[][] = [[]];
+      map.forEach((item) => {
+        if (item === "\n") rows.push([]);
+        else rows[rows.length - 1].push(item);
+      });
+      return (
+        <div key={key} className="live-preview__buttonmatrix" style={{ ...baseStyle, display: "flex", flexDirection: "column", gap: 2 }}>
+          {rows.map((row, ri) => (
+            <div key={ri} style={{ display: "flex", gap: 2 }}>
+              {row.map((label, ci) => (
+                <button key={ci} style={{ flex: 1, padding: "4px 8px", fontSize: 11, border: "1px solid #ccc", borderRadius: 4, background: "#f5f5f5" }}>{label}</button>
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "imagebutton":
+      return (
+        <div key={key} className="live-preview__imagebutton" style={{ ...baseStyle, display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid #ccc", borderRadius: 6, padding: "6px 12px", background: "#fafafa" }}>
+          <span style={{ fontSize: 16 }}>&#128444;</span>
+          <span style={{ fontSize: 12, color: "#666" }}>Image Button</span>
+        </div>
+      );
+    case "msgbox":
+      return (
+        <div key={key} className="live-preview__msgbox" style={{ ...baseStyle, border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.1)", maxWidth: 280, background: "#fff" }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #eee", fontWeight: 600, fontSize: 13 }}>
+            {(widget.props?.title as string) ?? "Alert"}
+          </div>
+          <div style={{ padding: "10px 14px", fontSize: 12, color: "#555" }}>
+            {(widget.props?.content_text as string) ?? "Message content"}
+          </div>
+          <div style={{ padding: "8px 14px", display: "flex", gap: 6, justifyContent: "flex-end", borderTop: "1px solid #eee" }}>
+            {(Array.isArray(widget.props?.buttons) ? (widget.props.buttons as string[]) : ["OK"]).map((btn, i) => (
+              <button key={i} style={{ padding: "4px 12px", fontSize: 11, border: "1px solid #ccc", borderRadius: 4, background: "#f5f5f5" }}>{btn}</button>
+            ))}
+          </div>
+        </div>
+      );
+    case "tileview":
+      return (
+        <div key={key} className="live-preview__tileview" style={{ ...baseStyle, border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden" }}>
+          <div style={{ padding: 4, fontSize: 10, color: "#999", background: "#f8f8f8", borderBottom: "1px solid #eee" }}>Tileview</div>
+          {children.length > 0 ? children[0] : <div style={{ padding: 12, color: "#999", fontSize: 12 }}>Tile content</div>}
+        </div>
+      );
+    case "win":
+      return (
+        <div key={key} className="live-preview__win" style={{ ...baseStyle, border: "1px solid #ccc", borderRadius: 8, overflow: "hidden" }}>
+          <div style={{ padding: "6px 10px", background: "#f0f0f0", borderBottom: "1px solid #ddd", fontSize: 12, fontWeight: 600 }}>
+            {(widget.props?.title as string) ?? "Window"}
+          </div>
+          <div style={{ padding: 8 }}>
+            {children.length > 0 ? children : <span style={{ color: "#999", fontSize: 12 }}>Window content</span>}
+          </div>
+        </div>
+      );
+    case "span":
+      return (
+        <p key={key} className="live-preview__span" style={baseStyle}>
+          {Array.isArray(widget.props?.spans)
+            ? (widget.props.spans as Array<{ text?: string }>).map((s, i) => (
+                <span key={i}>{s.text ?? ""}</span>
+              ))
+            : "Rich text span"}
+        </p>
+      );
+    case "animimg":
+      return (
+        <div key={key} className="live-preview__animimg" style={{ ...baseStyle, display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid #e0e0e0", borderRadius: 6, padding: "6px 12px" }}>
+          <span style={{ fontSize: 16 }}>&#9654;</span>
+          <span style={{ fontSize: 12, color: "#666" }}>Animated Image</span>
         </div>
       );
     default:
