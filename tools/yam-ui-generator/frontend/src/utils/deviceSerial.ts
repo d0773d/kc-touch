@@ -5,6 +5,22 @@
  * Response: [YACK (4 bytes)] on success, [YNAK (4 bytes)] on failure
  */
 
+/* WebSerial API type declarations — only available in Chromium-based browsers. */
+declare global {
+  interface Serial {
+    requestPort(): Promise<SerialPort>;
+  }
+  interface SerialPort {
+    open(options: { baudRate: number }): Promise<void>;
+    close(): Promise<void>;
+    readable: ReadableStream<Uint8Array> | null;
+    writable: WritableStream<Uint8Array> | null;
+  }
+  interface Navigator {
+    serial: Serial;
+  }
+}
+
 const START_MARKER = new TextEncoder().encode("YAML");
 const ACK_MARKER = "YACK";
 const NAK_MARKER = "YNAK";
@@ -185,7 +201,8 @@ export class DeviceSerial {
       return null;
     }
 
-    this.reader = this.port.readable.getReader();
+    const reader = this.port.readable.getReader();
+    this.reader = reader;
     const collected: number[] = [];
 
     try {
@@ -195,10 +212,14 @@ export class DeviceSerial {
         const remaining = deadline - Date.now();
         if (remaining <= 0) break;
 
+        const timeoutResult: ReadableStreamReadResult<Uint8Array> = {
+          done: true,
+          value: undefined,
+        };
         const result = await Promise.race([
-          this.reader.read(),
-          new Promise<{ done: true; value: undefined }>((resolve) =>
-            setTimeout(() => resolve({ done: true, value: undefined }), remaining)
+          reader.read(),
+          new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) =>
+            setTimeout(() => resolve(timeoutResult), remaining)
           ),
         ]);
 
@@ -215,7 +236,7 @@ export class DeviceSerial {
       }
       return null;
     } finally {
-      this.reader.releaseLock();
+      reader.releaseLock();
       this.reader = null;
     }
   }
