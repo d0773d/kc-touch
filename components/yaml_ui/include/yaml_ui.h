@@ -42,11 +42,26 @@ typedef struct {
 } yui_component_def_t;
 
 typedef struct {
+    char *key;
+    char *value;
+} yui_translation_entry_t;
+
+typedef struct {
+    char *locale;
+    char *label;
+    yui_translation_entry_t *entries;
+    size_t entry_count;
+} yui_translation_locale_t;
+
+typedef struct {
     char *name;
     char *background_color;
     char *text_color;
     char *accent_color;
     char *text_font;
+    int32_t font_size;
+    int32_t font_weight;
+    int32_t letter_spacing;
     int32_t width;
     int32_t height;
     int32_t padding;
@@ -67,12 +82,17 @@ typedef struct {
     yml_node_t *root;
     const yml_node_t *app_node;
     const yml_node_t *state_node;
+    const yml_node_t *theme_node;
     const yml_node_t *styles_node;
     const yml_node_t *components_node;
     const yml_node_t *screens_node;
     yui_app_config_t app;
+    yui_kv_pair_t *theme_defaults;
+    size_t theme_default_count;
     yui_style_t *styles;
     size_t style_count;
+    yui_translation_locale_t *translations;
+    size_t translation_count;
     yui_component_def_t *components;
     size_t component_count;
 } yui_schema_t;
@@ -82,8 +102,10 @@ void yui_schema_free(yui_schema_t *schema);
 const yml_node_t *yui_schema_get_screen(const yui_schema_t *schema, const char *name);
 const yui_component_def_t *yui_schema_get_component(const yui_schema_t *schema, const char *name);
 const yui_style_t *yui_schema_get_style(const yui_schema_t *schema, const char *name);
+const char *yui_schema_get_theme_default_style(const yui_schema_t *schema, const char *widget_type);
 const char *yui_schema_default_screen(const yui_schema_t *schema);
 const char *yui_schema_locale(const yui_schema_t *schema);
+const char *yui_schema_translate(const yui_schema_t *schema, const char *locale, const char *key);
 
 #ifdef __cplusplus
 }

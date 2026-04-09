@@ -50,7 +50,7 @@ If you want panel-only fallback (without BSP helper APIs):
 idf.py add-dependency "waveshare/esp_lcd_jd9365"
 ```
 
-`kc_touch_display` now boots the Waveshare backend directly (no Tab5 path in active build).
+`kc_touch_display` now boots the Waveshare backend directly.
 
 - `kc_touch_display_init()` runs right after `kc_touch_gui_init()` in [main/app_main.c](main/app_main.c#L1) so LVGL registers a real flush callback before the YamUI scene tree renders.
 - YamUI-generated layouts serve as the first visual confirmation that the panel is alive; touch input feeds LVGL through a pointer driver whenever available.

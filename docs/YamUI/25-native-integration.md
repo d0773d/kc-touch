@@ -11,7 +11,7 @@ The integration layer provides:
 - type conversion (string, number, boolean)  
 - safe execution and error handling  
 - integration with the Action System (`call()`)  
-- support for asynchronous operations (future extension)  
+- helper support for asynchronous state updates  
 
 This system allows YamUI to remain declarative while still controlling the full capabilities of the ESP32-P4.
 
@@ -182,7 +182,7 @@ Native errors never crash the UI.
 
 ---
 
-# 8. Asynchronous Operations (Future Extension)
+# 8. Asynchronous Operations
 
 Some operations are asynchronous:
 
@@ -191,17 +191,48 @@ Some operations are asynchronous:
 - sensor reads  
 - OTA updates  
 
-Future support will include:
+The current device contract uses state-driven async updates instead of
+`await(call(...))`.
 
-- `await(call(...))`  
-- callback registration  
-- promise-like state updates  
-
-For now, asynchronous operations must update state manually:
+For an operation key like `sync_demo`, the runtime helper layer exposes:
 
 ```c
-yamui_set("wifi.status", "connected");
+yamui_async_begin("sync_demo", "status.sync_starting");
+yamui_async_progress("sync_demo", 55, "status.sync_uploading");
+yamui_async_complete("sync_demo", "status.sync_done");
+yamui_async_fail("sync_demo", "status.sync_failed");
 ```
+
+These functions update:
+
+- `async.sync_demo.running`
+- `async.sync_demo.progress`
+- `async.sync_demo.status`
+- `async.sync_demo.message`
+- `async.sync_demo.error`
+
+That lets YAML express loading UX declaratively with existing bindings:
+
+```yaml
+- type: button
+  text: "Trigger Sync"
+  enabled_if: "!state.async.sync_demo.running"
+  on_click: call(demo_async_sync, sync_demo)
+
+- type: spinner
+  visible_if: state.async.sync_demo.running
+
+- type: bar
+  min: 0
+  max: 100
+  value: "{{state.async.sync_demo.progress}}"
+
+- type: label
+  text_key: "{{state.async.sync_demo.message}}"
+```
+
+Full sequencing with `await(call(...))` is still a future extension, but the
+runtime now has a stable async progress contract for native work.
 
 ---
 
@@ -211,9 +242,8 @@ yamui_set("wifi.status", "connected");
 
 ```yaml
 on_click:
-  - set(ui.loading, true)
+  - call(ui_async_reset, wifi_connect, status.ready)
   - call(wifi_connect, {{wifi.ssid}}, {{wifi.password}})
-  - goto(wifi_connecting)
 ```
 
 ### C Implementation
@@ -223,10 +253,11 @@ void wifi_connect(int argc, const char **argv) {
     const char *ssid = argv[0];
     const char *password = argv[1];
 
+    yamui_async_begin("wifi_connect", "wifi.status.connecting");
     wifi_start_connection(ssid, password);
 
     // Later, when connection succeeds:
-    yamui_set("wifi.status", "connected");
+    yamui_async_complete("wifi_connect", "wifi.status.connected");
 }
 ```
 

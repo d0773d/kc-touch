@@ -8,11 +8,10 @@ extern "C" {
 #endif
 
 /**
- * @brief Initialize the Tab5 camera stack (esp_video + SC2356 sensor).
+ * @brief Initialize the camera stack when supported by the active backend.
  *
- * Starts the SCCB bus, drives the external XCLK via the ESP clock router,
- * and boots the esp_video CSI pipeline so that higher level code can begin
- * requesting frames.
+ * Backends that do not provide a camera implementation should return
+ * `ESP_ERR_NOT_SUPPORTED`.
  */
 esp_err_t kc_touch_camera_init(void);
 

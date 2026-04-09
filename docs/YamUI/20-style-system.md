@@ -194,37 +194,34 @@ Inheritance rules:
 
 # 7. Themes
 
-Themes allow global style overrides.
+Themes allow project-level style defaults without repeating `style:` on every widget.
 
 ### Example
 
 ```yaml
-themes:
-  dark:
-    overrides:
-      card_style.bg_color: "#1A1A1A"
-      title_style.text_color: "#FFFFFF"
-
-  light:
-    overrides:
-      card_style.bg_color: "#FFFFFF"
-      title_style.text_color: "#000000"
+theme:
+  defaults:
+    label: body_style
+    button: button_style
+    panel: card_style
+    textarea: input_style
 ```
 
-Active theme:
+This means:
+
+- every `label` gets `body_style` unless it declares its own `style:`
+- every `panel` gets `card_style` unless it declares its own `style:`
+- explicit widget `style:` values still win over theme defaults
+
+YamUI also continues to support light/dark style lookup through style naming. If the active UI theme is dark and a widget asks for `card_style`, YamUI first looks for `dark.card_style` before falling back to `card_style`.
+
+Themes can still be switched at runtime through state:
 
 ```yaml
-app:
-  theme: dark
+on_click: set(ui.dark_mode, "true")
 ```
 
-Themes can be switched at runtime:
-
-```yaml
-on_click: set(ui.theme, "light")
-```
-
-YamUI automatically reapplies affected styles.
+YamUI refreshes the screen so themed styles are reapplied.
 
 ---
 

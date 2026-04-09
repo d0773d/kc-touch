@@ -11,6 +11,7 @@
 
 #define YUI_STATE_DEFAULT_CAPACITY 8
 #define YUI_STATE_WATCH_DEFAULT_CAPACITY 4
+#define YUI_STATE_KEY_BUFFER_MAX 256
 
 typedef struct {
     char *key;
@@ -41,6 +42,17 @@ static uint32_t s_watch_next_id = 1;
 static inline const char *yui_empty_if_null(const char *value)
 {
     return value ? value : "";
+}
+
+static const char *yui_state_normalize_key(const char *key)
+{
+    if (!key) {
+        return NULL;
+    }
+    if (strncmp(key, "state.", 6) == 0 && key[6] != '\0') {
+        return key + 6;
+    }
+    return key;
 }
 
 static char *yui_state_strdup(const char *value)
@@ -180,7 +192,7 @@ static esp_err_t yui_state_set_internal(const char *key, const char *value, bool
         return err;
     }
 
-    key = yui_empty_if_null(key);
+    key = yui_state_normalize_key(yui_empty_if_null(key));
     value = yui_empty_if_null(value);
 
     yui_state_lock();
@@ -267,6 +279,46 @@ static esp_err_t yui_state_set_internal(const char *key, const char *value, bool
     return ESP_OK;
 }
 
+static esp_err_t yui_state_seed_node_recursive(const yml_node_t *node, const char *prefix)
+{
+    if (!node) {
+        return ESP_OK;
+    }
+
+    yml_node_type_t type = yml_node_get_type(node);
+    if (type == YML_NODE_MAPPING) {
+        for (const yml_node_t *child = yml_node_child_at(node, 0); child; child = yml_node_next(child)) {
+            const char *key = yml_node_get_key(child);
+            if (!key || key[0] == '\0') {
+                continue;
+            }
+            char full_key[YUI_STATE_KEY_BUFFER_MAX];
+            if (prefix && prefix[0] != '\0') {
+                snprintf(full_key, sizeof(full_key), "%s.%s", prefix, key);
+            } else {
+                snprintf(full_key, sizeof(full_key), "%s", key);
+            }
+            esp_err_t err = yui_state_seed_node_recursive(child, full_key);
+            if (err != ESP_OK) {
+                return err;
+            }
+        }
+        return ESP_OK;
+    }
+
+    if (!prefix || prefix[0] == '\0') {
+        return ESP_OK;
+    }
+
+    const char *existing = yui_state_get(prefix, NULL);
+    if (existing) {
+        return ESP_OK;
+    }
+
+    const char *scalar = yml_node_get_scalar(node);
+    return yui_state_set_internal(prefix, scalar, false);
+}
+
 esp_err_t yui_state_init(void)
 {
     return yui_state_ensure_mutex();
@@ -347,22 +399,7 @@ esp_err_t yui_state_seed_from_yaml(const yml_node_t *state_node)
     if (err != ESP_OK) {
         return err;
     }
-    for (const yml_node_t *child = yml_node_child_at(state_node, 0); child; child = yml_node_next(child)) {
-        const char *key = yml_node_get_key(child);
-        if (!key || key[0] == '\0') {
-            continue;
-        }
-        const char *existing = yui_state_get(key, NULL);
-        if (existing) {
-            continue;
-        }
-        const char *scalar = yml_node_get_scalar(child);
-        err = yui_state_set_internal(key, scalar, false);
-        if (err != ESP_OK) {
-            return err;
-        }
-    }
-    return ESP_OK;
+    return yui_state_seed_node_recursive(state_node, NULL);
 }
 
 esp_err_t yui_state_set(const char *key, const char *value)
@@ -384,6 +421,7 @@ esp_err_t yui_state_set_bool(const char *key, bool value)
 
 const char *yui_state_get(const char *key, const char *default_value)
 {
+    key = yui_state_normalize_key(key);
     if (!key || key[0] == '\0' || yui_state_ensure_mutex() != ESP_OK) {
         return default_value;
     }
@@ -432,6 +470,7 @@ esp_err_t yui_state_watch(const char *key, yui_state_watch_cb_t cb, void *user_c
     }
 
     char *key_copy = NULL;
+    key = yui_state_normalize_key(key);
     if (key && key[0] != '\0') {
         key_copy = yui_state_strdup(key);
         if (!key_copy) {

@@ -27,6 +27,7 @@ struct yml_node {
 
 typedef struct {
     int indent;
+    int line_number;
     bool is_sequence;
     bool has_colon;
     char *key;
@@ -118,7 +119,16 @@ static void yml_line_cleanup(yml_line_t *line)
 
 static esp_err_t yml_next_line(const char *data, size_t length, size_t *cursor, yml_line_t *out)
 {
+    int line_number = 1;
+    if (*cursor > 0) {
+        for (size_t i = 0; i < *cursor && i < length; ++i) {
+            if (data[i] == '\n') {
+                line_number++;
+            }
+        }
+    }
     while (*cursor < length) {
+        int current_line_number = line_number++;
         size_t line_start = *cursor;
         size_t line_end = line_start;
         while (line_end < length && data[line_end] != '\n' && data[line_end] != '\r') {
@@ -140,7 +150,7 @@ static esp_err_t yml_next_line(const char *data, size_t length, size_t *cursor, 
             if (c == ' ') {
                 indent++;
             } else if (c == '\t') {
-                ESP_LOGE(TAG, "Tabs are not supported in YAML input");
+                ESP_LOGE(TAG, "Tabs are not supported in YAML input on line %d", current_line_number);
                 return ESP_ERR_INVALID_RESPONSE;
             } else {
                 seen_char = true;
@@ -218,7 +228,7 @@ static esp_err_t yml_next_line(const char *data, size_t length, size_t *cursor, 
             }
         } else {
             if (!is_sequence) {
-                ESP_LOGE(TAG, "Invalid YAML line, missing ':' separator");
+                ESP_LOGE(TAG, "Invalid YAML line %d, missing ':' separator: %s", current_line_number, payload);
                 free(content);
                 return ESP_ERR_INVALID_RESPONSE;
             }
@@ -235,6 +245,7 @@ static esp_err_t yml_next_line(const char *data, size_t length, size_t *cursor, 
         }
 
         out->indent = (int)indent;
+        out->line_number = current_line_number;
         out->is_sequence = is_sequence;
         out->has_colon = has_colon;
         out->key = key;

@@ -43,6 +43,7 @@ esp-idf/
 .espressif/
 tools/*
 !tools/yamui_bundle.py
+!tools/linux_vps_build.sh
 !tools/yam-ui-generator/
 !tools/yam-ui-generator/**
 dist/

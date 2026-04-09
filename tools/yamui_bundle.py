@@ -120,6 +120,7 @@ def _write_yaml_bundle(destination: Path, payload: Dict[str, Any]) -> str:
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,
+        width=4096,
     )
     destination.write_text(yaml_text, encoding="utf-8")
     return yaml_text

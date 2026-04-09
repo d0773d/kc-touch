@@ -13,8 +13,8 @@ esp_err_t kc_touch_display_backend_init_hw(void);
 esp_err_t kc_touch_display_backend_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const void *color_data);
 bool kc_touch_display_backend_touch_sample(uint16_t *x, uint16_t *y);
 esp_err_t kc_touch_display_backend_backlight_set(bool enable);
+esp_err_t kc_touch_display_backend_brightness_set(int percent);
 
 #ifdef __cplusplus
 }
 #endif
-

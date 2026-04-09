@@ -25,6 +25,31 @@ tools/yam-ui-generator/
 
 The frontend expects the backend to be available at `http://localhost:8000`. You can change this via the `VITE_API_BASE_URL` environment variable.
 
+## Device Testing Workflow
+
+To test generated YAML directly on the ESP32 firmware:
+
+1. Export or copy the generated YamUI YAML from the companion app.
+2. Install it into the embedded firmware schema path:
+   - `cd tools/yam-ui-generator`
+   - `.\use-generated-schema.ps1 -FromClipboard`
+   - or `.\use-generated-schema.ps1 -SourcePath C:\path\to\generated.yml`
+3. Build and flash the firmware:
+   - `cd ..\..`
+   - `idf.py build`
+   - `idf.py -p COM11 flash monitor`
+
+For a one-shot flow, use:
+
+- `.\deploy-generated-schema.ps1 -FromClipboard`
+- or `.\deploy-generated-schema.ps1 -SourcePath C:\path\to\generated.yml`
+
+The deploy helper will:
+- back up the current embedded `home.yml`
+- install the generated YAML
+- run `idf.py build`
+- optionally flash and monitor on `COM11` by default
+
 ## Documentation
 
 See [docs/phase1-core-features.md](docs/phase1-core-features.md) for the detailed Phase 1 feature breakdown.

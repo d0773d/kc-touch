@@ -79,6 +79,15 @@ static yui_action_type_t yui_action_type_from_name(const char *name)
     if (strcasecmp(name, "set") == 0) {
         return YUI_ACTION_SET;
     }
+    if (strcasecmp(name, "toggle") == 0) {
+        return YUI_ACTION_TOGGLE;
+    }
+    if (strcasecmp(name, "increment") == 0) {
+        return YUI_ACTION_INCREMENT;
+    }
+    if (strcasecmp(name, "decrement") == 0) {
+        return YUI_ACTION_DECREMENT;
+    }
     if (strcasecmp(name, "goto") == 0) {
         return YUI_ACTION_GOTO;
     }
@@ -108,6 +117,12 @@ static const char *yui_action_type_name(yui_action_type_t type)
     switch (type) {
         case YUI_ACTION_SET:
             return "set";
+        case YUI_ACTION_TOGGLE:
+            return "toggle";
+        case YUI_ACTION_INCREMENT:
+            return "increment";
+        case YUI_ACTION_DECREMENT:
+            return "decrement";
         case YUI_ACTION_GOTO:
             return "goto";
         case YUI_ACTION_PUSH:
@@ -337,6 +352,64 @@ static esp_err_t yui_execute_set(const yui_action_t *action, const yui_action_ev
     return err;
 }
 
+static esp_err_t yui_execute_toggle(const yui_action_t *action, const yui_action_eval_ctx_t *ctx)
+{
+    if (!action->arg0) {
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "toggle action missing key argument");
+        return ESP_ERR_INVALID_ARG;
+    }
+    char key_buffer[YUI_ACTION_EVAL_BUFFER];
+    const char *key = yui_eval_arg(action->arg0, ctx, key_buffer, sizeof(key_buffer));
+    if (!key || key[0] == '\0') {
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "toggle action resolved to empty key");
+        return ESP_ERR_INVALID_ARG;
+    }
+    bool next = !yui_state_get_bool(key, false);
+    esp_err_t err = yui_state_set_bool(key, next);
+    if (err == ESP_OK) {
+        yamui_telemetry_action("toggle", key, next ? "true" : "false");
+    }
+    return err;
+}
+
+static esp_err_t yui_execute_step(const yui_action_t *action, const yui_action_eval_ctx_t *ctx, int32_t direction)
+{
+    if (!action->arg0) {
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "%s action missing key argument",
+                  direction >= 0 ? "increment" : "decrement");
+        return ESP_ERR_INVALID_ARG;
+    }
+    char key_buffer[YUI_ACTION_EVAL_BUFFER];
+    char step_buffer[YUI_ACTION_EVAL_BUFFER];
+    const char *key = yui_eval_arg(action->arg0, ctx, key_buffer, sizeof(key_buffer));
+    if (!key || key[0] == '\0') {
+        yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "%s action resolved to empty key",
+                  direction >= 0 ? "increment" : "decrement");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    int32_t step = 1;
+    if (action->arg1) {
+        const char *step_text = yui_eval_arg(action->arg1, ctx, step_buffer, sizeof(step_buffer));
+        if (step_text && step_text[0] != '\0') {
+            step = (int32_t)strtol(step_text, NULL, 10);
+        }
+    }
+    if (step < 0) {
+        step = -step;
+    }
+
+    int32_t current = yui_state_get_int(key, 0);
+    int32_t next = direction >= 0 ? (current + step) : (current - step);
+    esp_err_t err = yui_state_set_int(key, next);
+    if (err == ESP_OK) {
+        char value_text[16];
+        snprintf(value_text, sizeof(value_text), "%ld", (long)next);
+        yamui_telemetry_action(direction >= 0 ? "increment" : "decrement", key, value_text);
+    }
+    return err;
+}
+
 static esp_err_t yui_execute_goto(const yui_action_t *action, const yui_action_eval_ctx_t *ctx)
 {
     if (!s_runtime.goto_screen) {
@@ -458,13 +531,6 @@ static esp_err_t yui_execute_emit(const yui_action_t *action, const yui_action_e
     return err;
 }
 
-static esp_err_t yui_execute_unimplemented(const yui_action_t *action, const char *label)
-{
-    (void)action;
-    yamui_log(YAMUI_LOG_LEVEL_WARN, YAMUI_LOG_CAT_ACTION, "%s action not implemented yet", label);
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
 static esp_err_t yui_execute_action(const yui_action_t *action, const yui_action_eval_ctx_t *ctx)
 {
     const char *name = yui_action_type_name(action->type);
@@ -474,6 +540,12 @@ static esp_err_t yui_execute_action(const yui_action_t *action, const yui_action
     switch (action->type) {
         case YUI_ACTION_SET:
             return yui_execute_set(action, ctx);
+        case YUI_ACTION_TOGGLE:
+            return yui_execute_toggle(action, ctx);
+        case YUI_ACTION_INCREMENT:
+            return yui_execute_step(action, ctx, 1);
+        case YUI_ACTION_DECREMENT:
+            return yui_execute_step(action, ctx, -1);
         case YUI_ACTION_GOTO:
             return yui_execute_goto(action, ctx);
         case YUI_ACTION_PUSH:

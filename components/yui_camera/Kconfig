@@ -1,0 +1,141 @@
+menu "YamUI Camera"
+
+config YUI_CAMERA_ENABLE
+    bool "Enable YamUI camera support"
+    default n
+    help
+        Enables the board-facing camera initialization and generic frame stream
+        helpers used by future YamUI camera widgets.
+
+if YUI_CAMERA_ENABLE
+
+choice YUI_CAMERA_INTERFACE
+    prompt "Camera interface"
+    default YUI_CAMERA_INTERFACE_DVP
+    help
+        Select the physical camera interface used by the attached sensor.
+
+config YUI_CAMERA_INTERFACE_DVP
+    bool "DVP"
+
+config YUI_CAMERA_INTERFACE_MIPI_CSI
+    bool "MIPI-CSI"
+
+endchoice
+
+config YUI_CAMERA_SCCB_I2C_PORT
+    int "SCCB(I2C) port"
+    default 0
+    range 0 5
+
+config YUI_CAMERA_SCCB_I2C_FREQ
+    int "SCCB(I2C) frequency"
+    default 100000
+    range 10000 400000
+
+config YUI_CAMERA_SCCB_SCL_PIN
+    int "SCCB(I2C) SCL pin"
+    default 8
+    range -1 63
+
+config YUI_CAMERA_SCCB_SDA_PIN
+    int "SCCB(I2C) SDA pin"
+    default 7
+    range -1 63
+
+config YUI_CAMERA_RESET_PIN
+    int "Camera reset pin"
+    default -1
+    range -1 63
+
+config YUI_CAMERA_PWDN_PIN
+    int "Camera power-down pin"
+    default -1
+    range -1 63
+
+if YUI_CAMERA_INTERFACE_DVP
+
+config YUI_CAMERA_DVP_XCLK_FREQ
+    int "DVP XCLK frequency"
+    default 20000000
+    range 1000000 40000000
+
+config YUI_CAMERA_DVP_XCLK_PIN
+    int "DVP XCLK pin"
+    default 20
+    range -1 63
+
+config YUI_CAMERA_DVP_PCLK_PIN
+    int "DVP PCLK pin"
+    default 4
+    range -1 63
+
+config YUI_CAMERA_DVP_VSYNC_PIN
+    int "DVP VSYNC pin"
+    default 37
+    range -1 63
+
+config YUI_CAMERA_DVP_DE_PIN
+    int "DVP DE pin"
+    default 22
+    range -1 63
+
+config YUI_CAMERA_DVP_D0_PIN
+    int "DVP D0 pin"
+    default 2
+    range -1 63
+
+config YUI_CAMERA_DVP_D1_PIN
+    int "DVP D1 pin"
+    default 32
+    range -1 63
+
+config YUI_CAMERA_DVP_D2_PIN
+    int "DVP D2 pin"
+    default 33
+    range -1 63
+
+config YUI_CAMERA_DVP_D3_PIN
+    int "DVP D3 pin"
+    default 23
+    range -1 63
+
+config YUI_CAMERA_DVP_D4_PIN
+    int "DVP D4 pin"
+    default 3
+    range -1 63
+
+config YUI_CAMERA_DVP_D5_PIN
+    int "DVP D5 pin"
+    default 6
+    range -1 63
+
+config YUI_CAMERA_DVP_D6_PIN
+    int "DVP D6 pin"
+    default 5
+    range -1 63
+
+config YUI_CAMERA_DVP_D7_PIN
+    int "DVP D7 pin"
+    default 21
+    range -1 63
+
+endif # YUI_CAMERA_INTERFACE_DVP
+
+if YUI_CAMERA_INTERFACE_MIPI_CSI
+
+config YUI_CAMERA_MIPI_XCLK_PIN
+    int "MIPI-CSI XCLK pin"
+    default -1
+    range -1 63
+
+config YUI_CAMERA_MIPI_XCLK_FREQ
+    int "MIPI-CSI XCLK frequency"
+    default 24000000
+    range 1000000 40000000
+
+endif # YUI_CAMERA_INTERFACE_MIPI_CSI
+
+endif # YUI_CAMERA_ENABLE
+
+endmenu
