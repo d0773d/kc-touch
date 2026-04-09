@@ -1,0 +1,125 @@
+menu "YamUI Loader"
+
+config YAMUI_LOADER_ENABLE
+    bool "Enable YamUI dynamic loader"
+    default y
+    help
+        Enable the YamUI loader subsystem that supports loading YAML schemas
+        from LittleFS storage, UART upload, HTTPS download, and HTTP push.
+
+if YAMUI_LOADER_ENABLE
+
+config YAMUI_LOADER_STORAGE_MOUNT
+    string "LittleFS mount point"
+    default "/storage"
+    help
+        VFS mount point for the LittleFS partition used to persist uploaded
+        or downloaded YAML schemas.
+
+config YAMUI_LOADER_STORAGE_PARTITION
+    string "LittleFS partition label"
+    default "storage"
+    help
+        Label of the data partition in the partition table that will be
+        formatted and mounted as LittleFS.
+
+config YAMUI_LOADER_MAX_YAML_SIZE
+    int "Maximum YAML payload size (bytes)"
+    default 65536
+    range 4096 262144
+    help
+        Upper limit on accepted YAML payloads via UART, HTTPS, or HTTP.
+        Larger files will be rejected to protect limited RAM.
+
+config YAMUI_LOADER_YAML_FILENAME
+    string "Persisted YAML filename"
+    default "ui.yml"
+    help
+        Filename (under the mount point) used to store the active YAML schema.
+
+menu "UART Listener"
+
+config YAMUI_LOADER_UART_ENABLE
+    bool "Enable UART YAML listener"
+    default y
+    help
+        Start a FreeRTOS task that listens for framed YAML uploads on a UART port.
+
+config YAMUI_LOADER_UART_PORT
+    int "UART port number"
+    default 1
+    range 0 2
+    depends on YAMUI_LOADER_UART_ENABLE
+    help
+        UART peripheral to use for receiving YAML uploads.
+
+config YAMUI_LOADER_UART_BAUD
+    int "UART baud rate"
+    default 115200
+    depends on YAMUI_LOADER_UART_ENABLE
+
+config YAMUI_LOADER_UART_TX_PIN
+    int "UART TX GPIO pin"
+    default 43
+    depends on YAMUI_LOADER_UART_ENABLE
+
+config YAMUI_LOADER_UART_RX_PIN
+    int "UART RX GPIO pin"
+    default 44
+    depends on YAMUI_LOADER_UART_ENABLE
+
+config YAMUI_LOADER_UART_TASK_STACK
+    int "UART listener task stack size"
+    default 4096
+    range 2048 16384
+    depends on YAMUI_LOADER_UART_ENABLE
+
+config YAMUI_LOADER_UART_RX_TIMEOUT_S
+    int "UART reception timeout (seconds)"
+    default 30
+    range 5 120
+    depends on YAMUI_LOADER_UART_ENABLE
+
+endmenu
+
+menu "HTTPS Client"
+
+config YAMUI_LOADER_HTTPS_ENABLE
+    bool "Enable HTTPS YAML download"
+    default n
+    help
+        Enable fetching YAML schemas from a remote HTTPS endpoint.
+
+config YAMUI_LOADER_HTTPS_URL
+    string "Default HTTPS URL"
+    default ""
+    depends on YAMUI_LOADER_HTTPS_ENABLE
+
+config YAMUI_LOADER_HTTPS_POLL_INTERVAL_S
+    int "HTTPS poll interval (seconds, 0 = one-shot)"
+    default 0
+    range 0 86400
+    depends on YAMUI_LOADER_HTTPS_ENABLE
+
+endmenu
+
+menu "HTTP Server"
+
+config YAMUI_LOADER_HTTPD_ENABLE
+    bool "Enable HTTP server for WiFi push"
+    default y
+    help
+        Start a lightweight HTTP server that accepts YAML uploads via POST
+        and exposes device status via GET.
+
+config YAMUI_LOADER_HTTPD_PORT
+    int "HTTP server port"
+    default 80
+    range 1 65535
+    depends on YAMUI_LOADER_HTTPD_ENABLE
+
+endmenu
+
+endif # YAMUI_LOADER_ENABLE
+
+endmenu

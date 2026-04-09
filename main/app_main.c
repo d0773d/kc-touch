@@ -12,6 +12,7 @@
 #include "sensor_manager.h"
 #include "yui_camera.h"
 #include "yamui_async.h"
+#include "yamui_loader.h"
 #include "yamui_logging.h"
 #include "yamui_runtime.h"
 #include "yamui_state.h"
@@ -180,7 +181,19 @@ void app_main(void)
     }
 
     app_register_yamui_demo_functions();
-    kc_touch_gui_show_root();
+
+    /* Initialize the YAML loader — mounts LittleFS, starts UART listener
+       and HTTP server based on Kconfig defaults. */
+    yamui_loader_config_t loader_cfg = yamui_loader_default_config();
+    esp_err_t loader_err = yamui_loader_init(&loader_cfg);
+    if (loader_err != ESP_OK) {
+        ESP_LOGW(TAG, "yamui_loader_init: %s — falling back to show_root",
+                 esp_err_to_name(loader_err));
+        kc_touch_gui_show_root();
+    } else {
+        yamui_loader_load_best();
+    }
+
     ESP_LOGI(TAG, "Waveshare YamUI runtime started");
 
     while (true) {

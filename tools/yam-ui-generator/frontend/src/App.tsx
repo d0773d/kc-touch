@@ -11,6 +11,7 @@ import StyleManager from "./components/StyleManager";
 import AssetManager from "./components/AssetManager";
 import TranslationManager from "./components/TranslationManager";
 import IssueAccelerators from "./components/IssueAccelerators";
+import DeviceConnection from "./components/DeviceConnection";
 import { useProject } from "./context/ProjectContext";
 import { ValidationIssue } from "./types/yamui";
 
@@ -92,6 +93,7 @@ export default function App(): JSX.Element {
           <StyleManager />
           <AssetManager />
           <TranslationManager issues={issues} />
+          <DeviceConnection />
         </section>
         <div
           className="resize-handle resize-handle--vertical"

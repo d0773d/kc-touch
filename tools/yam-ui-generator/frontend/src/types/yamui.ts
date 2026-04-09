@@ -10,6 +10,18 @@ export type WidgetType =
   | "textarea"
   | "switch"
   | "slider"
+  | "checkbox"
+  | "dropdown"
+  | "roller"
+  | "bar"
+  | "arc"
+  | "chart"
+  | "calendar"
+  | "table"
+  | "tabview"
+  | "menu"
+  | "keyboard"
+  | "led"
   | "component";
 
 export interface WidgetNode {

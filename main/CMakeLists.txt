@@ -5,6 +5,7 @@ idf_component_register(
         kc_touch_gui
         kc_touch_display
         sensor_manager
+        yamui_loader
         yui_camera
     INCLUDE_DIRS "."
 )
