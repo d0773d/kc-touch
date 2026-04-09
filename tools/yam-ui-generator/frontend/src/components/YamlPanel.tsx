@@ -204,6 +204,100 @@ function previewNode(
         </div>
       );
     }
+    case "checkbox":
+      return (
+        <label key={key} className="live-preview__checkbox" style={baseStyle}>
+          <input type="checkbox" readOnly checked={Boolean(widget.props?.checked)} />
+          <span>{resolveWidgetText(widget, project) || "Checkbox"}</span>
+        </label>
+      );
+    case "dropdown":
+      return (
+        <select key={key} className="live-preview__dropdown" style={baseStyle} disabled>
+          {(typeof widget.props?.options === "string"
+            ? widget.props.options.split("\n")
+            : Array.isArray(widget.props?.options) ? widget.props.options : ["Option 1", "Option 2", "Option 3"]
+          ).map((opt: string, i: number) => (
+            <option key={i}>{opt}</option>
+          ))}
+        </select>
+      );
+    case "roller":
+      return (
+        <div key={key} className="live-preview__roller" style={{ ...baseStyle, border: "1px solid #ccc", borderRadius: 6, padding: "4px 8px", textAlign: "center" }}>
+          {resolveWidgetText(widget, project) || "Roller"}
+        </div>
+      );
+    case "bar":
+      return (
+        <div key={key} className="live-preview__bar" style={{ ...baseStyle, background: "#e0e0e0", borderRadius: 4, height: 12, overflow: "hidden" }}>
+          <div style={{ width: `${typeof widget.props?.value === "number" ? widget.props.value : 50}%`, height: "100%", background: "#4fc3f7", borderRadius: 4 }} />
+        </div>
+      );
+    case "arc":
+      return (
+        <div key={key} className="live-preview__arc" style={{ ...baseStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg width="60" height="60" viewBox="0 0 60 60">
+            <circle cx="30" cy="30" r="24" fill="none" stroke="#e0e0e0" strokeWidth="6" />
+            <circle cx="30" cy="30" r="24" fill="none" stroke="#4fc3f7" strokeWidth="6"
+              strokeDasharray={`${((typeof widget.props?.value === "number" ? widget.props.value : 50) / 100) * 150.8} 150.8`}
+              strokeLinecap="round" transform="rotate(-90 30 30)" />
+            <text x="30" y="34" textAnchor="middle" fontSize="12" fill="#333">
+              {typeof widget.props?.value === "number" ? widget.props.value : 50}%
+            </text>
+          </svg>
+        </div>
+      );
+    case "keyboard":
+      return (
+        <div key={key} className="live-preview__keyboard" style={{ ...baseStyle, background: "#f0f0f0", borderRadius: 6, padding: 8, textAlign: "center", fontSize: 11, color: "#666" }}>
+          ⌨ Keyboard
+        </div>
+      );
+    case "led":
+      return (
+        <div key={key} className="live-preview__led" style={{ ...baseStyle, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 14, height: 14, borderRadius: "50%", background: widget.props?.color ?? "#4caf50", display: "inline-block", boxShadow: `0 0 6px ${widget.props?.color ?? "#4caf50"}` }} />
+          <span>{resolveWidgetText(widget, project) || "LED"}</span>
+        </div>
+      );
+    case "chart":
+      return (
+        <div key={key} className="live-preview__chart" style={{ ...baseStyle, border: "1px solid #e0e0e0", borderRadius: 6, padding: 12, textAlign: "center", color: "#999" }}>
+          📊 Chart
+        </div>
+      );
+    case "calendar":
+      return (
+        <div key={key} className="live-preview__calendar" style={{ ...baseStyle, border: "1px solid #e0e0e0", borderRadius: 6, padding: 12, textAlign: "center", color: "#999" }}>
+          📅 Calendar
+        </div>
+      );
+    case "table":
+      return (
+        <div key={key} className="live-preview__table" style={{ ...baseStyle, border: "1px solid #e0e0e0", borderRadius: 6, padding: 12, textAlign: "center", color: "#999" }}>
+          📋 Table
+        </div>
+      );
+    case "tabview":
+      return (
+        <div key={key} className="live-preview__tabview" style={baseStyle}>
+          <div style={{ display: "flex", borderBottom: "2px solid #e0e0e0", marginBottom: 4 }}>
+            {(widget.widgets ?? []).map((tab, i) => (
+              <span key={i} style={{ padding: "4px 12px", fontSize: 12, borderBottom: i === 0 ? "2px solid #4fc3f7" : "none", color: i === 0 ? "#4fc3f7" : "#999" }}>
+                {tab.props?.title ?? tab.id ?? `Tab ${i + 1}`}
+              </span>
+            ))}
+          </div>
+          {children[0] ?? <span style={{ color: "#999", fontSize: 12 }}>Tab content</span>}
+        </div>
+      );
+    case "menu":
+      return (
+        <div key={key} className="live-preview__menu" style={{ ...baseStyle, border: "1px solid #e0e0e0", borderRadius: 6 }}>
+          {children.length > 0 ? children : <span style={{ padding: 8, display: "block", color: "#999", fontSize: 12 }}>Menu</span>}
+        </div>
+      );
     default:
       findings.push({
         path,

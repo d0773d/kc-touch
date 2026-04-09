@@ -75,7 +75,7 @@ const parseTranslationIssue = (issue: ValidationIssue): TranslationIssueDetail |
 
 const buildColumnsTemplate = (localeCount: number): string => {
   const safeCount = Math.max(1, localeCount);
-  return `minmax(200px, 240px) repeat(${safeCount}, minmax(160px, 1fr)) 72px`;
+  return `minmax(200px, 240px) repeat(${safeCount}, minmax(160px, 1fr)) minmax(120px, auto)`;
 };
 
 const normalizeKey = (value: string): string => value.trim();

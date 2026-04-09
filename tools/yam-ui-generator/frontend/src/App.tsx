@@ -12,6 +12,7 @@ import AssetManager from "./components/AssetManager";
 import TranslationManager from "./components/TranslationManager";
 import IssueAccelerators from "./components/IssueAccelerators";
 import DeviceConnection from "./components/DeviceConnection";
+import Modal from "./components/Modal";
 import { useProject } from "./context/ProjectContext";
 import { ValidationIssue } from "./types/yamui";
 
@@ -21,6 +22,9 @@ const MIN_CENTER_WIDTH = 360;
 const MIN_YAML_HEIGHT = 200;
 
 type ResizeHandle = "palette" | "inspector" | "yaml";
+type SidebarTab = "build" | "project";
+type ProjectSection = "settings" | "assets" | "device" | null;
+type ModalSection = "components" | "styles" | "translations" | null;
 
 export default function App(): JSX.Element {
   const { project } = useProject();
@@ -31,6 +35,14 @@ export default function App(): JSX.Element {
   const [inspectorWidth, setInspectorWidth] = useState(320);
   const [yamlHeight, setYamlHeight] = useState(280);
   const [activeResize, setActiveResize] = useState<ResizeHandle | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("build");
+  const [issuesExpanded, setIssuesExpanded] = useState(false);
+  const [yamlExpanded, setYamlExpanded] = useState(false);
+  const [openProjectSection, setOpenProjectSection] = useState<ProjectSection>("settings");
+  const [modalSection, setModalSection] = useState<ModalSection>(null);
+
+  const toggleSection = (section: ProjectSection) =>
+    setOpenProjectSection((prev) => (prev === section ? null : section));
 
   useEffect(() => {
     if (!activeResize) {
@@ -78,6 +90,9 @@ export default function App(): JSX.Element {
     setActiveResize(type);
   };
 
+  const errorCount = issues.filter((i) => i.severity === "error").length;
+  const warningCount = issues.filter((i) => i.severity === "warning").length;
+
   return (
     <div className="app-shell">
       <ProjectToolbar onIssues={setIssues} />
@@ -86,14 +101,50 @@ export default function App(): JSX.Element {
           className="panel palette"
           style={{ width: paletteWidth, minWidth: MIN_PALETTE_WIDTH }}
         >
-          <WidgetPalette />
-          <ScreenManager />
-          <ProjectSettings />
-          <ComponentManager />
-          <StyleManager />
-          <AssetManager />
-          <TranslationManager issues={issues} />
-          <DeviceConnection />
+          <div className="sidebar-tabs">
+            <button
+              className={`sidebar-tab ${sidebarTab === "build" ? "sidebar-tab--active" : ""}`}
+              onClick={() => setSidebarTab("build")}
+            >
+              Build
+            </button>
+            <button
+              className={`sidebar-tab ${sidebarTab === "project" ? "sidebar-tab--active" : ""}`}
+              onClick={() => setSidebarTab("project")}
+            >
+              Project
+            </button>
+          </div>
+          {sidebarTab === "build" ? (
+            <>
+              <WidgetPalette />
+              <ScreenManager />
+            </>
+          ) : (
+            <div className="accordion-sidebar">
+              <details open={openProjectSection === "settings"} onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) toggleSection("settings"); }}>
+                <summary className="accordion-header">Settings</summary>
+                <div className="accordion-body"><ProjectSettings /></div>
+              </details>
+              <button className="accordion-launcher" onClick={() => setModalSection("components")}>
+                Components
+              </button>
+              <button className="accordion-launcher" onClick={() => setModalSection("styles")}>
+                Styles
+              </button>
+              <details open={openProjectSection === "assets"} onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) toggleSection("assets"); }}>
+                <summary className="accordion-header">Assets</summary>
+                <div className="accordion-body"><AssetManager /></div>
+              </details>
+              <button className="accordion-launcher" onClick={() => setModalSection("translations")}>
+                Translations
+              </button>
+              <details open={openProjectSection === "device"} onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) toggleSection("device"); }}>
+                <summary className="accordion-header">Device</summary>
+                <div className="accordion-body"><DeviceConnection /></div>
+              </details>
+            </div>
+          )}
         </section>
         <div
           className="resize-handle resize-handle--vertical"
@@ -103,21 +154,61 @@ export default function App(): JSX.Element {
           onMouseDown={startResize("palette")}
         />
         <div className="app-main" ref={mainColumnRef}>
-          <IssueAccelerators issues={issues} />
-          <Canvas issues={issues} style={{ flex: 1 }} />
           <div
-            className="resize-handle resize-handle--horizontal"
-            role="separator"
-            aria-label="Resize YAML panel"
-            title="Drag to resize YAML preview"
-            onMouseDown={startResize("yaml")}
-          />
-          <YamlPanel
-            project={project}
-            issues={issues}
-            onIssues={setIssues}
-            style={{ height: yamlHeight, minHeight: MIN_YAML_HEIGHT }}
-          />
+            className={`issues-bar ${issuesExpanded ? "issues-bar--expanded" : ""}`}
+            onClick={() => !issuesExpanded && setIssuesExpanded(true)}
+          >
+            <div className="issues-bar__summary">
+              <span className="issues-bar__label">Issues</span>
+              <span className={`issues-bar__badge ${errorCount > 0 ? "issues-bar__badge--error" : ""}`}>
+                {errorCount} errors
+              </span>
+              <span className={`issues-bar__badge ${warningCount > 0 ? "issues-bar__badge--warning" : ""}`}>
+                {warningCount} warnings
+              </span>
+              <button
+                className="issues-bar__toggle"
+                onClick={(e) => { e.stopPropagation(); setIssuesExpanded(!issuesExpanded); }}
+                title={issuesExpanded ? "Collapse issues" : "Expand issues"}
+              >
+                {issuesExpanded ? "\u25B2" : "\u25BC"}
+              </button>
+            </div>
+            {issuesExpanded && <IssueAccelerators issues={issues} />}
+          </div>
+          <Canvas issues={issues} style={{ flex: 1 }} />
+          {yamlExpanded ? (
+            <>
+              <div
+                className="resize-handle resize-handle--horizontal"
+                role="separator"
+                aria-label="Resize YAML panel"
+                title="Drag to resize YAML preview"
+                onMouseDown={startResize("yaml")}
+              />
+              <YamlPanel
+                project={project}
+                issues={issues}
+                onIssues={setIssues}
+                style={{ height: yamlHeight, minHeight: MIN_YAML_HEIGHT }}
+              />
+              <button
+                className="yaml-collapse-btn"
+                onClick={() => setYamlExpanded(false)}
+                title="Collapse YAML panel"
+              >
+                Hide YAML \u25BC
+              </button>
+            </>
+          ) : (
+            <button
+              className="yaml-expand-btn"
+              onClick={() => setYamlExpanded(true)}
+              title="Show YAML panel"
+            >
+              YAML / Preview \u25B2
+            </button>
+          )}
         </div>
         <div
           className="resize-handle resize-handle--vertical"
@@ -131,6 +222,21 @@ export default function App(): JSX.Element {
           style={{ width: inspectorWidth, minWidth: MIN_INSPECTOR_WIDTH }}
         />
       </div>
+      {modalSection === "components" && (
+        <Modal title="Components" onClose={() => setModalSection(null)} width="90vw">
+          <ComponentManager />
+        </Modal>
+      )}
+      {modalSection === "styles" && (
+        <Modal title="Styles" onClose={() => setModalSection(null)} width="90vw">
+          <StyleManager />
+        </Modal>
+      )}
+      {modalSection === "translations" && (
+        <Modal title="Translations" onClose={() => setModalSection(null)} width="90vw">
+          <TranslationManager issues={issues} />
+        </Modal>
+      )}
     </div>
   );
 }

@@ -456,13 +456,19 @@ def _validate_semantic_rules(raw: Dict[str, Any]) -> List[ValidationIssue]:
 
             style_name = widget.get("style")
             if isinstance(style_name, str) and style_name.strip() and style_name not in styles:
-                issues.append(
-                    ValidationIssue(
-                        path=f"{widget_path}/style",
-                        message=f"Style '{style_name}' is not defined",
-                        severity="warning",
-                    )
+                # Check for themed variants (e.g. "hero" matches "light.hero" / "dark.hero")
+                has_themed = any(
+                    k == f"light.{style_name}" or k == f"dark.{style_name}"
+                    for k in styles
                 )
+                if not has_themed:
+                    issues.append(
+                        ValidationIssue(
+                            path=f"{widget_path}/style",
+                            message=f"Style '{style_name}' is not defined",
+                            severity="warning",
+                        )
+                    )
 
             if widget.get("type") == "component":
                 props = widget.get("props")

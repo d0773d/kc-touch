@@ -654,6 +654,261 @@ body {
   overflow-y: auto;
 }
 
+/* --- Sidebar Tabs --- */
+.sidebar-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 2px solid #e8ecf0;
+  padding-bottom: 0;
+}
+
+.sidebar-tab {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.sidebar-tab:hover {
+  color: #64748b;
+}
+
+.sidebar-tab--active {
+  color: #0ea5e9;
+  border-bottom-color: #0ea5e9;
+}
+
+/* --- Issues Bar (collapsed) --- */
+.issues-bar {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+  flex-shrink: 0;
+}
+
+.issues-bar:hover {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+}
+
+.issues-bar--expanded {
+  cursor: default;
+}
+
+.issues-bar__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
+.issues-bar__label {
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+}
+
+.issues-bar__badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+.issues-bar__badge--error {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.issues-bar__badge--warning {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.issues-bar__toggle {
+  margin-left: auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  padding: 2px 6px;
+}
+
+.issues-bar__toggle:hover {
+  color: #0ea5e9;
+}
+
+/* --- YAML Expand/Collapse Buttons --- */
+.yaml-expand-btn,
+.yaml-collapse-btn {
+  border: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  text-align: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.yaml-expand-btn:hover,
+.yaml-collapse-btn:hover {
+  background: #f1f5f9;
+  color: #0ea5e9;
+}
+
+.yaml-collapse-btn {
+  margin-top: -8px;
+}
+
+/* --- Accordion Sidebar (Project tab) --- */
+.accordion-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.accordion-sidebar details {
+  border: 1px solid #e8ecf0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.accordion-sidebar details[open] {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.accordion-header {
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5b728a;
+  cursor: pointer;
+  background: #f8fafc;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.accordion-header::-webkit-details-marker {
+  display: none;
+}
+
+.accordion-header::before {
+  content: "\25B6";
+  font-size: 0.6rem;
+  transition: transform 0.15s;
+  color: #94a3b8;
+}
+
+details[open] > .accordion-header::before {
+  transform: rotate(90deg);
+}
+
+.accordion-header:hover {
+  background: #f1f5f9;
+  color: #0ea5e9;
+}
+
+/* Launcher buttons that open content-heavy sections as modals */
+.accordion-launcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e8ecf0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5b728a;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+}
+
+.accordion-launcher::after {
+  content: "\2197";
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.accordion-launcher:hover {
+  background: #f1f5f9;
+  color: #0ea5e9;
+}
+
+.accordion-body {
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Hide redundant section-title inside accordion body since header already shows it */
+.accordion-body > section > .section-title:first-child,
+.accordion-body > .section-title:first-child {
+  display: none;
+}
+
+/* --- Compact Screen List --- */
+.screen-list .screen-item {
+  padding: 4px 8px;
+  gap: 4px;
+  align-items: center;
+}
+
+.screen-list .screen-item > div:last-child {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.screen-list .screen-item:hover > div:last-child {
+  opacity: 1;
+}
+
+.screen-list .screen-item .button {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+}
+
 .issue-accelerators {
   gap: 12px;
 }
@@ -2846,7 +3101,32 @@ body {
 
 .translation-table__cell--actions {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.translation-table__missing-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.translation-table__missing-pill {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.translation-table__missing-pill.is-missing {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.translation-table__missing-pill.is-complete {
+  background: #d1fae5;
+  color: #065f46;
 }
 
 .translation-table__cell--locale.is-missing {
