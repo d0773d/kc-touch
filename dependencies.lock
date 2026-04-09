@@ -49,7 +49,7 @@ dependencies:
     - esp32c61
     version: 1.7.0
   espressif/esp_codec_dev:
-    component_hash: d67021bdb3f619cebabdfabd4507d978dfa5cddf3ae8db4752b23843cf2cc2d9
+    component_hash: 54870f7a66dd93367b4153dedb22299efadf8b7b2ead322cdebc7c92a542fa35
     dependencies:
     - name: idf
       require: private
@@ -57,7 +57,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.5.6
+    version: 1.5.7
   espressif/esp_h264:
     component_hash: fa5daaebc8a304f0b79bc57e51aab43e0a03eabc2ba3865bff4063c56b5d4564
     dependencies:
@@ -337,7 +337,7 @@ dependencies:
       type: service
     version: 1.0.2
   espressif/libpng:
-    component_hash: 8c426d10dc2bf187aafd84ef42834e1a44835ed08a293d78683eb7811d8f8c25
+    component_hash: 940ea54356129e5252b8ed50bc535fdce2836d09815e8c362595b5d538471f48
     dependencies:
     - name: idf
       require: private
@@ -349,7 +349,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.6.55
+    version: 1.6.56
   espressif/usb_host_uvc:
     component_hash: f20c4e4dea50536e2e29daaf589b5f5984402284c155867daef27d6b64869f78
     dependencies:
@@ -386,7 +386,17 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 5.5.1
+    version: 5.5.2
+  joltwallet/littlefs:
+    component_hash: dcea25bcef2de023f089f5f01e8d8c46ad1b8ffef75861ad5ffb4098555839df
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.20.4
   lvgl/lvgl:
     component_hash: 184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae
     dependencies: []
@@ -548,8 +558,9 @@ dependencies:
     version: 1.0.0
 direct_dependencies:
 - espressif/esp_video
+- joltwallet/littlefs
 - lvgl/lvgl
 - waveshare/esp32_p4_platform
-manifest_hash: 18ad95b048cb56200b15c8fe80fe624ad930b388c493e9df5d42a73990049149
+manifest_hash: b3c6133dee16d642106367fcdd3e84a574b15d9eeba11041b971f7c4c6b6df06
 target: esp32p4
 version: 2.0.0

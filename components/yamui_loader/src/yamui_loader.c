@@ -113,6 +113,14 @@ esp_err_t yamui_loader_init(const yamui_loader_config_t *config)
         }
     }
 
+    if (config->enable_https_poll && config->https_url[0] != '\0') {
+        extern esp_err_t yamui_loader_start_https_poll(const char *url);
+        ret = yamui_loader_start_https_poll(config->https_url);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "HTTPS poll start failed: %s", esp_err_to_name(ret));
+        }
+    }
+
     ESP_LOGI(TAG, "Initialized (uart=%s, https=%s, httpd=%s)",
              config->enable_uart_listener ? "on" : "off",
              config->enable_https_poll ? "on" : "off",
@@ -259,6 +267,12 @@ esp_err_t yamui_loader_fetch_https(const char *url)
 {
     (void)url;
     ESP_LOGW(TAG, "HTTPS client not compiled (CONFIG_YAMUI_LOADER_HTTPS_ENABLE=n)");
+    return ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t yamui_loader_start_https_poll(const char *url)
+{
+    (void)url;
+    ESP_LOGW(TAG, "HTTPS polling not compiled (CONFIG_YAMUI_LOADER_HTTPS_ENABLE=n)");
     return ESP_ERR_NOT_SUPPORTED;
 }
 #endif

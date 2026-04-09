@@ -33,9 +33,8 @@ if(CONFIG_YAMUI_LOADER_HTTPS_ENABLE)
     list(APPEND YAMUI_LOADER_REQUIRES "esp_http_client" "esp-tls")
 endif()
 
-if(CONFIG_YAMUI_LOADER_HTTPD_ENABLE)
-    list(APPEND YAMUI_LOADER_REQUIRES "esp_http_server")
-endif()
+# esp_http_server is always required (httpd enabled by default in Kconfig)
+list(APPEND YAMUI_LOADER_REQUIRES "esp_http_server")
 
 idf_component_register(
     SRCS ${YAMUI_LOADER_SRCS}

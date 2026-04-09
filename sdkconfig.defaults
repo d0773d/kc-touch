@@ -57,3 +57,18 @@ CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
 # CONFIG_ESP_SYSTEM_NO_BACKTRACE is not set
 CONFIG_LV_FONT_DEJAVU_16_PERSIAN_HEBREW=y
 CONFIG_LV_FONT_DEFAULT_DEJAVU_16_PERSIAN_HEBREW=y
+
+# Flash size for Waveshare board (16MB)
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Target ESP32-P4 rev <3.0 (rev 1.x hardware)
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+
+# Increase partition table offset for larger bootloader
+CONFIG_PARTITION_TABLE_OFFSET=0x10000
+
+# Allow legacy + new I2C drivers to coexist (i2c_bus component uses legacy API)
+CONFIG_I2C_SKIP_LEGACY_CONFLICT_CHECK=y
+
+# Disable HTTPD by default (ESP32-P4 has no WiFi, TCP/IP stack not initialized)
+# CONFIG_YAMUI_LOADER_HTTPD_ENABLE is not set
