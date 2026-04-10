@@ -8,6 +8,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_lcd_panel_ops.h"
+#include "esp_lv_adapter.h"
 #include "soc/soc_caps.h"
 #if __has_include("esp_lcd_touch.h")
 #include "esp_lcd_touch.h"
@@ -77,7 +78,15 @@ esp_err_t kc_touch_display_backend_init_hw(void)
 #if KC_TOUCH_WAVESHARE_BSP_AVAILABLE
     /* Prefer Waveshare BSP LVGL adapter path (same flow as vendor examples). */
     bsp_display_cfg_t display_cfg = {
-        .lv_adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG(),
+        .lv_adapter_cfg = {
+            .task_stack_size   = CONFIG_KC_TOUCH_GUI_TASK_STACK_SIZE,
+            .task_priority     = ESP_LV_ADAPTER_DEFAULT_TASK_PRIORITY,
+            .task_core_id      = ESP_LV_ADAPTER_DEFAULT_TASK_CORE_ID,
+            .tick_period_ms    = ESP_LV_ADAPTER_DEFAULT_TICK_PERIOD_MS,
+            .task_min_delay_ms = ESP_LV_ADAPTER_DEFAULT_TASK_MIN_DELAY_MS,
+            .task_max_delay_ms = ESP_LV_ADAPTER_DEFAULT_TASK_MAX_DELAY_MS,
+            .stack_in_psram    = true,
+        },
         .rotation = ESP_LV_ADAPTER_ROTATE_0,
         .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_TRIPLE_PARTIAL,
         .touch_flags = {

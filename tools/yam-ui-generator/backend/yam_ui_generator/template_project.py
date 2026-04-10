@@ -65,6 +65,8 @@ TEMPLATE_PROJECT_DATA = {
                 "actions.english": "English",
                 "actions.spanish": "Espanol",
                 "actions.open_widgets": "Open Widgets",
+                "actions.open_new_widgets": "New Widgets",
+                "actions.open_grid": "Grid Demo",
                 "actions.open_table": "Open Table",
                 "actions.open_chart": "Open Chart",
                 "actions.open_calendar": "Open Calendar",
@@ -89,6 +91,8 @@ TEMPLATE_PROJECT_DATA = {
                 "screen.calendar": "Calendar Demo",
                 "screen.tabview": "Tabview Demo",
                 "screen.menu": "Menu Demo",
+                "screen.new_widgets": "New Widgets",
+                "screen.grid": "Grid Demo",
                 "screen.back": "Back",
                 "status.ready": "Ready for interaction",
             },
@@ -461,6 +465,14 @@ TEMPLATE_PROJECT_DATA = {
                                         {"type": "button", "id": "menu-btn", "text": "Open Menu", "style": "ghost"},
                                     ],
                                 },
+                                {
+                                    "type": "row",
+                                    "id": "nav-row-3",
+                                    "widgets": [
+                                        {"type": "button", "id": "new-widgets-btn", "text": "New Widgets", "style": "cta", "on_click": "push(new_widgets)"},
+                                        {"type": "button", "id": "grid-btn", "text": "Grid Demo", "style": "ghost", "on_click": "push(grid_demo)"},
+                                    ],
+                                },
                             ],
                         },
                         # Keyboard overlay
@@ -650,6 +662,175 @@ TEMPLATE_PROJECT_DATA = {
                             ],
                         }},
                         {"type": "button", "id": "menu-back", "text": "Back", "style": "cta"},
+                    ],
+                }
+            ],
+        },
+        "new_widgets": {
+            "name": "new_widgets",
+            "title": "New Widgets",
+            "widgets": [
+                {
+                    "type": "column",
+                    "id": "nw-column",
+                    "widgets": [
+                        {
+                            "type": "panel",
+                            "id": "nw-hero",
+                            "style": "hero",
+                            "widgets": [
+                                {"type": "label", "id": "nw-title", "text": "New Widgets", "style": "heading"},
+                                {"type": "label", "id": "nw-desc", "text": "Showcase of newly added LVGL widgets: spinner, line, QR code, spinbox, scale, button matrix, message box, span, and more.", "style": "body"},
+                            ],
+                        },
+                        # Spinner
+                        {
+                            "type": "panel",
+                            "id": "spinner-panel",
+                            "style": "card",
+                            "widgets": [
+                                {"type": "label", "id": "spinner-title", "text": "Spinner", "style": "heading"},
+                                {"type": "label", "id": "spinner-desc", "text": "Animated loading indicator", "style": "body"},
+                                {
+                                    "type": "row",
+                                    "id": "spinner-row",
+                                    "widgets": [
+                                        {"type": "spinner", "id": "demo-spinner-1", "props": {"duration": 1000, "arc_sweep": 240}},
+                                        {"type": "spinner", "id": "demo-spinner-2", "props": {"duration": 600, "arc_sweep": 300}},
+                                        {"type": "spinner", "id": "demo-spinner-3", "props": {"duration": 2000, "arc_sweep": 180}},
+                                    ],
+                                },
+                            ],
+                        },
+                        # Line
+                        {
+                            "type": "panel",
+                            "id": "line-panel",
+                            "style": "card",
+                            "widgets": [
+                                {"type": "label", "id": "line-title", "text": "Line", "style": "heading"},
+                                {"type": "label", "id": "line-desc", "text": "Points connected by line segments", "style": "body"},
+                                {"type": "line", "id": "demo-line", "props": {"points": [[0, 0], [40, 30], [80, 5], [120, 35], [160, 10], [200, 25]]}},
+                            ],
+                        },
+                        # QR Code
+                        {
+                            "type": "panel",
+                            "id": "qrcode-panel",
+                            "style": "card",
+                            "widgets": [
+                                {"type": "label", "id": "qr-title", "text": "QR Code", "style": "heading"},
+                                {"type": "label", "id": "qr-desc", "text": "Encode any text or URL as a QR code", "style": "body"},
+                                {"type": "qrcode", "id": "demo-qr", "props": {"data": "https://github.com/epicgrowers/kc-touch", "size": 150}},
+                            ],
+                        },
+                        # Spinbox
+                        {
+                            "type": "panel",
+                            "id": "spinbox-panel",
+                            "style": "card",
+                            "widgets": [
+                                {"type": "label", "id": "spinbox-title", "text": "Spinbox", "style": "heading"},
+                                {"type": "label", "id": "spinbox-desc", "text": "Numeric input with digit selection", "style": "body"},
+                                {"type": "spinbox", "id": "demo-spinbox", "props": {"value": 42, "min": -999, "max": 999, "step": 1, "digit_count": 4, "decimal_pos": 0}},
+                            ],
+                        },
+                        # Scale
+                        {
+                            "type": "panel",
+                            "id": "scale-panel",
+                            "style": "card",
+                            "widgets": [
+                                {"type": "label", "id": "scale-title", "text": "Scale", "style": "heading"},
+                                {"type": "label", "id": "scale-desc", "text": "Gauge scale with tick marks and labels", "style": "body"},
+                                {"type": "scale", "id": "demo-scale", "props": {"mode": "horizontal", "range_min": 0, "range_max": 100, "tick_count": 21, "major_tick_every": 5, "label_show": True}},
+                            ],
+                        },
+                        # Button Matrix
+                        {
+                            "type": "panel",
+                            "id": "btnm-panel",
+                            "style": "card",
+                            "widgets": [
+                                {"type": "label", "id": "btnm-title", "text": "Button Matrix", "style": "heading"},
+                                {"type": "label", "id": "btnm-desc", "text": "Grid of buttons from a string array", "style": "body"},
+                                {"type": "buttonmatrix", "id": "demo-btnm", "props": {"map": ["1", "2", "3", "\n", "4", "5", "6", "\n", "7", "8", "9", "\n", "*", "0", "#"]}},
+                            ],
+                        },
+                        # Message Box
+                        {
+                            "type": "panel",
+                            "id": "msgbox-panel",
+                            "style": "card",
+                            "widgets": [
+                                {"type": "label", "id": "msgbox-title", "text": "Message Box", "style": "heading"},
+                                {"type": "label", "id": "msgbox-desc", "text": "Modal alert or confirm dialog", "style": "body"},
+                                {"type": "msgbox", "id": "demo-msgbox", "props": {"title": "Confirm Action", "content_text": "Are you sure you want to proceed?", "close_button": True, "buttons": ["Cancel", "OK"]}},
+                            ],
+                        },
+                        # Span (Rich Text)
+                        {
+                            "type": "panel",
+                            "id": "span-panel",
+                            "style": "card",
+                            "widgets": [
+                                {"type": "label", "id": "span-title", "text": "Span (Rich Text)", "style": "heading"},
+                                {"type": "label", "id": "span-desc", "text": "Mixed-style text in a single widget", "style": "body"},
+                                {"type": "span", "id": "demo-span", "props": {"mode": "break", "spans": [{"text": "Temperature: "}, {"text": "22C ", "style": "stat-value"}, {"text": "Humidity: "}, {"text": "48%", "style": "stat-value"}]}},
+                            ],
+                        },
+                        {"type": "button", "id": "nw-back", "text": "Back", "style": "cta", "on_click": "pop()"},
+                    ],
+                }
+            ],
+        },
+        "grid_demo": {
+            "name": "grid_demo",
+            "title": "Grid Demo",
+            "widgets": [
+                {
+                    "type": "column",
+                    "id": "grid-column",
+                    "widgets": [
+                        {
+                            "type": "panel",
+                            "id": "grid-hero",
+                            "style": "hero",
+                            "widgets": [
+                                {"type": "label", "id": "grid-title", "text": "Grid Layout", "style": "heading"},
+                                {"type": "label", "id": "grid-desc", "text": "CSS Grid-style layout with fractional units, spanning, and alignment.", "style": "body"},
+                            ],
+                        },
+                        # Grid: 3-column dashboard
+                        {
+                            "type": "panel",
+                            "id": "grid-dashboard",
+                            "style": "card",
+                            "props": {},
+                            "layout": {"type": "grid", "columns": ["1fr", "1fr", "1fr"], "rows": ["auto", "auto"], "column_gap": 8, "row_gap": 8},
+                            "widgets": [
+                                {"type": "label", "id": "g-temp", "text": "22 C", "style": "stat-value", "grid_cell": {"col": 0, "row": 0}},
+                                {"type": "label", "id": "g-humid", "text": "48%", "style": "stat-value", "grid_cell": {"col": 1, "row": 0}},
+                                {"type": "label", "id": "g-press", "text": "1012 hPa", "style": "stat-value", "grid_cell": {"col": 2, "row": 0}},
+                                {"type": "label", "id": "g-temp-l", "text": "Temperature", "style": "stat-label", "grid_cell": {"col": 0, "row": 1}},
+                                {"type": "label", "id": "g-humid-l", "text": "Humidity", "style": "stat-label", "grid_cell": {"col": 1, "row": 1}},
+                                {"type": "label", "id": "g-press-l", "text": "Pressure", "style": "stat-label", "grid_cell": {"col": 2, "row": 1}},
+                            ],
+                        },
+                        # Grid: 2-column with spanning
+                        {
+                            "type": "panel",
+                            "id": "grid-span-demo",
+                            "style": "card",
+                            "layout": {"type": "grid", "columns": ["1fr", "1fr"], "rows": ["auto", "auto", "auto"], "column_gap": 8, "row_gap": 8},
+                            "widgets": [
+                                {"type": "label", "id": "g-header", "text": "Status Overview", "style": "heading", "grid_cell": {"col": 0, "row": 0, "col_span": 2}},
+                                {"type": "bar", "id": "g-bar", "props": {"min": 0, "max": 100, "value": 72}, "grid_cell": {"col": 0, "row": 1}},
+                                {"type": "arc", "id": "g-arc", "props": {"min": 0, "max": 100, "value": 48}, "grid_cell": {"col": 1, "row": 1}},
+                                {"type": "label", "id": "g-footer", "text": "All systems operational", "style": "body", "grid_cell": {"col": 0, "row": 2, "col_span": 2}},
+                            ],
+                        },
+                        {"type": "button", "id": "grid-back", "text": "Back", "style": "cta", "on_click": "pop()"},
                     ],
                 }
             ],

@@ -68,6 +68,10 @@ translations:
       actions.open_calendar: "Open Calendar"
       actions.open_tabview: "Open Tabs"
       actions.open_menu: "Open Menu"
+      actions.open_new_widgets: "New Widgets"
+      actions.open_grid: "Grid Demo"
+      screen.new_widgets: "New Widgets"
+      screen.grid: "Grid Demo"
       actions.details: "Open Details"
       actions.modal: "Open Modal"
       actions.english: "English"
@@ -143,6 +147,10 @@ translations:
       actions.open_calendar: "Abrir calendario"
       actions.open_tabview: "Abrir pestañas"
       actions.open_menu: "Abrir menú"
+      actions.open_new_widgets: "Nuevos Widgets"
+      actions.open_grid: "Demo de cuadrícula"
+      screen.new_widgets: "Nuevos Widgets"
+      screen.grid: "Demo de cuadrícula"
       actions.details: "Abrir detalles"
       actions.modal: "Abrir modal"
       actions.english: "Inglés"
@@ -645,6 +653,21 @@ screens:
                 enabled_if: "!state.async.sync_demo.running"
                 on_click: push(widgets)
 
+          - type: row
+            id: nav-row-3
+            layout:
+              type: row
+              gap: 10
+            widgets:
+              - type: button
+                text_key: "actions.open_new_widgets"
+                style: cta
+                on_click: push(new_widgets)
+              - type: button
+                text_key: "actions.open_grid"
+                style: ghost
+                on_click: push(grid_demo)
+
       - type: keyboard
         overlay: true
         visible_if: state.ui.keyboard_visible
@@ -1085,6 +1108,321 @@ screens:
                 - type: label
                   text: "Mode: {{state.demo.mode}}"
                   style: body
+      - type: button
+        text_key: "screen.back"
+        style: cta
+        on_click: pop()
+
+  new_widgets:
+    name: new_widgets
+    title: "New Widgets"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text_key: "screen.new_widgets"
+            style: heading
+          - type: label
+            text: "Showcase of newly added LVGL widgets: spinner, line, QR code, spinbox, scale, button matrix, message box, and span."
+            style: body
+
+      - type: panel
+        style: card
+        props:
+          title: "Spinner"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Animated loading indicator with configurable speed and sweep."
+            style: body
+          - type: row
+            layout:
+              type: row
+              gap: 12
+            widgets:
+              - type: spinner
+                props:
+                  duration: 1000
+                  arc_sweep: 240
+              - type: spinner
+                props:
+                  duration: 600
+                  arc_sweep: 300
+              - type: spinner
+                props:
+                  duration: 2000
+                  arc_sweep: 180
+
+      - type: panel
+        style: card
+        props:
+          title: "Line"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Points connected by line segments."
+            style: body
+          - type: line
+            props:
+              points:
+                - [0, 0]
+                - [40, 30]
+                - [80, 5]
+                - [120, 35]
+                - [160, 10]
+                - [200, 25]
+
+      - type: panel
+        style: card
+        props:
+          title: "QR Code"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Encode any text or URL as a QR code."
+            style: body
+          - type: qrcode
+            props:
+              data: "https://github.com/epicgrowers/kc-touch"
+              size: 150
+
+      - type: panel
+        style: card
+        props:
+          title: "Spinbox"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Numeric input with digit selection."
+            style: body
+          - type: spinbox
+            props:
+              value: 42
+              min: -999
+              max: 999
+              step: 1
+              digit_count: 4
+              decimal_pos: 0
+
+      - type: panel
+        style: card
+        props:
+          title: "Scale"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Gauge scale with tick marks and labels."
+            style: body
+          - type: scale
+            props:
+              mode: horizontal
+              range_min: 0
+              range_max: 100
+              tick_count: 21
+              major_tick_every: 5
+              label_show: true
+
+      - type: panel
+        style: card
+        props:
+          title: "Button Matrix"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Grid of buttons from a string array (phone keypad)."
+            style: body
+          - type: buttonmatrix
+            props:
+              map:
+                - 1
+                - 2
+                - 3
+                - NEWLINE
+                - 4
+                - 5
+                - 6
+                - NEWLINE
+                - 7
+                - 8
+                - 9
+                - NEWLINE
+                - "*"
+                - 0
+                - "#"
+
+      - type: panel
+        style: card
+        props:
+          title: "Message Box"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Modal alert or confirm dialog."
+            style: body
+          - type: msgbox
+            props:
+              title: "Confirm Action"
+              content_text: "Are you sure you want to proceed?"
+              close_button: true
+              buttons: ["Cancel", "OK"]
+
+      - type: panel
+        style: card
+        props:
+          title: "Span (Rich Text)"
+        layout:
+          type: column
+          gap: 8
+        widgets:
+          - type: label
+            text: "Mixed-style text in a single widget."
+            style: body
+          - type: span
+            props:
+              mode: break
+              spans:
+                - text: "Temperature: "
+                - text: "22°C "
+                  style: stat-value
+                - text: "Humidity: "
+                - text: "48%"
+                  style: stat-value
+
+      - type: button
+        text_key: "screen.back"
+        style: cta
+        on_click: pop()
+
+  grid_demo:
+    name: grid_demo
+    title: "Grid Demo"
+    layout:
+      type: column
+      gap: 16
+    widgets:
+      - type: panel
+        style: hero
+        layout:
+          type: column
+          gap: 12
+        widgets:
+          - type: label
+            text_key: "screen.grid"
+            style: heading
+          - type: label
+            text: "CSS Grid-style layout with fractional units, spanning, and alignment."
+            style: body
+
+      - type: panel
+        style: card
+        props:
+          title: "Metrics Dashboard (3-col grid)"
+        layout:
+          type: grid
+          columns: ["1fr", "1fr", "1fr"]
+          rows: ["auto", "auto"]
+          column_gap: 8
+          row_gap: 8
+        widgets:
+          - type: label
+            text: "{{state.ui.temperature}}°"
+            style: stat-value
+            grid_cell:
+              col: 0
+              row: 0
+          - type: label
+            text: "{{state.ui.humidity}}%"
+            style: stat-value
+            grid_cell:
+              col: 1
+              row: 0
+          - type: label
+            text: "{{state.ui.pressure}} hPa"
+            style: stat-value
+            grid_cell:
+              col: 2
+              row: 0
+          - type: label
+            text: "Temperature"
+            style: stat-label
+            grid_cell:
+              col: 0
+              row: 1
+          - type: label
+            text: "Humidity"
+            style: stat-label
+            grid_cell:
+              col: 1
+              row: 1
+          - type: label
+            text: "Pressure"
+            style: stat-label
+            grid_cell:
+              col: 2
+              row: 1
+
+      - type: panel
+        style: card
+        props:
+          title: "Col-span Demo (2-col grid)"
+        layout:
+          type: grid
+          columns: ["1fr", "1fr"]
+          rows: ["auto", "auto", "auto"]
+          column_gap: 8
+          row_gap: 8
+        widgets:
+          - type: label
+            text: "Status Overview"
+            style: heading
+            grid_cell:
+              col: 0
+              row: 0
+              col_span: 2
+          - type: bar
+            min: 0
+            max: 100
+            value: "{{state.display.brightness}}"
+            grid_cell:
+              col: 0
+              row: 1
+          - type: arc
+            min: 0
+            max: 100
+            value: "{{state.display.brightness}}"
+            on_change: set(display.brightness, {{value}})
+            grid_cell:
+              col: 1
+              row: 1
+          - type: label
+            text: "All systems operational"
+            style: body
+            grid_cell:
+              col: 0
+              row: 2
+              col_span: 2
+
       - type: button
         text_key: "screen.back"
         style: cta

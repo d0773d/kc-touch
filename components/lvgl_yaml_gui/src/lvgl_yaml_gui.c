@@ -4228,7 +4228,11 @@ static esp_err_t yui_render_widget(const yml_node_t *node, yui_schema_runtime_t 
                 for (size_t i = 0; i < count; ++i) {
                     const yml_node_t *entry = yml_node_child_at(map_node, i);
                     const char *val = entry ? yml_node_get_scalar(entry) : NULL;
-                    map_arr[i] = val ? strdup(val) : strdup("");
+                    if (val && strcmp(val, "NEWLINE") == 0) {
+                        map_arr[i] = strdup("\n");
+                    } else {
+                        map_arr[i] = val ? strdup(val) : strdup("");
+                    }
                 }
                 map_arr[count] = "";
                 lv_buttonmatrix_set_map(btnm, map_arr);
